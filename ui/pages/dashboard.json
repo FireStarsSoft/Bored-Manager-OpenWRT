@@ -1,0 +1,200 @@
+{
+  "blocks": [
+    {
+      "type": "conditional",
+      "when": {
+        "source": { "kind": "stream", "event": "capabilities", "path": "problem" },
+        "op": "exists"
+      },
+      "blocks": [
+        {
+          "type": "section",
+          "title": "OpenWRT is not ready",
+          "blocks": [
+            {
+              "type": "keyValue",
+              "source": { "kind": "stream", "event": "capabilities" },
+              "rows": [
+                { "key": "connected", "label": "Connected" },
+                { "key": "release", "label": "Release" },
+                { "key": "board", "label": "Board" },
+                { "key": "problem", "label": "Problem" }
+              ]
+            },
+            {
+              "type": "actions",
+              "actions": [{ "label": "Check again", "method": "sweepNow" }]
+            }
+          ]
+        }
+      ],
+      "else": [
+        {
+          "type": "conditional",
+          "when": {
+            "source": { "kind": "stream", "event": "ui", "path": "hintsOn" },
+            "op": "eq",
+            "value": true
+          },
+          "blocks": [
+            {
+              "type": "note",
+              "title": "How live data is collected",
+              "lines": [
+                "WAN-pool traffic is aggregated on the router; version 1.0 deliberately does not transfer per-session counters.",
+                "At large interface counts the full interface dump runs every second or third fast tick, so WAN state can lag by up to three update cycles.",
+                "All live figures come from one batched SSH probe per tick. Change its speed in Settings, General, Update intervals."
+              ]
+            }
+          ]
+        },
+        {
+          "type": "section",
+          "title": "Router",
+          "columns": 2,
+          "blocks": [
+            {
+              "type": "keyValue",
+              "source": { "kind": "stream", "event": "capabilities" },
+              "rows": [
+                { "key": "release", "label": "OpenWRT release" },
+                { "key": "board", "label": "Board" },
+                { "key": "hasFw4", "label": "Firewall4" },
+                { "key": "hasPppoe", "label": "PPPoE support" }
+              ]
+            },
+            {
+              "type": "keyValue",
+              "source": { "kind": "stream", "event": "overview", "path": "sys" },
+              "rows": [
+                { "key": "uptimeLabel", "label": "Uptime" },
+                { "key": "load1", "label": "Load (1 minute)", "format": "number" },
+                { "key": "memTotal", "label": "Memory", "format": "bytes" },
+                { "key": "memFree", "label": "Memory free", "format": "bytes" }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "section",
+          "title": "Live",
+          "columns": 4,
+          "blocks": [
+            {
+              "type": "stat",
+              "label": "DHCP devices",
+              "source": { "kind": "stream", "event": "overview", "path": "counts.devices" },
+              "format": "number",
+              "spark": { "source": { "kind": "stream", "event": "series" }, "key": "devices" }
+            },
+            {
+              "type": "stat",
+              "label": "WAN up",
+              "source": { "kind": "stream", "event": "overview", "path": "counts.wanUp" },
+              "format": "number",
+              "spark": { "source": { "kind": "stream", "event": "series" }, "key": "wanUp" }
+            },
+            {
+              "type": "stat",
+              "label": "WAN errors",
+              "source": { "kind": "stream", "event": "overview", "path": "counts.wanErr" },
+              "format": "number",
+              "spark": { "source": { "kind": "stream", "event": "series" }, "key": "wanErr" }
+            },
+            {
+              "type": "stat",
+              "label": "Pool receive",
+              "source": { "kind": "stream", "event": "overview", "path": "poolAgg.rxRate" },
+              "format": "rate",
+              "spark": { "source": { "kind": "stream", "event": "series" }, "key": "rx" }
+            },
+            {
+              "type": "stat",
+              "label": "Pool transmit",
+              "source": { "kind": "stream", "event": "overview", "path": "poolAgg.txRate" },
+              "format": "rate",
+              "spark": { "source": { "kind": "stream", "event": "series" }, "key": "tx" }
+            }
+          ]
+        },
+        {
+          "type": "section",
+          "title": "History",
+          "columns": 2,
+          "blocks": [
+            {
+              "type": "chart",
+              "title": "WAN-pool throughput",
+              "kind": "area",
+              "source": { "kind": "stream", "event": "series" },
+              "format": "rate",
+              "series": [
+                { "key": "rx", "label": "Receive", "color": "download" },
+                { "key": "tx", "label": "Transmit", "color": "upload" }
+              ]
+            },
+            {
+              "type": "chart",
+              "title": "WAN state",
+              "kind": "line",
+              "source": { "kind": "stream", "event": "series" },
+              "format": "number",
+              "series": [
+                { "key": "wanUp", "label": "Up", "color": "success" },
+                { "key": "wanErr", "label": "Error", "color": "destructive" }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "section",
+          "title": "Interfaces outside the managed PPPoE pool",
+          "blocks": [
+            {
+              "type": "table",
+              "source": { "kind": "stream", "event": "overview", "path": "ifaces" },
+              "rowKey": "name",
+              "columns": [
+                { "key": "name", "label": "Interface" },
+                { "key": "proto", "label": "Protocol" },
+                { "key": "device", "label": "Device" },
+                { "key": "status", "label": "State" },
+                { "key": "ipv4", "label": "IPv4" },
+                { "key": "uptimeLabel", "label": "Uptime" },
+                { "key": "rxRate", "label": "Receive", "format": "rate", "align": "right" },
+                { "key": "txRate", "label": "Transmit", "format": "rate", "align": "right" }
+              ],
+              "sortDefault": { "key": "name", "dir": "asc" },
+              "filterKeys": ["name", "proto", "device", "status", "ipv4"],
+              "emptyText": "No interfaces have been sampled yet"
+            }
+          ]
+        },
+        {
+          "type": "section",
+          "title": "DHCP devices",
+          "blocks": [
+            {
+              "type": "table",
+              "source": { "kind": "invoke", "method": "deviceRows", "intervalKey": "openwrt" },
+              "rowKey": "mac",
+              "columns": [
+                { "key": "host", "label": "Host" },
+                { "key": "mac", "label": "MAC" },
+                { "key": "ip", "label": "IPv4" },
+                { "key": "lan", "label": "LAN" },
+                { "key": "expires", "label": "Lease expires", "align": "right" },
+                { "key": "wan", "label": "Assigned WAN" },
+                { "key": "bindingStatus", "label": "Binding" }
+              ],
+              "sortDefault": { "key": "host", "dir": "asc" },
+              "filterKeys": ["host", "mac", "ip", "lan", "wan", "bindingStatus"],
+              "groupModes": [{ "id": "lan", "label": "By LAN", "key": "lan" }],
+              "emptyText": "No active DHCP leases"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

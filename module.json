@@ -1,0 +1,40 @@
+{
+  "apiVersion": 2,
+  "id": "openwrt",
+  "name": "OpenWRT",
+  "version": "1.0.0",
+  "description": "Manage an OpenWRT router over SSH without its web UI: live dashboard, bulk PPPoE dialing and one-to-one LAN device to WAN binding.",
+  "author": "Bored Manager",
+  "minAppVersion": "0.3.3",
+  "defaultEnabled": false,
+  "entries": { "main": "main/index.ts" },
+  "pages": [
+    { "id": "dashboard", "label": "Dashboard", "icon": "Gauge", "order": 57 },
+    { "id": "automation", "label": "Automation", "icon": "Zap", "order": 58 },
+    { "id": "settings", "label": "Module settings", "icon": "Settings2", "order": 59 }
+  ],
+  "widgets": [
+    { "id": "summary", "label": "OpenWRT", "defaultEnabled": false, "order": 77 }
+  ],
+  "streams": [
+    { "event": "capabilities", "kind": "latest" },
+    { "event": "ui", "kind": "latest" },
+    { "event": "overview", "kind": "latest" },
+    { "event": "series", "kind": "series" },
+    { "event": "pppoe", "kind": "latest" },
+    { "event": "binding", "kind": "latest" },
+    { "event": "jobs", "kind": "latest" }
+  ],
+  "methods": [
+    "sweepNow", "selectOptions", "hintsToggle", "interfaceRows", "deviceRows",
+    "pppoeBatches", "pppoeRows", "pppoeBatchCheck", "pppoeBatchApply",
+    "pppoeBatchAction", "pppoeBatchDelete", "pppoeConnAction",
+    "bindingList", "bindingCheck", "bindingApply", "bindingRows",
+    "bindingWaitingRows", "bindingEventRows", "bindingStart", "bindingStop",
+    "bindingDelete", "bindingUnassign", "bindingReassign",
+    "rulesEffective", "rulesCheck", "rulesApply", "rulesReset",
+    "jobCancel", "jobsClear"
+  ],
+  "fastInterval": "openwrt",
+  "slowInterval": "openwrt"
+}

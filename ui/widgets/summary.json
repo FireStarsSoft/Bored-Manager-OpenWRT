@@ -1,0 +1,47 @@
+{
+  "blocks": [
+    {
+      "type": "conditional",
+      "when": {
+        "source": { "kind": "stream", "event": "capabilities", "path": "problem" },
+        "op": "exists"
+      },
+      "blocks": [
+        {
+          "type": "note",
+          "title": "OpenWRT unavailable",
+          "lines": ["Open the OpenWRT Module settings page to see the compatibility problem."],
+          "tone": "warning"
+        }
+      ],
+      "else": [
+        {
+          "type": "section",
+          "title": "OpenWRT WAN pool",
+          "blocks": [
+            {
+              "type": "pie",
+              "source": { "kind": "stream", "event": "overview", "path": "poolAgg" },
+              "center": { "key": "total", "label": "WANs" },
+              "slices": [
+                { "key": "up", "label": "Up", "status": "ok" },
+                { "key": "dialing", "label": "Dialing", "status": "unknown" },
+                { "key": "error", "label": "Error", "status": "bad" },
+                { "key": "stopped", "label": "Stopped", "status": "unknown" }
+              ],
+              "emptyText": "No managed WANs yet"
+            },
+            {
+              "type": "keyValue",
+              "source": { "kind": "stream", "event": "overview", "path": "counts" },
+              "rows": [
+                { "key": "bound", "label": "Devices bound", "format": "number" },
+                { "key": "waiting", "label": "Devices waiting", "format": "number" }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

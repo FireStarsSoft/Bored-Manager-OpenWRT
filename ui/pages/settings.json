@@ -1,0 +1,326 @@
+{
+  "blocks": [
+    {
+      "type": "section",
+      "title": "Hints",
+      "blocks": [
+        {
+          "type": "conditional",
+          "when": {
+            "source": { "kind": "stream", "event": "ui", "path": "hintsOn" },
+            "op": "eq",
+            "value": true
+          },
+          "blocks": [
+            {
+              "type": "actions",
+              "actions": [{ "label": "Hide hints", "method": "hintsToggle" }]
+            }
+          ],
+          "else": [
+            {
+              "type": "actions",
+              "actions": [{ "label": "Show hints", "method": "hintsToggle" }]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "title": "Compatibility",
+      "blocks": [
+        {
+          "type": "conditional",
+          "when": {
+            "source": { "kind": "stream", "event": "ui", "path": "hintsOn" },
+            "op": "eq",
+            "value": true
+          },
+          "blocks": [
+            {
+              "type": "note",
+              "title": "Connect directly to the router",
+              "lines": [
+                "Add this OpenWRT router as a Bored Manager machine and connect to it as root through dropbear. The app encrypts the saved SSH credential; this module does not store one.",
+                "The module must find ubus, uci, ip, logread, firewall4, pppd and PPPoE kernel support on the selected machine."
+              ]
+            }
+          ]
+        },
+        {
+          "type": "keyValue",
+          "source": { "kind": "stream", "event": "capabilities" },
+          "rows": [
+            { "key": "connected", "label": "Connected" },
+            { "key": "isOpenwrt", "label": "OpenWRT" },
+            { "key": "release", "label": "Release" },
+            { "key": "board", "label": "Board" },
+            { "key": "hasUbus", "label": "ubus" },
+            { "key": "hasUci", "label": "uci" },
+            { "key": "hasIp", "label": "ip" },
+            { "key": "hasLogread", "label": "logread" },
+            { "key": "hasNetifd", "label": "netifd" },
+            { "key": "hasPppd", "label": "pppd" },
+            { "key": "hasFw4", "label": "firewall4" },
+            { "key": "hasPppoe", "label": "PPPoE packages" },
+            { "key": "problem", "label": "Problem" }
+          ]
+        },
+        {
+          "type": "actions",
+          "actions": [{ "label": "Check again", "method": "sweepNow" }]
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "title": "Rules in force",
+      "blocks": [
+        {
+          "type": "keyValue",
+          "source": { "kind": "invoke", "method": "rulesEffective", "intervalKey": "openwrt" },
+          "rows": [
+            { "key": "ifacePrefix", "label": "Default PPPoE prefix" },
+            { "key": "tableBase", "label": "Routing-table base", "format": "number" },
+            { "key": "rulePrefBase", "label": "Client-rule priority base", "format": "number" },
+            { "key": "catchAllPrefBase", "label": "Safety-rule priority base", "format": "number" },
+            { "key": "catchAllTable", "label": "Unreachable table", "format": "number" },
+            { "key": "uciChunkSize", "label": "Interfaces per UCI chunk", "format": "number" },
+            { "key": "chunkDelayMs", "label": "Delay between chunks (ms)", "format": "number" },
+            { "key": "ruleChunkLines", "label": "IP-rule lines per command", "format": "number" },
+            { "key": "execTimeoutSec", "label": "Job command timeout (s)", "format": "number" },
+            { "key": "maxBatchRows", "label": "Maximum accounts per batch", "format": "number" },
+            { "key": "zoneName", "label": "Firewall zone" },
+            { "key": "zoneMode", "label": "Firewall membership mode" },
+            { "key": "remapOnWanError", "label": "Remap after WAN errors" },
+            { "key": "wanErrorGraceSec", "label": "WAN error grace (s)", "format": "number" },
+            { "key": "wanWarnUptimeSec", "label": "New-WAN warning window (s)", "format": "number" },
+            { "key": "stickyByMac", "label": "Sticky by MAC" },
+            { "key": "releaseGraceSec", "label": "Lease release grace (s)", "format": "number" },
+            { "key": "autoRedialAfterMin", "label": "Watchdog redial after (min)", "format": "number" },
+            { "key": "leaseFile", "label": "DHCP lease file" },
+            { "key": "maxEvents", "label": "Binding events kept", "format": "number" },
+            { "key": "stickyCap", "label": "Sticky mappings kept", "format": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "title": "Change the rules",
+      "blocks": [
+        {
+          "type": "conditional",
+          "when": {
+            "source": { "kind": "stream", "event": "ui", "path": "hintsOn" },
+            "op": "eq",
+            "value": true
+          },
+          "blocks": [
+            {
+              "type": "note",
+              "title": "Advanced values",
+              "tone": "warning",
+              "lines": [
+                "Changing the routing-table or rule-priority bases while batches or binding instances exist is refused: old and new ownership ranges cannot safely overlap.",
+                "Leave a numeric field empty to use its documented default. Only change kernel-facing values when you understand the resulting routing ownership."
+              ]
+            }
+          ]
+        },
+        {
+          "type": "checkForm",
+          "checkMethod": "rulesCheck",
+          "applyMethod": "rulesApply",
+          "checkLabel": "Check the rules",
+          "applyLabel": "Save the rules",
+          "fields": [
+            {
+              "key": "ifacePrefix",
+              "label": "Default PPPoE prefix",
+              "input": "text",
+              "placeholder": "pd",
+              "help": "One to four lowercase letters or digits, beginning with a letter. Default pd. A batch may override it."
+            },
+            {
+              "key": "tableBase",
+              "label": "Routing-table base",
+              "input": "text",
+              "placeholder": "10000",
+              "help": "Default 10000. A managed PPPoE session uses this value plus its sequence. Cannot change while managed batches or binding instances exist."
+            },
+            {
+              "key": "rulePrefBase",
+              "label": "Client-rule priority base",
+              "input": "text",
+              "placeholder": "20000",
+              "help": "Default 20000. Client source rules occupy the range from here up to, but not including, the safety-rule base."
+            },
+            {
+              "key": "catchAllPrefBase",
+              "label": "Safety-rule priority base",
+              "input": "text",
+              "placeholder": "29900",
+              "help": "Default 29900. Each binding instance gets one subnet catch-all priority from this base; it must be above every client rule."
+            },
+            {
+              "key": "catchAllTable",
+              "label": "Unreachable routing table",
+              "input": "text",
+              "placeholder": "29999",
+              "help": "Default 29999. This table contains an unreachable default and prevents waiting clients from leaking through another WAN."
+            },
+            {
+              "key": "uciChunkSize",
+              "label": "Interfaces per UCI chunk",
+              "input": "text",
+              "placeholder": "100",
+              "help": "1 to 1000, default 100. Smaller waves reduce PADI and reload bursts but take longer."
+            },
+            {
+              "key": "chunkDelayMs",
+              "label": "Delay between chunks (ms)",
+              "input": "text",
+              "placeholder": "1000",
+              "help": "0 to 60000, default 1000 milliseconds. Applied between PPPoE create, stop, start, redial, and delete waves."
+            },
+            {
+              "key": "ruleChunkLines",
+              "label": "IP-rule lines per command",
+              "input": "text",
+              "placeholder": "500",
+              "help": "50 to 2000, default 500. Caps the stdin script used when many policy rules must be repaired after a reboot."
+            },
+            {
+              "key": "execTimeoutSec",
+              "label": "Job command timeout (s)",
+              "input": "text",
+              "placeholder": "60",
+              "help": "10 to 600, default 60 seconds. Every command is bounded even when the router is overloaded."
+            },
+            {
+              "key": "maxBatchRows",
+              "label": "Maximum accounts per batch",
+              "input": "text",
+              "placeholder": "5000",
+              "help": "1 to 5000, default 5000. This is a guard rail, not a claim that the router has enough RAM for that many pppd processes."
+            },
+            {
+              "key": "zoneName",
+              "label": "Firewall zone name",
+              "input": "text",
+              "placeholder": "bmwanpool",
+              "help": "Default bmwanpool. The module owns this UCI zone and its LAN forwarding; use only letters, digits, or underscore."
+            },
+            {
+              "key": "zoneMode",
+              "label": "Firewall membership mode",
+              "input": "select",
+              "options": [
+                { "value": "wildcard", "label": "Wildcard PPPoE devices (default)" },
+                { "value": "networks", "label": "Explicit UCI network list" }
+              ],
+              "help": "Wildcard keeps a large firewall config small. Use explicit networks only if verification shows that this router's fw4 build did not materialize the wildcard."
+            },
+            {
+              "key": "remapOnWanError",
+              "label": "Remap after WAN errors",
+              "input": "checkbox",
+              "initial": true,
+              "help": "Default on for new binding instances when no per-instance value is supplied. Each instance's own Remap choice is authoritative afterward."
+            },
+            {
+              "key": "wanErrorGraceSec",
+              "label": "WAN error grace (s)",
+              "input": "text",
+              "placeholder": "30",
+              "help": "0 to 3600, default 30 seconds. A failed WAN must remain failed this long before its client can move."
+            },
+            {
+              "key": "wanWarnUptimeSec",
+              "label": "New-WAN warning window (s)",
+              "input": "text",
+              "placeholder": "60",
+              "help": "0 to 3600, default 60 seconds. A newly reconnected WAN remains Warning for this long so flapping is visible."
+            },
+            {
+              "key": "stickyByMac",
+              "label": "Sticky by MAC",
+              "input": "checkbox",
+              "initial": true,
+              "help": "Default on for new instances when no per-instance value is supplied. Each instance's own Sticky choice is authoritative afterward."
+            },
+            {
+              "key": "releaseGraceSec",
+              "label": "Lease release grace (s)",
+              "input": "text",
+              "placeholder": "300",
+              "help": "0 to 86400, default 300 seconds. The WAN stays reserved for this long after a DHCP lease disappears."
+            },
+            {
+              "key": "autoRedialAfterMin",
+              "label": "Watchdog redial after (min)",
+              "input": "text",
+              "placeholder": "0",
+              "help": "0 disables the watchdog (default) because netifd already retries. A positive value redials sessions that remain failed for that many minutes."
+            },
+            {
+              "key": "leaseFile",
+              "label": "DHCP lease file",
+              "input": "text",
+              "placeholder": "/tmp/dhcp.leases",
+              "help": "Default /tmp/dhcp.leases. It must be an absolute path without shell metacharacters and use dnsmasq's standard lease format."
+            },
+            {
+              "key": "maxEvents",
+              "label": "Binding events kept",
+              "input": "text",
+              "placeholder": "200",
+              "help": "20 to 1000, default 200. Older event rows are discarded to keep per-router host data bounded."
+            },
+            {
+              "key": "stickyCap",
+              "label": "Sticky mappings kept",
+              "input": "text",
+              "placeholder": "6000",
+              "help": "100 to 10000, default 6000. Least-recently-seen MAC hints are pruned beyond this cap to stay below the 512 KiB host-data limit."
+            }
+          ]
+        },
+        {
+          "type": "actions",
+          "actions": [
+            {
+              "label": "Reset every rule",
+              "method": "rulesReset",
+              "kind": "danger",
+              "confirm": "Put every OpenWRT module rule back to its default?"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "conditional",
+      "when": {
+        "source": { "kind": "stream", "event": "ui", "path": "hintsOn" },
+        "op": "eq",
+        "value": true
+      },
+      "blocks": [
+        {
+          "type": "note",
+          "title": "Operating notes",
+          "tone": "warning",
+          "lines": [
+            "PPPoE account passwords are stored in clear text by OpenWRT in /etc/config/network. Protect router root access and backups.",
+            "Use the Low (5 second) fast interval above roughly 2,000 sessions. Pausing it pauses WAN Binding.",
+            "A waiting client can still reach local router services such as DNS, but deliberately has no internet route.",
+            "Router reboot and app restart are recovered by deriving state from UCI, DHCP leases, routing tables, and managed IP rules."
+          ]
+        }
+      ]
+    }
+  ]
+}
