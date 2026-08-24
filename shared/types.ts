@@ -824,7 +824,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
     network: 'normal',
     disk: 'normal',
     bmc: 'normal',
-    openwrt: 'normal',
     // A module-declared refresh key with no default here reads back as
     // `normal` (modules-host's fastIntervalMs), so this entry is not required
     // for service-fleet to poll - it is a deliberate override to `low`,
@@ -837,7 +836,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
     container: 300,
     network: 60,
     bmc: 60,
-    openwrt: 60,
     'service-fleet': 120
   },
   overviewWidgets: {},
