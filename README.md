@@ -9,7 +9,7 @@ Settings → Modules.
 
 | Where | What |
 |---|---|
-| Sidebar → OpenWRT → Dashboard | Router health, aggregate throughput, WAN state, interfaces, and DHCP clients in real time. |
+| Sidebar → OpenWRT → Dashboard | Router health, aggregate throughput, WAN state, DHCP clients, and the interfaces *outside* the managed PPPoE pool, in real time. The pool itself is summarised rather than listed: a thousand `pppoe-*` sessions are a number, not a thousand rows. |
 | Sidebar → OpenWRT → Automation → PPPoE Dialer | Create, start, stop, redial, inspect, and remove one to thousands of PPPoE sessions from a text file or pasted list. |
 | Sidebar → OpenWRT → Automation → WAN Binding | Assign every DHCP client on one selected LAN to one free WAN on one selected carrier, one-to-one. |
 | Sidebar → OpenWRT → Automation → Jobs | Progress and partial failures for chunked operations. |
@@ -204,3 +204,4 @@ These checks need a real OpenWRT router. They are not covered by the unit suite.
 | `main/binding.ts` | WAN-pool discovery and one-to-one rule reconciliation. |
 | `main/options.ts` | Dynamic form choices from the in-memory model. |
 | `main/queries.ts` | Large table rows built from the in-memory model. |
+| `main/types.ts` | The shapes the halves above pass between themselves. |

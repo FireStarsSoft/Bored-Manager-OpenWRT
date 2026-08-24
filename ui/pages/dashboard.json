@@ -52,6 +52,8 @@
           "type": "section",
           "title": "Router",
           "columns": 2,
+          "slowTarget": "openwrt",
+          "slowAt": { "kind": "stream", "event": "overview", "path": "slowAt" },
           "blocks": [
             {
               "type": "keyValue",

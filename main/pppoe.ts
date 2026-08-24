@@ -38,7 +38,8 @@ import {
   runUciBatch,
   vlanSectionName,
   waitCancelable,
-  type InterfaceAction
+  type InterfaceAction,
+  type PppoeUciChunk
 } from './uci'
 
 /** Only the rules consumed here; ConfigStore.effectiveRules() may return more. */
@@ -176,6 +177,10 @@ export interface RouterInventory {
 interface NetworkDeviceInventory {
   interfaceDevices: Map<string, string>
   deviceNames: Map<string, string>
+  /** Every `network.<name>=interface` section that exists on the router now. */
+  interfaceSections: Set<string>
+  /** Every `firewall.<name>=zone` section that exists on the router now. */
+  zoneSections: Set<string>
 }
 
 const HARD_MAX_BATCH_ROWS = 5_000
@@ -757,11 +762,12 @@ export class PppoeManager<TData extends PppoeStoreData = PppoeStoreData> {
         items: jobItems,
         onError: 'abort',
         onFinished: (finished) => {
+          if (finished.state !== 'done') this.shrinkToCommitted(id, chunks, finished)
           this.forceDump()
           this.emitSummary()
           this.recordEvent(
             'pppoe-create',
-            `Batch ${batch.name} create job ${finished.state} (${batch.count} connections)`
+            `Batch ${batch.name} create job ${finished.state} (${plan.rows.length} connections)`
           )
         }
       })
@@ -894,17 +900,30 @@ export class PppoeManager<TData extends PppoeStoreData = PppoeStoreData> {
     let networkMutated = false
     let firewallMutated = false
     let finalReloadDone = false
+    // A create that was cancelled or failed part-way leaves a record covering
+    // the whole requested range while UCI only has the chunks that committed.
+    // `uci delete` on a section that is not there prints `uci: Entry not
+    // found`, which runUciBatch treats - correctly, for real mistakes - as a
+    // failure, so the delete job aborted on the first phantom chunk and the
+    // batch could never be removed. Delete only what the router has.
+    const present = new Set<string>()
+    let zonePresent = false
 
     const items: JobSpec['items'] = [{
       name: 'Inspect batch VLAN devices',
       run: async () => {
         const inventory = await this.inspectNetworkDevices(timeoutMs(rules))
+        zonePresent = inventory.zoneSections.has(rules.zoneName)
         for (const name of names) {
+          if (inventory.interfaceSections.has(name)) present.add(name)
           const device = inventory.interfaceDevices.get(name) ?? ''
           const prefix = `${batch.carrier}.`
           if (!device.startsWith(prefix)) continue
           const vlan = Number(device.slice(prefix.length))
           if (Number.isInteger(vlan) && vlan >= 1 && vlan <= 4094) candidateVlans.add(vlan)
+        }
+        if (present.size < names.length) {
+          return `${names.length - present.size} of ${names.length} interfaces are already gone`
         }
       }
     }]
@@ -936,17 +955,22 @@ export class PppoeManager<TData extends PppoeStoreData = PppoeStoreData> {
       items.push({
         name: `Delete UCI chunk ${index + 1}/${waves.length}`,
         run: async () => {
-          const lines = buildDeletePppoeLines(chunk, {
-            zoneName: rules.zoneName,
-            mode: rules.zoneMode
-          })
+          const sections = chunk.filter((name) => present.has(name))
+          if (!sections.length) return 'nothing left to delete'
+          // `del_list firewall.<zone>.network=...` on a zone the failed create
+          // never got as far as adding fails with `uci: Invalid argument`.
+          const firewall =
+            rules.zoneMode === 'networks' && zonePresent
+              ? { zoneName: rules.zoneName, mode: rules.zoneMode }
+              : undefined
+          const lines = buildDeletePppoeLines(sections, firewall)
           networkMutated = true
-          if (rules.zoneMode === 'networks') firewallMutated = true
+          if (firewall) firewallMutated = true
           try {
             await runUciBatch(
               this.ctx,
               lines,
-              rules.zoneMode === 'networks' ? ['network', 'firewall'] : ['network'],
+              firewall ? ['network', 'firewall'] : ['network'],
               timeoutMs(rules)
             )
           } finally {
@@ -1252,6 +1276,49 @@ export class PppoeManager<TData extends PppoeStoreData = PppoeStoreData> {
     this.service.event?.(kind, safe)
   }
 
+  /**
+   * The batch record is written before the first chunk runs, so a create that
+   * aborts leaves it claiming interfaces UCI never got. Left that way every
+   * phantom row reads as an error forever and Delete has phantom sections to
+   * trip over. Shrink the record to the chunks that actually committed, or
+   * drop it when none did. `nextSeq` is deliberately left alone: it is a
+   * high-water mark, and lowering it would hand out sequence numbers that a
+   * half-finished create may still own.
+   */
+  private shrinkToCommitted(
+    id: string,
+    chunks: readonly PppoeUciChunk[],
+    finished: FinishedJob
+  ): void {
+    const committed = chunks.filter((_chunk, index) =>
+      finished.items.some((item) => item.idx === index && item.status === 'ok')
+    )
+    const names = chunks.flatMap((chunk) => chunk.sections)
+    const lastOk = committed[committed.length - 1]
+    const batch = this.store.read().batches.find((entry) => entry.id === id)
+    if (!batch) return
+    if (!lastOk) {
+      this.store.update((host) => {
+        host.batches = host.batches.filter((entry) => entry.id !== id)
+      })
+      for (const name of names) this.usernames.delete(name)
+      this.ctx.log(`openwrt: batch ${batch.name} was dropped; no chunk reached the router`)
+      return
+    }
+    if (lastOk.seqTo >= batch.seqTo) return
+    const kept = lastOk.seqTo - batch.seqFrom + 1
+    this.store.update((host) => {
+      const entry = host.batches.find((record) => record.id === id)
+      if (!entry) return
+      entry.count = kept
+      entry.seqTo = lastOk.seqTo
+    })
+    for (const name of names.slice(kept)) this.usernames.delete(name)
+    this.ctx.log(
+      `openwrt: batch ${batch.name} shrunk to the ${kept} connection(s) that reached the router`
+    )
+  }
+
   private async inspectRouter(carrier: string, timeout: number): Promise<RouterInventory> {
     if (!isSafeDeviceName(carrier)) throw new Error('carrier is not a safe interface name')
     const script = [
@@ -1330,16 +1397,23 @@ export class PppoeManager<TData extends PppoeStoreData = PppoeStoreData> {
   private async inspectNetworkDevices(timeout: number): Promise<NetworkDeviceInventory> {
     const result = await this.ctx.exec('sh -s', {
       stdin:
-        "uci -q show network 2>/dev/null | grep -E '=device$|\\.device=|\\.name=' || true\n",
+        "uci -q show network 2>/dev/null | grep -E '=interface$|=device$|\\.device=|\\.name=' || true\n" +
+        "uci -q show firewall 2>/dev/null | grep -E '=zone$' || true\n",
       timeoutMs: timeout
     })
     if (result.code !== 0) throw new Error(`network device inventory failed (exit ${result.code})`)
     const interfaceDevices = new Map<string, string>()
     const deviceNames = new Map<string, string>()
     const deviceSections = new Set<string>()
+    const interfaceSections = new Set<string>()
+    const zoneSections = new Set<string>()
     for (const line of result.stdout.split(/\r?\n/)) {
       const declaration = /^network\.([^.=]+)=device$/.exec(line.trim())
       if (declaration?.[1]) deviceSections.add(declaration[1])
+      const section = /^network\.([^.=]+)=interface$/.exec(line.trim())
+      if (section?.[1]) interfaceSections.add(section[1])
+      const zone = /^firewall\.([^.=]+)=zone$/.exec(line.trim())
+      if (zone?.[1]) zoneSections.add(zone[1])
     }
     for (const line of result.stdout.split(/\r?\n/)) {
       const device = /^network\.([^.=]+)\.device=(.+)$/.exec(line.trim())
@@ -1349,6 +1423,6 @@ export class PppoeManager<TData extends PppoeStoreData = PppoeStoreData> {
         deviceNames.set(name[1], parseQuotedValue(name[2]))
       }
     }
-    return { interfaceDevices, deviceNames }
+    return { interfaceDevices, deviceNames, interfaceSections, zoneSections }
   }
 }

@@ -63,7 +63,7 @@
             { "key": "hasNetifd", "label": "netifd" },
             { "key": "hasPppd", "label": "pppd" },
             { "key": "hasFw4", "label": "firewall4" },
-            { "key": "hasPppoe", "label": "PPPoE packages" },
+            { "key": "hasPppoe", "label": "PPPoE support" },
             { "key": "problem", "label": "Problem" }
           ]
         },

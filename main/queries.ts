@@ -1,6 +1,6 @@
 import type { ConfigStore } from './config'
 import type { HostStore, PppoeBatchRecord } from './store'
-import type { IfaceState, IpRule, RouterModel } from './types'
+import type { IfaceState, IpRule, Lease, RouterModel } from './types'
 
 function ipv4ToInt(ip: string): number | null {
   const parts = ip.split('.')
@@ -43,26 +43,16 @@ function conventionalWan(table: number, tableBase: number, batches: PppoeBatchRe
   return batch ? `${batch.prefix}${String(seq).padStart(5, '0')}` : ''
 }
 
-function expiryLabel(expires: number, nowSec: number): string {
-  if (expires === 0) return 'never'
+function expiryLabel(lease: Lease, nowSec: number): string {
+  if (lease.expires === 0) return 'never'
+  // The router's clock is not ours to subtract from; see Lease.expiresUnknown.
+  if (lease.expiresUnknown) return 'unknown'
+  const expires = lease.expires
   const remaining = expires - nowSec
   if (remaining <= 0) return 'expired'
   if (remaining < 60) return `${remaining}s`
   if (remaining < 3_600) return `${Math.ceil(remaining / 60)}m`
   return `${Math.ceil(remaining / 3_600)}h`
-}
-
-function uptimeLabel(secondsRaw: number): string {
-  let seconds = Math.max(0, Math.floor(secondsRaw))
-  const days = Math.floor(seconds / 86_400)
-  seconds %= 86_400
-  const hours = Math.floor(seconds / 3_600)
-  seconds %= 3_600
-  const minutes = Math.floor(seconds / 60)
-  if (days) return `${days}d ${hours}h`
-  if (hours) return `${hours}h ${minutes}m`
-  if (minutes) return `${minutes}m`
-  return `${seconds}s`
 }
 
 /** Builders for potentially-thousands-row invoke tables; every source is RAM. */
@@ -74,35 +64,6 @@ export class Queries {
     private store: HostStore
   ) {}
 
-  interfaceRows(): Array<Record<string, unknown>> {
-    const model = this.model()
-    if (!model) return []
-    return [...model.ifaces]
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map((iface) => {
-        const rate =
-          model.rates[iface.l3Device] ??
-          model.rates[iface.device] ??
-          model.rates[iface.name] ?? { rx: 0, tx: 0 }
-        return {
-          id: iface.name,
-          name: iface.name,
-          proto: iface.proto,
-          device: iface.device,
-          l3Device: iface.l3Device,
-          status: ifaceStatus(iface),
-          ipv4: iface.ipv4 ? `${iface.ipv4.addr}/${iface.ipv4.mask}` : '',
-          uptime: Math.round(iface.uptimeSec),
-          rx: Math.round(rate.rx),
-          tx: Math.round(rate.tx),
-          uptimeLabel: uptimeLabel(iface.uptimeSec),
-          rxRate: Math.round(rate.rx),
-          txRate: Math.round(rate.tx),
-          table: iface.ip4Table ?? '',
-          error: iface.errorCode ?? ''
-        }
-      })
-  }
 
   deviceRows(): Array<Record<string, unknown>> {
     const model = this.model()
@@ -175,7 +136,7 @@ export class Queries {
         mac: lease.mac,
         ip: lease.ip,
         lan,
-        expires: expiryLabel(lease.expires, nowSec),
+        expires: expiryLabel(lease, nowSec),
         wan,
         bindingStatus: status
       }

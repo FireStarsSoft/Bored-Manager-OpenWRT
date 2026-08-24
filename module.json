@@ -2,7 +2,7 @@
   "apiVersion": 2,
   "id": "openwrt",
   "name": "OpenWRT",
-  "version": "1.0.0",
+  "version": "1.0.7",
   "description": "Manage an OpenWRT router over SSH without its web UI: live dashboard, bulk PPPoE dialing and one-to-one LAN device to WAN binding.",
   "author": "Bored Manager",
   "minAppVersion": "0.3.3",
@@ -26,10 +26,10 @@
     { "event": "jobs", "kind": "latest" }
   ],
   "methods": [
-    "sweepNow", "selectOptions", "hintsToggle", "interfaceRows", "deviceRows",
+    "sweepNow", "selectOptions", "hintsToggle",  "deviceRows",
     "pppoeBatches", "pppoeRows", "pppoeBatchCheck", "pppoeBatchApply",
     "pppoeBatchAction", "pppoeBatchDelete", "pppoeConnAction",
-    "bindingList", "bindingCheck", "bindingApply", "bindingRows",
+     "bindingCheck", "bindingApply", "bindingRows",
     "bindingWaitingRows", "bindingEventRows", "bindingStart", "bindingStop",
     "bindingDelete", "bindingUnassign", "bindingReassign",
     "rulesEffective", "rulesCheck", "rulesApply", "rulesReset",

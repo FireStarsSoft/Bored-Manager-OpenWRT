@@ -29,8 +29,18 @@ export interface IfaceState {
 }
 
 export interface Lease {
-  /** Absolute Unix expiry time in seconds. Zero means a static/infinite lease. */
+  /** Absolute Unix expiry time in seconds, rebased onto the app's clock. Zero means a static/infinite lease. */
   expires: number
+  /**
+   * True when the router could not say what time it thinks it is - `ubus call
+   * system info` without a `localtime`, which is what a router that has not
+   * reached NTP yet answers, and what a freshly booted one answers for the
+   * first minute or two. `expires` is then the router's own epoch and cannot
+   * be compared with anything here, so nothing does: the lease counts as
+   * active and its remaining time reads "unknown" rather than being turned
+   * into a number that is wrong by however far the two clocks are apart.
+   */
+  expiresUnknown?: boolean
   mac: string
   ip: string
   host: string
@@ -151,6 +161,8 @@ export interface OverviewIface {
 
 export interface OpenWrtOverview {
   t: number
+  /** When the slow probe (UCI tables, PPPoE log) last completed - 0 before the first one. */
+  slowAt: number
   sys: RouterSystemState & { uptimeLabel: string }
   counts: OpenWrtOverviewCounts
   /** Pool members are omitted and this list is capped before it is pushed. */

@@ -264,14 +264,23 @@ function normalize(raw: unknown): OwrtHostData {
     if (data.extraTables.length >= 8_000) break
   }
 
+  // Sticky entries are written in the compact `stickyPacked` form (see
+  // serializeHostData and flush); `stickyMap` is the shape older builds wrote
+  // and is still read, so an existing file still loads.
+  for (const value of Array.isArray(raw.stickyPacked) ? raw.stickyPacked : []) {
+    const entry = unpackSticky(value)
+    if (!entry || !instanceIds.has(entry[0])) continue
+    data.stickyMap.push(entry)
+    if (data.stickyMap.length >= 20_000) break
+  }
   for (const value of Array.isArray(raw.stickyMap) ? raw.stickyMap : []) {
+    if (data.stickyMap.length >= 20_000) break
     if (!Array.isArray(value) || value.length < 4) continue
     const instanceId = string(value[0])
     const mac = string(value[1]).toLowerCase()
     const wanName = string(value[2])
     if (!instanceIds.has(instanceId) || !mac || !wanName) continue
     data.stickyMap.push([instanceId, mac, wanName, finite(value[3])])
-    if (data.stickyMap.length >= 20_000) break
   }
 
   for (const value of Array.isArray(raw.events) ? raw.events : []) {
@@ -386,7 +395,13 @@ export class HostStore {
     const data = this.cache
     trim(data, this.rules())
     try {
-      this.ctx.hostDataSet(data)
+      // Write exactly what `serializedBytes` measures. They used to disagree:
+      // the budget was worked out against the compact form while the raw
+      // object went to disk, so a document the estimate thought fit could be
+      // half as large again as the 512 KB cap - and past roughly five
+      // thousand sticky entries every flush failed, dirty stayed set, and
+      // nothing created afterwards survived a restart.
+      this.ctx.hostDataSet(serializeHostData(data))
       this.dirty = false
       return
     } catch (error) {
@@ -397,7 +412,7 @@ export class HostStore {
 
     fitHostData(data, this.rules())
     try {
-      this.ctx.hostDataSet(data)
+      this.ctx.hostDataSet(serializeHostData(data))
       this.dirty = false
     } catch (error) {
       // Keep the in-memory state. A later mutation schedules another attempt.

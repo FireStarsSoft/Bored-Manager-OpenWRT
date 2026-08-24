@@ -16,6 +16,12 @@ export interface OpenWrtCapabilities {
   hasFw4: boolean
   hasPppoe: boolean
   tools: string[]
+  /**
+   * Whether the router actually answered. False when the probe threw or came
+   * back empty - a verdict the caller must keep retrying rather than latch,
+   * since an SSH hiccup looks exactly like "not an OpenWRT router" here.
+   */
+  probed: boolean
   problem: string | null
 }
 
@@ -25,7 +31,14 @@ const PROBE_COMMAND = [
   `echo '===REL==='; cat /etc/openwrt_release 2>/dev/null`,
   `echo '===BOARD==='; ubus -S call system board 2>/dev/null`,
   `echo '===TOOLS==='; command -v ubus uci ip fw4 logread nft netifd pppd 2>/dev/null`,
-  `echo '===PPP==='; opkg list-installed 2>/dev/null | grep -E '^(ppp|ppp-mod-pppoe|kmod-pppoe) '`
+  // PPPoE support is read off the files the packages install, not off a
+  // package manager: OpenWRT 25.12 and every main snapshot since late 2024
+  // ship apk instead of opkg, so `opkg list-installed` produced nothing there
+  // and PPPoE Dialer refused to create a batch on a router that had ppp,
+  // ppp-mod-pppoe and kmod-pppoe installed all along. The artefacts are the
+  // same under either manager - and they also cover a pppoe driver built into
+  // the kernel, which no package list mentions at all.
+  `echo '===PPP==='; if ls /usr/lib/pppd/*/*pppoe.so >/dev/null 2>&1; then echo plugin; fi; if ls /lib/modules/*/pppoe.ko* >/dev/null 2>&1 || grep -qs pppoe /lib/modules/*/modules.builtin; then echo kmod; fi`
 ].join('; ')
 
 export function emptyCapabilities(): OpenWrtCapabilities {
@@ -44,6 +57,7 @@ export function emptyCapabilities(): OpenWrtCapabilities {
     hasFw4: false,
     hasPppoe: false,
     tools: [],
+    probed: false,
     problem: 'Not connected to a router yet.'
   }
 }
@@ -109,6 +123,7 @@ export async function probeOpenWrt(ctx: ModuleContext): Promise<OpenWrtCapabilit
   if (!ctx.connected) return emptyCapabilities()
   try {
     const result = await ctx.exec(PROBE_COMMAND, { timeoutMs: PROBE_TIMEOUT_MS })
+    const answered = result.stdout.trim().length > 0
     const sections = splitSections(result.stdout)
     const release = releaseValues(sections.get('REL') ?? '')
     const board = boardValues(sections.get('BOARD') ?? '')
@@ -117,10 +132,10 @@ export async function probeOpenWrt(ctx: ModuleContext): Promise<OpenWrtCapabilit
       .map((line) => line.trim().split('/').pop() ?? '')
       .filter((name) => name.length > 0)
     const toolSet = new Set(tools)
-    const packages = new Set(
+    const pppArtefacts = new Set(
       (sections.get('PPP') ?? '')
         .split(/\r?\n/)
-        .map((line) => line.trim().split(/\s+/)[0] ?? '')
+        .map((line) => line.trim())
         .filter(Boolean)
     )
     const isOpenwrt =
@@ -153,11 +168,9 @@ export async function probeOpenWrt(ctx: ModuleContext): Promise<OpenWrtCapabilit
       hasPppd: toolSet.has('pppd'),
       hasFw4: toolSet.has('fw4') && toolSet.has('nft'),
       hasPppoe:
-        toolSet.has('pppd') &&
-        packages.has('ppp') &&
-        packages.has('ppp-mod-pppoe') &&
-        packages.has('kmod-pppoe'),
+        toolSet.has('pppd') && pppArtefacts.has('plugin') && pppArtefacts.has('kmod'),
       tools: [...new Set(tools)].sort(),
+      probed: answered,
       problem
     }
   } catch (error) {

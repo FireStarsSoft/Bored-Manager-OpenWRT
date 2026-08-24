@@ -115,7 +115,12 @@ const activate: ModuleActivate = (ctx: ModuleContext) => {
     return pending
   }
 
-  const startPollers = (): void => {
+  /**
+   * `known` is a probe result the caller has just awaited. Without it every
+   * explicit re-check paid for a second identical PROBE_COMMAND over SSH,
+   * because refreshCapabilities() had already settled by the time this ran.
+   */
+  const startPollers = (known?: OpenWrtCapabilities): void => {
     const fastMs = Math.max(0, ctx.fastIntervalMs(INTERVAL_KEY))
     const slowSec = Math.max(0, ctx.slowIntervalSec(INTERVAL_KEY))
     const key = `${ctx.connected}|${fastMs}|${slowSec}`
@@ -129,10 +134,19 @@ const activate: ModuleActivate = (ctx: ModuleContext) => {
     }
     if (probing === key) return
     probing = key
-    void refreshCapabilities().then(
+    void (known ? Promise.resolve(known) : refreshCapabilities()).then(
       (available) => {
         if (stopped || probing !== key || !ctx.connected) return
         if (available.problem) {
+          // Record the key for a verdict the router actually gave us: there is
+          // nothing to poll until the connection or the intervals change, and
+          // leaving it unset re-ran the probe over SSH on every applyPollers()
+          // - every connect, settings change, tab switch and module toggle -
+          // for each pooled machine that is not a router. A probe that threw
+          // or came back empty stays retryable. Explicit re-checks (sweepNow,
+          // refreshSlow) call refreshCapabilities() directly, and reset()
+          // clears the key.
+          if (available.probed) applied = key
           probing = null
           return
         }
@@ -152,11 +166,9 @@ const activate: ModuleActivate = (ctx: ModuleContext) => {
   ctx.handle('selectOptions', (kind: unknown) =>
     selectOptions(kind, service.latest, store.read())
   )
-  ctx.handle('interfaceRows', () => queries.interfaceRows())
   ctx.handle('deviceRows', () => queries.deviceRows())
   ctx.handle('pppoeBatches', () => pppoe.batches())
   ctx.handle('pppoeRows', (batchId: unknown) => pppoe.rows(batchId))
-  ctx.handle('bindingList', () => binding.list())
   ctx.handle('bindingRows', (id: unknown) => binding.rows(id))
   ctx.handle('bindingWaitingRows', (id: unknown) => binding.waitingRows(id))
   ctx.handle('bindingEventRows', (id: unknown) => binding.eventRows(id))
@@ -168,9 +180,9 @@ const activate: ModuleActivate = (ctx: ModuleContext) => {
     if (available.problem) return { ok: false, error: available.problem }
     applied = null
     probing = null
-    startPollers()
+    startPollers(available)
     service.forceDumpNextTick()
-    await service.run()
+    await Promise.all([service.run(), service.runSlow()])
     return { ok: true }
   })
   ctx.handle('hintsToggle', (): OkResult => {
@@ -183,7 +195,7 @@ const activate: ModuleActivate = (ctx: ModuleContext) => {
     if (!capabilities.hasPppoe) {
       return failedCheck(
         'PPPoE support is missing on this router',
-        'Install ppp, ppp-mod-pppoe and kmod-pppoe, then run Check again in Module settings.'
+        'Install ppp, ppp-mod-pppoe and kmod-pppoe (with opkg or apk, whichever this release ships), then run Check again in Module settings.'
       )
     }
     if (!capabilities.hasFw4) {
@@ -284,6 +296,7 @@ const activate: ModuleActivate = (ctx: ModuleContext) => {
       binding.dispose()
       rules.clear()
       store.dispose()
+      config.dispose()
     }
   }
 }

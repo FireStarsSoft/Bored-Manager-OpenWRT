@@ -28,6 +28,13 @@ import {
 } from './types'
 
 const EXEC_TIMEOUT_MS = 20_000
+/**
+ * Ticks to wait before asking for the heavy interface dump again after one
+ * came back unparseable. Retrying it every tick costs a `network.interface
+ * dump` per tick for as long as the condition lasts, and at the scale where
+ * that happens (the output no longer fits) it lasts until the pool shrinks.
+ */
+const DUMP_RETRY_TICKS = 5
 const SERIES_WINDOW_MS = 5 * 60 * 1_000
 const MAX_PUSH_IFACES = 64
 const MAX_OVERVIEW_CHARS = 8 * 1_024
@@ -92,11 +99,18 @@ export function buildFastSweepCommand(
     `echo '===SYS==='; ubus -S call system info 2>/dev/null || true`,
     `echo '===DEV==='; awk -v R=${shQuote(rangeSpec)} ${shQuote(DEV_AWK)} /proc/net/dev 2>/dev/null || true`,
     `echo '===LEASES==='; cat ${shQuote(rules.leaseFile)} 2>/dev/null || true`,
-    // RULES_OK is a fail-closed sentinel: a hidden `ip` failure must not look
+    // RULESOK is a fail-closed sentinel: a hidden `ip` failure must not look
     // like "zero managed rules" or BindingEngine will re-add every assignment.
+    //
+    // It has to be a section of its own - `splitSections` only recognises a
+    // line that is exactly `===NAME===`, with NAME in capitals and no
+    // underscore. Written as `===RULES_OK===1` it matched nothing at all and
+    // became the last line of the RULES body, so the sentinel read false on
+    // every single tick: no reconcile ever ran, the binding engine never got
+    // a model, and every binding method answered "no router sample".
     `echo '===RULES==='; if ip -4 rule show >/tmp/.bm-owrt-rules.$$ 2>/dev/null; then awk -F: -v B=${Math.trunc(
       rules.rulePrefBase
-    )} -v E=${RULE_FILTER_END} '$1+0 >= B && $1+0 < E' /tmp/.bm-owrt-rules.$$; echo '===RULES_OK===1'; else echo '===RULES_OK===0'; fi; rm -f /tmp/.bm-owrt-rules.$$`
+    )} -v E=${RULE_FILTER_END} '$1+0 >= B && $1+0 < E' /tmp/.bm-owrt-rules.$$; echo '===RULESOK==='; echo 1; else echo '===RULESOK==='; echo 0; fi; rm -f /tmp/.bm-owrt-rules.$$`
   ]
   if (includeDump) {
     parts.push(
@@ -255,14 +269,24 @@ function activeLeases(
   const byMac = new Map<string, Lease>()
   for (const lease of leases) {
     let normalized = lease
-    if (lease.expires !== 0 && routerNowSec != null) {
-      const remaining = lease.expires - routerNowSec
-      if (remaining <= 0) continue
-      normalized = {
-        ...lease,
-        // Keep expiry comparable with the app-clock model timestamp even when
-        // the router has not synchronized its wall clock yet.
-        expires: Math.floor(at / 1_000) + remaining
+    if (lease.expires !== 0) {
+      if (routerNowSec != null) {
+        const remaining = lease.expires - routerNowSec
+        if (remaining <= 0) continue
+        normalized = {
+          ...lease,
+          // Keep expiry comparable with the app-clock model timestamp even when
+          // the router has not synchronized its wall clock yet.
+          expires: Math.floor(at / 1_000) + remaining
+        }
+      } else {
+        // No `localtime` in `ubus call system info`, so there is no offset to
+        // rebase by. The raw router epoch used to be handed on as though it
+        // were ours, and both places that read it compare against Date.now():
+        // a router still waiting for NTP reports 1970, so every lease showed
+        // as expired and the binding automation skipped every one of them.
+        // Saying "unknown" keeps the lease and keeps the table honest.
+        normalized = { ...lease, expiresUnknown: true }
       }
     }
     const old = byMac.get(normalized.mac)
@@ -288,6 +312,7 @@ export class FastSweep {
   readonly slowPoller: ModulePoller
   latest: RouterModel | null = null
   overview: OpenWrtOverview | null = null
+  slowAt = 0
   series: OpenWrtSeriesPoint[] = []
   uciTables: Record<string, number> = {}
   pppoeUsers: Record<string, string> = {}
@@ -300,6 +325,8 @@ export class FastSweep {
   private pppoeErrors: OpenWrtSlowSample['pppoeErrors'] = {}
   private ticksSinceDump = Number.MAX_SAFE_INTEGER
   private dumpNextTick = true
+  private dumpBackoff = 0
+  private dumpFailed = false
   private generation = 0
   private stopped = false
   private fastFlight: Promise<void> | null = null
@@ -320,6 +347,9 @@ export class FastSweep {
 
   forceDumpNextTick(): void {
     this.dumpNextTick = true
+    // An explicit request - a mutation, a reboot, a manual Sweep - outranks a
+    // back-off that only exists to stop the module retrying on its own.
+    this.dumpBackoff = 0
   }
 
   pppoeErrorSnapshot(): Readonly<Record<string, string>> {
@@ -356,6 +386,7 @@ export class FastSweep {
     this.slowPoller.stop()
     this.latest = null
     this.overview = null
+    this.slowAt = 0
     this.series = []
     this.uciTables = {}
     this.pppoeUsers = {}
@@ -367,6 +398,8 @@ export class FastSweep {
     this.pppoeErrors = {}
     this.ticksSinceDump = Number.MAX_SAFE_INTEGER
     this.dumpNextTick = true
+    this.dumpBackoff = 0
+    this.dumpFailed = false
     this.fastFailed = false
     this.slowFailed = false
     this.hookFailed = false
@@ -453,6 +486,7 @@ export class FastSweep {
       .map((iface) => overviewIface(model, iface))
     const overview: OpenWrtOverview = {
       t: model.t,
+      slowAt: this.slowAt,
       sys: { ...model.sys, uptimeLabel: uptimeLabel(model.sys.uptimeSec) },
       counts: {
         ifTotal: model.ifaces.length,
@@ -494,9 +528,11 @@ export class FastSweep {
     const rules = this.config.effectiveRules()
     const ranges = managedRanges(this.store)
     this.ticksSinceDump += 1
+    if (this.dumpBackoff > 0) this.dumpBackoff -= 1
     const cadence = dumpCadence(this.cachedIfaces.length)
     const includeDump =
-      this.dumpNextTick || this.cachedIfaces.length === 0 || this.ticksSinceDump >= cadence
+      this.dumpBackoff === 0 &&
+      (this.dumpNextTick || this.cachedIfaces.length === 0 || this.ticksSinceDump >= cadence)
     if (includeDump) this.dumpNextTick = false
 
     let result
@@ -515,6 +551,19 @@ export class FastSweep {
       return
     }
     if (!this.active(generation)) return
+    if (result.code === 125 || result.stderr.includes('[overflow]')) {
+      // The executor truncated stdout at its output cap, so the tail sections
+      // (RULESOK, DUMP) are simply gone. Parsing what arrived would read as
+      // "ip rule failed" plus an unparseable dump on every tick, with nothing
+      // in the log to explain why the dashboard reports zero interfaces.
+      if (!this.fastFailed) {
+        this.fastFailed = true
+        this.ctx.log(
+          'openwrt: fast sweep output exceeded the command output limit; reduce the managed PPPoE pool or raise the fast interval'
+        )
+      }
+      return
+    }
     if (result.code !== 0 && !result.stdout.trim()) {
       if (!this.fastFailed) {
         this.fastFailed = true
@@ -527,7 +576,7 @@ export class FastSweep {
     this.fastFailed = false
 
     const sections = splitSections(result.stdout)
-    const rulesOk = (sections.get('RULES_OK') ?? '').trim() === '1'
+    const rulesOk = (sections.get('RULESOK') ?? '').trim() === '1'
     if (!rulesOk && this.active(generation)) {
       this.ctx.log('openwrt: ip -4 rule show failed; skipping binding reconcile')
     }
@@ -554,9 +603,21 @@ export class FastSweep {
       if (validDump(dump)) {
         this.cachedIfaces = parseDump(dump)
         this.ticksSinceDump = 0
+        this.dumpFailed = false
       } else {
-        // A failed heavy section must not erase the last good model.
-        this.forceDumpNextTick()
+        // A failed heavy section must not erase the last good model. Asking
+        // for it again straight away only helps when it was a one-off; when
+        // the dump itself cannot come back whole - past ubus's own message
+        // limit, or truncated on the way here - that is one wasted heavy
+        // command every single tick, silently, forever.
+        this.dumpNextTick = true
+        this.dumpBackoff = DUMP_RETRY_TICKS
+        if (!this.dumpFailed) {
+          this.dumpFailed = true
+          this.ctx.log(
+            `openwrt: interface dump unparseable (${dump.length} bytes); keeping the last known interface list`
+          )
+        }
       }
     }
     const ifaces = this.cachedIfaces.map((iface) => ({
@@ -641,6 +702,7 @@ export class FastSweep {
       uciTables: { ...this.uciTables },
       model: this.latest
     }
+    this.slowAt = sample.t
     try {
       await this.hooks.onSlowSample?.(sample)
     } catch (error) {

@@ -398,7 +398,10 @@ function leaseRank(lease: Lease): number {
 }
 
 function activeLease(lease: Lease, now: number): boolean {
-  return lease.expires === 0 || lease.expires * 1000 > now
+  // A lease whose expiry could not be rebased onto our clock counts as active:
+  // the router's own epoch says nothing next to `now` (see Lease.expiresUnknown),
+  // and dropping it would unbind every client of a router waiting for NTP.
+  return lease.expires === 0 || lease.expiresUnknown === true || lease.expires * 1000 > now
 }
 
 function ruleSignature(rule: BindingRuleChange): string {
@@ -1666,10 +1669,6 @@ export class BindingEngine {
 
   snapshot(): BindingSnapshot {
     return this.latestPayload
-  }
-
-  bindingList(): BindingListRow[] {
-    return this.list()
   }
 
   list(): BindingListRow[] {

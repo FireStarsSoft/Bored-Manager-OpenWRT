@@ -188,25 +188,43 @@ function normalize(raw: unknown): OwrtConfig {
   }
 }
 
+/**
+ * Config is shared by all router instances, so the normalised document is kept
+ * only until something writes it: `onConfigChange` fires for every instance of
+ * the module, this one included, so a toggle made on another router drops this
+ * copy instead of being overwritten by it. Without the cache, `effectiveRules()`
+ * re-read and re-validated the file on every call - many times per fast tick,
+ * since every batch, every rule number and every table poll asks for it.
+ */
 export class ConfigStore {
-  constructor(private ctx: ModuleContext) {}
+  private cache: OwrtConfig | null = null
+  private rules: OwrtRules | null = null
+  private readonly unsubscribe: () => void
 
-  /**
-   * Config is shared by all router instances. Read it afresh so a toggle made
-   * on one router cannot be overwritten by another instance's stale copy.
-   */
+  constructor(private ctx: ModuleContext) {
+    this.unsubscribe = ctx.onConfigChange(() => {
+      this.cache = null
+      this.rules = null
+    })
+  }
+
   read(): OwrtConfig {
-    return normalize(this.ctx.configGet())
+    return (this.cache ??= normalize(this.ctx.configGet()))
   }
 
   effectiveRules(): OwrtRules {
-    return { ...DEFAULT_RULES, ...this.read().rules }
+    return (this.rules ??= { ...DEFAULT_RULES, ...this.read().rules })
   }
 
   update<T>(mutate: (config: OwrtConfig) => T): T {
     const config = this.read()
     const result = mutate(config)
-    this.ctx.configSet(normalize(config))
+    const written = normalize(config)
+    this.ctx.configSet(written)
+    // The listener above has just cleared both; what was written is what the
+    // next read should see.
+    this.cache = written
+    this.rules = null
     return result
   }
 
@@ -224,7 +242,14 @@ export class ConfigStore {
   }
 
   reset(): void {
-    // There is deliberately no in-memory config document.
+    this.cache = null
+    this.rules = null
+  }
+
+  /** Stop listening. The context drops the listener on revoke anyway; this is for a tidy dispose. */
+  dispose(): void {
+    this.unsubscribe()
+    this.reset()
   }
 }
 
