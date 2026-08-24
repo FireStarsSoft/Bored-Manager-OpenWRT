@@ -3,6 +3,19 @@
 Module versions are independent of the app's. OpenWRT 1.0.0 needs Bored Manager
 **0.3.3** for the `subnav` and `note` blocks and the `file` form input.
 
+## 1.0.8
+
+- **The module now lives in its own repository** and is installed rather than
+  shipped: [FireStarsSoft/Bored-Manager-OpenWRT](https://github.com/FireStarsSoft/Bored-Manager-OpenWRT).
+  Bored Manager 0.4.1 is the first release that does not bundle it - get it from
+  Settings → Modules (catalog, `FireStarsSoft/Bored-Manager-OpenWRT`, or the
+  release zip). An install that already has 1.0.7 keeps working untouched across
+  the app update, and updating to 1.0.8 keeps its rules, per-router state and
+  history: nothing about the module's behaviour, manifest ids or stored shapes
+  changed here.
+- README: an Installing section, since the module is no longer in the app
+  download, and a link back to the repository.
+
 ## 1.0.7
 
 - Fixed: every DHCP lease read as expired on a router whose clock had not

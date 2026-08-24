@@ -5,6 +5,21 @@ connection. The module does not use LuCI and does not open a second connection:
 add the router as a machine, connect to it as `root`, then enable OpenWRT in
 Settings → Modules.
 
+## Installing
+
+This module is not part of the app download. Install it from **Settings →
+Modules**, by any of:
+
+- **Catalog** - pick *OpenWRT* from the reviewed list;
+- **GitHub repo** - `FireStarsSoft/Bored-Manager-OpenWRT`, which installs the
+  latest release;
+- **From file** - the `openwrt-<version>.zip` attached to a
+  [release](https://github.com/FireStarsSoft/Bored-Manager-OpenWRT/releases).
+
+It needs Bored Manager **0.3.3** or newer, and installs switched off; enable it
+in the same place. Source, issues and changelog live in
+[FireStarsSoft/Bored-Manager-OpenWRT](https://github.com/FireStarsSoft/Bored-Manager-OpenWRT).
+
 ## What it adds
 
 | Where | What |
@@ -17,8 +32,8 @@ Settings → Modules.
 | Overview cards | An optional WAN-pool and binding summary. |
 | History | `openwrt`: aggregate WAN, device, receive, and transmit values. |
 
-The module ships disabled. It is intentionally scoped to the currently selected
-router: another connected router receives a separate module instance and
+The module installs disabled. It is intentionally scoped to the currently
+selected router: another connected router receives a separate module instance and
 separate per-host state.
 
 ## Requirements
