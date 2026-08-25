@@ -120,10 +120,17 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
+          # luci.mk builds a separate `luci-i18n-<basename>-<lang>` package out
+          # of every directory under po/, so luci-app-bm also produces
+          # luci-i18n-bm-vi - a name that matches neither of the other two
+          # patterns. It was built and then left behind, and pack-bundle.mjs,
+          # which derives the same name from po/, refused to pack a bundle
+          # missing it. Parenthesised and given an explicit -print so the
+          # next name added here cannot change what the others match.
           # PKGARCH:=all puts everything under bin/packages/all/, but the glob
           # stays wide so a package that ever stops being architecture-free is
           # collected rather than silently missing from the release.
-          find sdk/bin/packages -name 'bm-*.apk' -o -name 'luci-app-bm*.apk' | while read -r file; do
+          find sdk/bin/packages \( -name 'bm-*.apk' -o -name 'luci-app-bm*.apk' -o -name 'luci-i18n-bm-*.apk' \) -print | while read -r file; do
             cp "$file" out/
           done
           test -n "$(ls -A out)" || { echo "no .apk was produced" >&2; exit 1; }
