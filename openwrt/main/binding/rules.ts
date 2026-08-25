@@ -42,6 +42,30 @@ export function catchAllRoute(table: number): string {
   return `ip -4 route replace unreachable default table ${table}`
 }
 
+/**
+ * The route that keeps the router itself reachable on a LAN it is blackholing.
+ *
+ * The catch-all rule selects on *source*, and the LAN CIDR it selects contains
+ * the router's own LAN address - so without this the router's own replies on
+ * that LAN are looked up in a table whose only route is `unreachable`, and it
+ * stops answering SSH, ping and ARP on the very interface being bound. That is
+ * not a theoretical corner: it is what taking a router off its own network
+ * looked like.
+ *
+ * A connected route is the smallest thing that fixes it. Anything destined off
+ * this LAN still falls through to `unreachable default`, so an unassigned
+ * client cannot leak out of the router's own WAN - the property the catch-all
+ * exists for - while everything on the LAN, the router included, can still talk
+ * to everything else on it.
+ *
+ * The table is shared by every slot, so this also lets an unassigned client on
+ * one bound LAN route towards another bound LAN. Routing is not what separates
+ * those: the zone forwardings are, and they are unchanged.
+ */
+export function catchAllLocalRoute(table: number, cidr: string, device: string): string {
+  return `ip -4 route replace ${cidr} dev ${device} scope link table ${table}`
+}
+
 export function ruleIp(from: string): string | null {
   const text = String(from ?? '').trim()
   const slash = text.indexOf('/')

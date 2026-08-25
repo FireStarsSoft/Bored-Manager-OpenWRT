@@ -96,6 +96,30 @@
                 {
                   "type": "conditional",
                   "when": {
+                    "source": {
+                      "kind": "stream",
+                      "event": "capabilities",
+                      "path": "agent.usable"
+                    },
+                    "op": "eq",
+                    "value": false
+                  },
+                  "blocks": [
+                    {
+                      "type": "note",
+                      "title": "Compatibility mode: no Bored Manager agent on this router",
+                      "tone": "warning",
+                      "lines": [
+                        "Everything on this page is real and everything below still works. The module is driving the router over SSH, the way it always has.",
+                        "What is missing is the safety net. A change that takes the connection down cannot undo itself, because there is nobody left on this side to tell it to; DHCP leases are read on a timer rather than as they happen; and a large PPPoE pool is written one round trip at a time.",
+                        "Module settings, under Router packages, installs it - from a file on this machine when the router has no internet of its own."
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "conditional",
+                  "when": {
                     "source": { "kind": "stream", "event": "capabilities", "path": "state" },
                     "op": "eq",
                     "value": "attention"
@@ -1340,6 +1364,79 @@
                         {
                           "type": "actions",
                           "actions": [{ "label": "Refresh the router sample", "method": "sweepNow" }]
+                        },
+                        {
+                          "type": "conditional",
+                          "when": {
+                            "source": {
+                              "kind": "stream",
+                              "event": "capabilities",
+                              "path": "setupNeeded"
+                            },
+                            "op": "eq",
+                            "value": true
+                          },
+                          "blocks": [
+                            {
+                              "type": "section",
+                              "title": "Install what these forms need",
+                              "blocks": [
+                                {
+                                  "type": "note",
+                                  "title": "One or both forms below will refuse until this is installed",
+                                  "tone": "warning",
+                                  "lines": [
+                                    "This router is missing a package the automations depend on. Both forms check before they write, so a check here will refuse and name it - but naming it and then sending you to another page is a longer way round than doing it, so the same install runs from here.",
+                                    "It is the same flow as Module settings: the check reads free space and whether the router has a route to the internet and changes nothing, and only names from this module's own list ever reach a command line. Applying refreshes the package index once, installs one package per step, and re-runs the readiness probe to confirm the result."
+                                  ]
+                                },
+                                {
+                                  "type": "list",
+                                  "source": {
+                                    "kind": "stream",
+                                    "event": "capabilities",
+                                    "path": "missingPackages"
+                                  },
+                                  "columns": [
+                                    { "key": "name", "label": "Package" },
+                                    { "key": "for", "label": "Needed for" }
+                                  ],
+                                  "limit": 32,
+                                  "emptyText": "nothing is missing"
+                                },
+                                {
+                                  "type": "checkForm",
+                                  "checkMethod": "setupCheck",
+                                  "applyMethod": "setupApply",
+                                  "checkLabel": "Check what would be installed",
+                                  "applyLabel": "Install now",
+                                  "fields": [
+                                    {
+                                      "key": "pppoe",
+                                      "label": "PPPoE support (ppp, ppp-mod-pppoe, kmod-pppoe)",
+                                      "input": "checkbox",
+                                      "initial": true,
+                                      "help": "What the PPPoE batch form below needs. A group already present is skipped."
+                                    },
+                                    {
+                                      "key": "ipfull",
+                                      "label": "Policy routing (ip-full)",
+                                      "input": "checkbox",
+                                      "initial": true,
+                                      "help": "What the WAN Binding form below needs. Some targets ship the BusyBox applet, which has no ip rule subcommand at all."
+                                    },
+                                    {
+                                      "key": "dnsmasq",
+                                      "label": "DHCP leases (dnsmasq)",
+                                      "input": "checkbox",
+                                      "initial": true,
+                                      "help": "Where WAN Binding finds the devices it assigns. Without it the device table stays empty."
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
                         },
                         {
                           "type": "section",

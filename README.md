@@ -22,13 +22,13 @@ You do not need this repository to use the module. In Bored Manager, open
 | GitHub repo | `FireStarsSoft/Bored-Manager-OpenWRT` |
 | Zip URL / file | the `openwrt-<version>.zip` attached to a [release](../../releases) |
 
-It installs **switched off** — enable it in the same place. Version 2.0.0 needs
+It installs **switched off** — enable it in the same place. The 2.x line needs
 Bored Manager **0.4.1** or newer, which is also the first app release that does
 not bundle the module, **and OpenWrt 25.12 or newer** on the router — 25.12.0
-replaced opkg with apk, and 2.0.0 speaks only apk, so it refuses a 24.10 router
+replaced opkg with apk, and 2.x speaks only apk, so it refuses a 24.10 router
 outright rather than half-managing it. The 1.0.x line still runs on **0.3.3**.
 An app already carrying 1.0.7 keeps it across the update, and updating to 1.0.8
-or 2.0.0 from here keeps its rules, per-router state and history.
+or 2.x from here keeps its rules, per-router state and history.
 
 Once it is installed, updating it is a button rather than a repository name
 typed again. **Settings → Modules** puts an **Update** button on its row, next
@@ -57,11 +57,13 @@ openwrt/            the module, and nothing else — this folder is what ships
   ui/widgets/*.json   Overview widget specs
   README.md           what the module does
   CHANGELOG.md        module versions, independent of the app's
-shared/             vendored copy of the app's shared/ — what `@shared/*` means
+packages/           the router half: ucode packages built into .apk by the OpenWrt SDK
+shared/             vendored copy of the app's shared/ - what `@shared/*` means
 vendor/             vendored copy of the app's module compiler, plus two shims
 tests/              unit tests for main/, on the app's own module harness
 scripts/            packaging and the checks CI runs
-.github/workflows/  the same checks on push, the tagged release, the SDK drift watch
+.github/workflows/  the same checks on push, the tagged release, the SDK drift watch,
+                    and the SDK build that turns packages/ into .apk files
 sdk.lock.json       which app ref the two vendored folders came from
 ```
 
@@ -80,7 +82,8 @@ to LF, and nothing that is not part of the module goes into that folder.
 
 ```bash
 npm install
-npm run check      # sdk:check + typecheck + test + specs + size + compile
+npm run check      # sdk:check + typecheck + test + specs + size + requirements
+                   #   + packages:check + compile
 ```
 
 | Script | What it does |
@@ -89,8 +92,11 @@ npm run check      # sdk:check + typecheck + test + specs + size + compile
 | `npm test` | Vitest over `tests/`, using the app's `moduleHarness` |
 | `npm run specs` | every `ui/*.json` through the app's own spec validator |
 | `npm run size` | the structural rules for `openwrt/main/`: no file over 600 lines, no import that reaches past a folder's barrel, no CRLF |
+| `npm run requirements` | the manifest, the handlers and `main/requirements.ts` are one list: every method declared, registered through the one gate, and carrying an entry saying what it needs from the router |
 | `npm run compile` | esbuild through the app's real scope guard — catches an import a module is not allowed to make |
+| `npm run packages:check` | the router packages agree on one version, install only files that exist, and can migrate a router from schema 1 to the current one |
 | `npm run pack` | writes `dist/openwrt-<version>.zip` and its `.sha256` |
+| `npm run pack:packages <dir>` | turns a folder of built `.apk` files into `bm-packages.json` and the `.apkbundle` the app can install offline |
 | `npm run sdk:check` | have the vendored copies been edited? (offline) |
 | `npm run sdk:sync` | re-fetch them at the pinned ref |
 | `npm run sdk:drift` | what has the app changed since the pin? (online) |
@@ -121,6 +127,14 @@ host (where the app root is, where a module folder is), so
 
 ## Releasing
 
+Two things ship from this repository on two tags. The module is `v<version>`;
+the router packages are `pkg-v<version>`. They version independently, and the
+tag patterns are deliberately different — `release.yml` asserts that **exactly
+one** `.zip` is attached to a `v*` tag, because the app picks a module archive
+by "the only zip asset there is".
+
+### The module
+
 1. Bump `version` in `openwrt/module.json` and add a section to
    `openwrt/CHANGELOG.md`.
 2. `npm run check`, then `npm run pack` and note the sha256 it prints. The
@@ -138,6 +152,27 @@ host (where the app root is, where a module folder is), so
 Exactly one `.zip` may be attached to a release: the app picks the module
 archive by "the only zip asset that is not the app's own", and a second one
 makes the install fail rather than guess.
+
+### The router packages
+
+1. Bump `release` in `packages/version.json`, and `PKG_VERSION` in every
+   `packages/*/Makefile` and `RELEASE` in `bm/version.uc` to match. Move
+   `apiVersion` only if a ubus call changed shape, and `configSchema` only if
+   what is written to `/etc` changed — a schema bump also needs a migration in
+   `packages/bm-agent/files/usr/share/bm/migrations/`, and
+   `npm run packages:check` refuses a chain with a hole in it.
+2. Add a section to `packages/CHANGELOG.md`.
+3. `npm run packages:check`, then push `pkg-v<release>`. That workflow calls the
+   same syntax check and SDK build `main` runs, signs the manifest with the
+   `BM_RELEASE_SECKEY` secret, and attaches the `.apk` files,
+   `bm-packages.json`, its `.sig`, and the `.apkbundle`.
+
+Without that secret the manifest is published unsigned, the workflow says so,
+and a router refuses to update itself from it — which is the correct answer, not
+a bug. Installing from the app still works, because the pinned install, the
+bundle and a path already on the router each have their own trust root. Making
+a key is `sh scripts/gen-release-key.sh`, once, and the details are in
+[`packages/bm-agent/files/usr/share/bm/keys/README.md`](packages/bm-agent/files/usr/share/bm/keys/README.md).
 
 ## Contributing
 

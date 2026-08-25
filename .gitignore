@@ -7,3 +7,30 @@ openwrt/.dist/
 *.log
 .claude/
 .cursor/
+
+# The OpenWrt tree the router-side packages are written against, cloned at the
+# 25.12 maintenance branch. It is a reference, not a dependency: nothing here
+# builds from it and nothing in it is ours, so it stays out of the repository
+# and out of the module archive. Clone it with:
+#   git clone --filter=blob:none --branch openwrt-25.12 https://github.com/openwrt/openwrt.git openwrt-src
+openwrt-src/
+
+# The ucode interpreter the router packages are written against, at the exact
+# commit openwrt-src/package/utils/ucode/Makefile pins. Same reason as above: a
+# reference, not a dependency. `npm run packages:ucode` clones its own copy, so
+# this one is only for reading. Clone it with:
+#   git clone --filter=blob:none https://github.com/jow-/ucode.git ucode-src
+#   git -C ucode-src checkout $(sed -n 's/^PKG_SOURCE_VERSION:=//p' openwrt-src/package/utils/ucode/Makefile)
+ucode-src/
+
+# The LuCI feed the app package is written against, at the same 25.12 branch.
+# Same reason as the two above: a reference, not a dependency - luci.mk is read
+# from $(TOPDIR)/feeds/luci at build time on a machine that has the SDK, never
+# from here. Clone it with:
+#   git clone --depth 1 --branch openwrt-25.12 https://git.openwrt.org/project/luci.git luci-src
+luci-src/
+
+# Compiled ucode, which `ucode -c` drops wherever it was told to. Build
+# output, never a source file: `npm run packages:ucode` writes to /dev/null and
+# a stray one at the root would otherwise be swept up by `git add -A`.
+*.uc.bc

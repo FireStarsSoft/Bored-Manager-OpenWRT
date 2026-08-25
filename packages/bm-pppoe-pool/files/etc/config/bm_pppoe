@@ -1,0 +1,54 @@
+# Bored Manager: pools of PPPoE sessions.
+#
+# Shipped with no pool. A pool names a physical interface and carries account
+# credentials that only exist on one router, so there is nothing to guess and
+# nothing this file could usefully contain before somebody creates one.
+#
+# Pools are added from LuCI (Services -> Bored Manager -> PPPoE Pools), with
+# `bmpppoe create ID --from FILE` at a console, or from the app - all three end
+# up in the same daemon call and produce the same sections. `bmpppoe append`
+# and the Add sessions button widen an existing pool, which is what to reach for
+# instead of creating a second pool with the same prefix.
+#
+# Each pool appears below as a `config pool` section. The sections that actually
+# dial live in /etc/config/network, where netifd reads them - this file is the
+# record of which of them belong to which pool, so that "delete this pool" means
+# something more precise than "delete every PPPoE interface on the router".
+#
+# Nothing here is edited by hand in practice: the seq range and the table base
+# are what the interfaces were written against, so changing them makes the
+# record describe interfaces that are not there. Delete the pool and make it
+# again instead.
+#
+# Everything here is a conffile, so an update leaves it alone.
+
+config pppoe 'main'
+	# Off means the daemon starts, watches nothing and answers questions, which
+	# is a more useful "off" than a service that is not there to ask.
+	option enabled '1'
+
+	# Seconds between counter passes. Reading /proc/net/dev and summing by
+	# prefix is cheap - it is one file, whatever the number of sessions - but it
+	# is not free, and nothing anybody watches changes faster than this.
+	option counter_interval '5'
+
+	# Seconds a session may stay down before it is redialled. 0 turns the
+	# watchdog off entirely and leaves every session to netifd, which does its
+	# own retrying; this is for the sessions netifd has given up on.
+	option redial_after '120'
+
+	# The most redials to start in one watchdog pass. A provider that has just
+	# dropped four thousand sessions does not want four thousand simultaneous
+	# reconnects from one router, and neither does the router.
+	option redial_batch '20'
+
+# One pool. Written by whoever created it; the fields are the record of what it
+# was created as, so that deleting it removes exactly what it added.
+#
+#config pool 'ppp'
+#	option prefix 'ppp'
+#	option carrier 'eth1'
+#	option seq_from '1'
+#	option seq_to '500'
+#	option table_base '1000'
+#	option created '1750000000'

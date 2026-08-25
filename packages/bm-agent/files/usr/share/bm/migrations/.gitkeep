@@ -1,0 +1,3 @@
+# Schema 1 needs no migration. A release that changes what is written to
+# /etc adds a file here named NNN-what-it-does.uc; see bm/migrate.uc for
+# the three rules every one of them has to follow.

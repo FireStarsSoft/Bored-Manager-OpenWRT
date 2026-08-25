@@ -1,0 +1,8 @@
+#!/bin/sh
+# The two flags are the point of this wrapper.
+#
+# `-R` says the file is a script rather than a template and `-S` turns on strict
+# mode, and saying both out loud is what keeps this working on a router whose
+# ucode was built with different defaults - which a shebang line cannot do,
+# since Linux passes at most one argument to an interpreter.
+exec /usr/bin/ucode -R -S /usr/share/bm/bmctl.uc "$@"

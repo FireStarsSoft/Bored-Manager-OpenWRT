@@ -19,6 +19,7 @@ import type {
 } from '../../openwrt/main/binding'
 import type { Lease, OpenWrtOverview, OpenWrtSeriesPoint } from '../../openwrt/main/types'
 import { moduleHarness, sharedModuleConfig } from '../helpers/module-harness'
+import { isProbeCommand, routerProbeOutput } from '../helpers/router'
 
 /**
  * Everything a page reads instead of computing for itself.
@@ -325,10 +326,14 @@ describe('the PPPoE payload', () => {
   const withRouter = (dump: unknown): ReturnType<typeof moduleHarness> =>
     moduleHarness(
       'openwrt',
-      (command) =>
-        command.includes('===SYS===')
+      (command) => {
+        // The probe as well as the sweep: a router the module has never asked
+        // about is refused by the requirements gate before any action runs.
+        if (isProbeCommand(command)) return ok(routerProbeOutput())
+        return command.includes('===SYS===')
           ? ok(sweepOutput({ dump: JSON.stringify(dump) }))
-          : ok(''),
+          : ok('')
+      },
       { hostData: batchHost, config: sharedModuleConfig(null) }
     )
 
@@ -438,6 +443,9 @@ describe('the PPPoE payload', () => {
     })
     const runtime = activate(harness.ctx)
 
+    // Dialing needs ppp, so the action is gated on the probe having landed.
+    runtime.applyPollers?.()
+    await settle()
     await harness.ticks[0]()
 
     const single = harness.handlers.get('pppoeConnAction')?.('pd00001', 'stop') as {

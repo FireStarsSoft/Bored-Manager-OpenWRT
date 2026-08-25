@@ -9,12 +9,17 @@
     "test": "vitest run",
     "specs": "tsx scripts/check-specs.mjs",
     "size": "node scripts/check-size.mjs",
+    "requirements": "node scripts/check-requirements.mjs",
+    "packages:check": "node scripts/check-packages.mjs",
     "compile": "tsx scripts/compile-module.mjs",
     "pack": "node scripts/package-module.mjs openwrt dist",
+    "pack:packages": "node scripts/pack-bundle.mjs",
+    "pin:packages": "node scripts/pin-packages.mjs",
+    "packages:ucode": "sh scripts/check-ucode.sh",
     "sdk:check": "node scripts/sync-sdk.mjs --check",
     "sdk:sync": "node scripts/sync-sdk.mjs",
     "sdk:drift": "node scripts/sync-sdk.mjs --against main",
-    "check": "npm run sdk:check && npm run typecheck && npm test && npm run specs && npm run size && npm run compile"
+    "check": "npm run sdk:check && npm run typecheck && npm test && npm run specs && npm run size && npm run requirements && npm run packages:check && npm run compile"
   },
   "devDependencies": {
     "@types/node": "^26.1.0",

@@ -8,6 +8,7 @@ import { FastSweep } from '../../openwrt/main/service'
 import { HostStore } from '../../openwrt/main/store'
 import type { OpenWrtOverview, OpenWrtSeriesPoint } from '../../openwrt/main/types'
 import { moduleHarness, sharedModuleConfig } from '../helpers/module-harness'
+import { isProbeCommand, routerProbeOutput } from '../helpers/router'
 
 /**
  * What the four JSON specs promise, checked against what the module can
@@ -563,8 +564,17 @@ describe('the assignments a binding drawer asks for', () => {
 
 describe('a device no binding instance manages', () => {
   it('is refused by name, with the thing to do next', async () => {
-    const harness = moduleHarness('openwrt', () => ok(), { config: sharedModuleConfig(null) })
+    const harness = moduleHarness(
+      'openwrt',
+      (command) => (isProbeCommand(command) ? ok(routerProbeOutput()) : ok()),
+      { config: sharedModuleConfig(null) }
+    )
     const runtime = activate(harness.ctx)
+    // All three write an ip rule, so the requirements gate wants the router read
+    // first. It is read here, and passes - which is what leaves the refusal below
+    // free to be about the device rather than about the router.
+    runtime.applyPollers?.()
+    await settle()
 
     // The dashboard offers these buttons on every DHCP lease it can see, and an
     // unmanaged device carries an empty instance id. The engine answered "no

@@ -40,10 +40,20 @@ export function commandFailure(label: string, result: ModuleExecResult): Error {
   return new Error(`${label} failed (exit ${result.code})`)
 }
 
+/**
+ * The UCI packages this module ever commits.
+ *
+ * A closed list rather than a string, because `commit <name>` is built into a
+ * line here and a name from anywhere else would be a way to make this module
+ * commit somebody's uncommitted changes to a config it has nothing to do with.
+ * `bm_wanbind` joined the two originals when the router-side binder did.
+ */
+export type UciPackage = 'network' | 'firewall' | 'bm_wanbind'
+
 export async function runUciBatch(
   ctx: ExecContext,
   lines: readonly string[],
-  commits: readonly ('network' | 'firewall')[],
+  commits: readonly UciPackage[],
   timeoutMs: number
 ): Promise<void> {
   const body = lines.filter((line) => line.trim().length > 0)

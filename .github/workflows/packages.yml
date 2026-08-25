@@ -1,0 +1,132 @@
+name: packages
+
+# The router half. Separate from `ci.yml` on purpose: this one fetches an
+# OpenWrt SDK and builds .apk files, which is minutes of work that a change to
+# the module's TypeScript has no reason to pay for. It runs when `packages/`
+# changes, and on demand.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/**'
+      - 'scripts/check-packages.mjs'
+      - 'scripts/check-ucode.sh'
+      - '.github/workflows/packages.yml'
+  pull_request:
+    paths:
+      - 'packages/**'
+      - 'scripts/check-packages.mjs'
+      - 'scripts/check-ucode.sh'
+      - '.github/workflows/packages.yml'
+  workflow_dispatch:
+  # Called by packages-release.yml, so a tag builds through exactly the steps
+  # main already builds through rather than a second copy of them that drifts.
+  workflow_call:
+
+env:
+  # The release the SDK is fetched from. Anything here is PKGARCH:=all, so the
+  # target only decides which SDK is downloaded, not what comes out - x86/64 is
+  # the one that is always published and always quick.
+  OPENWRT_RELEASE: '25.12.0'
+  OPENWRT_TARGET: 'x86/64'
+
+jobs:
+  # Every mistake this catches would otherwise be found by a router: a typo, an
+  # unbalanced brace, a name imported from a module that does not export it.
+  # ucode resolves imports while compiling, so the check needs those modules to
+  # exist - which is what `packages/ci/stubs/` is for. Read its README before
+  # adding to it.
+  #
+  # The ucode commit is pinned inside scripts/check-ucode.sh rather than here,
+  # so a developer running that script by hand checks against the same one.
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # Offline, and first: it names the Makefile line rather than letting a
+      # build fail on a path several minutes later.
+      - run: npm run packages:check
+
+      # One script, so what CI checks and what a developer can check on their
+      # own machine are the same thing rather than two copies that drift. It
+      # builds the exact ucode OpenWrt 25.12 ships, pinned to the commit in
+      # openwrt/package/utils/ucode/Makefile, and compiles every .uc file and
+      # every /bin/sh script in packages/ with it.
+      - name: Install the ucode build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake pkg-config libjson-c-dev build-essential
+
+      - name: Compile every .uc file against the ucode OpenWrt ships
+        run: sh scripts/check-ucode.sh
+
+  build:
+    needs: syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch and verify the OpenWrt SDK
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ccache gawk gettext git libncurses-dev libssl-dev \
+            python3-distutils rsync unzip zlib1g-dev file wget zstd
+
+          BASE="https://downloads.openwrt.org/releases/${OPENWRT_RELEASE}/targets/${OPENWRT_TARGET}"
+          curl -fsSL "$BASE/sha256sums" -o sha256sums
+          NAME="$(grep -oE 'openwrt-sdk-[^ ]+\.tar\.(xz|zst)' sha256sums | head -n1)"
+          test -n "$NAME" || { echo "no SDK listed at $BASE" >&2; exit 1; }
+          echo "SDK: $NAME"
+          curl -fsSL "$BASE/$NAME" -o "$NAME"
+          # The published checksum, not one computed from the file just fetched:
+          # a hash taken from the same download only proves it arrived intact.
+          grep -F "$NAME" sha256sums | sha256sum -c -
+          mkdir sdk
+          tar --strip-components=1 -xf "$NAME" -C sdk
+
+      - name: Build every package
+        run: |
+          set -euo pipefail
+          cd sdk
+          for dir in "$GITHUB_WORKSPACE"/packages/*/; do
+            [ -f "$dir/Makefile" ] || continue
+            name="$(basename "$dir")"
+            ln -sfn "$dir" "package/$name"
+            echo "CONFIG_PACKAGE_${name}=m" >> .config
+          done
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          make defconfig
+          for dir in "$GITHUB_WORKSPACE"/packages/*/; do
+            [ -f "$dir/Makefile" ] || continue
+            make "package/$(basename "$dir")/compile" -j"$(nproc)" V=s
+          done
+
+      - name: Collect the archives
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          # PKGARCH:=all puts everything under bin/packages/all/, but the glob
+          # stays wide so a package that ever stops being architecture-free is
+          # collected rather than silently missing from the release.
+          find sdk/bin/packages -name 'bm-*.apk' -o -name 'luci-app-bm*.apk' | while read -r file; do
+            cp "$file" out/
+          done
+          test -n "$(ls -A out)" || { echo "no .apk was produced" >&2; exit 1; }
+          cd out && sha256sum ./*.apk | tee sha256sums.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bm-packages-${{ github.sha }}
+          path: out/
+          if-no-files-found: error

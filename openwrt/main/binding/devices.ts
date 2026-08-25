@@ -9,6 +9,16 @@
  * held, force-reassigned or pinned by a pass that never reached the router.
  */
 import type { OkResult } from '@shared/types'
+import {
+  hasFeature,
+  wanbindPin,
+  wanbindReassign,
+  wanbindReconcile,
+  wanbindSection,
+  wanbindUnassign,
+  type AgentDeps
+} from '../agent'
+import type { AgentCapability } from '../probe'
 import { clonePlannerMemory, emptyPlannerMemory, normalizedMac } from './memory'
 import { lanCidr, plannerWans, poolIfaces, wanState, wanUsable } from './pool'
 import { reconcileModel } from './reconcile'
@@ -39,11 +49,14 @@ const WAN_TROUBLE: Record<string, string> = {
   missing: 'is not in the interface list this module last read off the router'
 }
 
-function actionTargets(
-  idOrKeys: unknown,
-  macRaw?: unknown
-): Array<{ instanceId: string; mac: string }> {
-  const targets: Array<{ instanceId: string; mac: string }> = []
+/** One row of a selection: which instance, which device. */
+interface DeviceTarget {
+  instanceId: string
+  mac: string
+}
+
+function actionTargets(idOrKeys: unknown, macRaw?: unknown): DeviceTarget[] {
+  const targets: DeviceTarget[] = []
   if (Array.isArray(idOrKeys)) {
     for (const raw of idOrKeys) {
       const key = String(raw ?? '')
@@ -132,6 +145,66 @@ export async function queueDeviceAction(
   )
 }
 
+/**
+ * The same three actions, asked of the router instead.
+ *
+ * They are the router's to perform when it holds the assignment, and the
+ * mapping is one to one because the package was built to make it so: Unassign
+ * holds a client out of the pool, Reassign moves it off the WAN it has, and Pin
+ * puts it on a named one. Nothing here touches planner memory - there is no
+ * planner running on this side - and nothing writes an ip rule.
+ *
+ * A pass is asked for afterwards so the rows a surface reads next are the ones
+ * the action produced, rather than the ones from up to thirty seconds ago.
+ */
+async function routerDeviceAction(
+  runtime: BindingRuntime,
+  capability: AgentCapability,
+  targets: readonly DeviceTarget[],
+  action: DeviceAction,
+  wan: string
+): Promise<OkResult> {
+  const deps: AgentDeps = { ctx: runtime.ctx, capability: () => capability }
+  const instances = new Map(runtime.store.read().instances.map((entry) => [entry.id, entry]))
+  const done: string[] = []
+
+  for (const target of targets) {
+    const instance = instances.get(target.instanceId)
+    if (!instance) {
+      return { ok: false, error: `binding instance ${target.instanceId} no longer exists` }
+    }
+
+    const section = wanbindSection(instance.id)
+    const result =
+      action === 'pin'
+        ? await wanbindPin(deps, section, target.mac, wan)
+        : action === 'unassign'
+          ? await wanbindUnassign(deps, section, target.mac)
+          : await wanbindReassign(deps, section, target.mac)
+
+    if (!result.ok) {
+      // Named, and with however many already went through. A selection that
+      // stopped half way is a fact the user needs; reporting only the failure
+      // would have them repeat the ones that worked.
+      return {
+        ok: false,
+        error: done.length
+          ? `${result.error ?? 'the router refused'} (${done.length} of ${targets.length} were done first)`
+          : (result.error ?? 'the router refused')
+      }
+    }
+
+    done.push(target.mac)
+  }
+
+  // Best effort. The rows are one pass behind if this does not land, which the
+  // next tick corrects; failing an action that the router did perform would be
+  // reporting the wrong thing.
+  await wanbindReconcile(deps)
+
+  return { ok: true, data: `${done.length}` }
+}
+
 async function deviceActionNow(
   runtime: BindingRuntime,
   idOrKeys: unknown,
@@ -151,6 +224,15 @@ async function deviceActionNow(
     }
   }
   return exclusive(runtime, async () => {
+    // The router's, when the router is holding the assignment. Checked inside
+    // the exclusive block so it cannot change under the branch, and before the
+    // model is required: the agent knows who is bound whether or not a sweep
+    // has landed on this side yet.
+    const capability = runtime.options.agent?.()
+    if (capability && hasFeature(capability, 'binding')) {
+      return routerDeviceAction(runtime, capability, targets, action, wan)
+    }
+
     const model = runtime.latestModel
     if (!model) return { ok: false, error: NO_SAMPLE }
     const instances = new Map(runtime.store.read().instances.map((entry) => [entry.id, entry]))

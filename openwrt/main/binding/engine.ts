@@ -26,6 +26,7 @@ import {
 import { applyBinding } from './prepare'
 import { onSample } from './reconcile'
 import { createBindingRuntime } from './runtime'
+import { syncRouterInstances, syncRouterInstancesQuietly } from './sync'
 import { reconcileWanTables } from './tables'
 import {
   assignmentRows,
@@ -108,7 +109,26 @@ export class BindingEngine {
   }
 
   async reconcileWanTables(source: WanTableSource): Promise<void> {
+    // The slow tick is also where the router's copy of the instance list is
+    // brought back in step. It is a repair rather than a write: on a router
+    // that already agrees it reads one small file and stops. Awaited, unlike
+    // the mutation path below, because nothing is waiting on this tick and a
+    // failure here is worth having in the log with its own message.
+    await syncRouterInstances(this.runtime, this.runtime.options.agent?.()).catch(() => undefined)
     return reconcileWanTables(this.runtime, source)
+  }
+
+  /**
+   * Put the router's instance list back in step after a record changed.
+   *
+   * Called by every mutation below and nothing else. It is convergent, so it
+   * does not matter which of them called it or whether two arrive together;
+   * and it never fails the operation that called it, because the record has
+   * already changed and reporting a failed Start for an instance that did
+   * start would be reporting the wrong thing. The slow tick is the net.
+   */
+  private syncRouter(): void {
+    syncRouterInstancesQuietly(this.runtime, this.runtime.options.agent?.())
   }
 
   // ------------------------------------------------------------- check/apply
@@ -126,7 +146,9 @@ export class BindingEngine {
   }
 
   async apply(raw: unknown): Promise<OkResult> {
-    return applyBinding(this.runtime, raw)
+    const result = await applyBinding(this.runtime, raw)
+    this.syncRouter()
+    return result
   }
 
   // --------------------------------------------------------------- lifecycle
@@ -150,7 +172,9 @@ export class BindingEngine {
   }
 
   async start(idRaw: unknown): Promise<OkResult> {
-    return startInstance(this.runtime, idRaw)
+    const result = await startInstance(this.runtime, idRaw)
+    this.syncRouter()
+    return result
   }
 
   async bindingStop(idRaw: unknown): Promise<OkResult> {
@@ -158,7 +182,9 @@ export class BindingEngine {
   }
 
   async stop(idRaw: unknown): Promise<OkResult> {
-    return stopInstance(this.runtime, idRaw)
+    const result = await stopInstance(this.runtime, idRaw)
+    this.syncRouter()
+    return result
   }
 
   bindingUpdate(idRaw: unknown, valuesRaw: unknown): OkResult {
@@ -170,7 +196,9 @@ export class BindingEngine {
    * carrier are refused: see `edit.ts`.
    */
   update(idRaw: unknown, valuesRaw: unknown): OkResult {
-    return updateInstance(this.runtime, idRaw, valuesRaw)
+    const result = updateInstance(this.runtime, idRaw, valuesRaw)
+    this.syncRouter()
+    return result
   }
 
   async bindingDelete(idRaw: unknown): Promise<OkResult> {
@@ -178,7 +206,13 @@ export class BindingEngine {
   }
 
   async delete(idRaw: unknown): Promise<OkResult> {
-    return deleteInstance(this.runtime, idRaw)
+    const result = await deleteInstance(this.runtime, idRaw)
+    // The sync is what takes the section away, and taking the section away is
+    // what makes `apk`-level and app-level removal the same act: it flushes the
+    // instance's rules first, because once the section is gone the daemon has
+    // no instance for that priority range and will never look at it again.
+    this.syncRouter()
+    return result
   }
 
   async bindingUnassign(idOrKeys: unknown, macRaw?: unknown): Promise<OkResult> {

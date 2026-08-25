@@ -8,10 +8,101 @@
  * in `readiness.ts`) is what makes every branch of the verdict - including the
  * ones only a broken router reaches - testable without a router.
  */
+import { DEFAULT_RULES } from '../config'
 import type { PackageGroupKey } from '../packages'
 
 /** The vocabulary the `statusCards` block tints its rows and chips with. */
 export type ReadinessStatus = 'ok' | 'warn' | 'bad' | 'unknown'
+
+/**
+ * Whether something that has to be *running* actually is.
+ *
+ * `unknown` is a state of its own rather than a pessimistic `stopped` because
+ * the answer comes from `pidof`, and a router without it would otherwise be
+ * told its dnsmasq is down - a refusal invented out of a missing BusyBox
+ * applet. Nothing may block on `unknown`; it is reported and moved past.
+ */
+export type ServiceState = 'running' | 'stopped' | 'unknown'
+
+/**
+ * An `ip rule` sitting below the preference this module starts writing at.
+ *
+ * The lowest preference wins, so one of these silently outranks every rule the
+ * binding engine installs - and the fast sweep cannot see it, because it filters
+ * `ip rule show` down to the managed window on the router before sending
+ * anything back. That is the whole failure mode: green everywhere, packets
+ * leaving by another WAN.
+ */
+export interface ForeignRule {
+  pref: number
+  /** The rest of the line as the router printed it, trimmed and capped. */
+  text: string
+}
+
+/**
+ * The range of agent API versions this module knows how to drive.
+ *
+ * Declared here rather than in `agent/` because the probe has to judge an
+ * answer the moment it reads one, and `agent/` reads the verdict rather than
+ * the other way round - the import has to point one way or the folders cannot
+ * be split at all.
+ *
+ * An agent outside this range is never an error. Older means the module drives
+ * what it can and does the rest over SSH; newer means the agent is from a
+ * release this module has not met, and falling back is the only honest answer -
+ * an app from last month must not stop a router from working because somebody
+ * updated its packages.
+ */
+export const AGENT_API = { min: 1, max: 3 } as const
+
+/** Which agent calls exist, by the version that introduced them. */
+export const AGENT_API_GUARD = 2
+export const AGENT_API_UPDATE = 3
+
+/** The commit-confirm countdown, as the agent reports it. */
+export interface AgentGuard {
+  armed: boolean
+  snapshot: string
+  reason: string
+  /** Seconds left; negative once it is overdue and restoring. */
+  remaining: number
+}
+
+/**
+ * What `ubus call bm.agent info` said, or what `bmctl info --json` said when
+ * the service is installed but not running.
+ *
+ * `installed` and `running` are separate for the reason they always are here: a
+ * package that is present with its service stopped is a different problem with
+ * a different fix from a package that was never installed, and one field cannot
+ * say both.
+ */
+export interface AgentFacts {
+  installed: boolean
+  running: boolean
+  release: string
+  apiVersion: number
+  /** The schema the installed build understands. */
+  schema: number
+  /** What is actually written on the disk; null on a router with no data yet. */
+  dataSchema: number | null
+  /** Capability names the installed feature packages claim. */
+  provides: string[]
+  guard: AgentGuard | null
+}
+
+/**
+ * The facts plus the judgement: whether this module will drive that agent, and
+ * which of its calls exist.
+ */
+export interface AgentCapability extends AgentFacts {
+  /** The module talks to it. False means every path falls back to SSH. */
+  usable: boolean
+  /** Why the module is not using it, in a sentence. Null when it is. */
+  problem: string | null
+  canGuard: boolean
+  canUpdate: boolean
+}
 
 /**
  * What the surfaces show instead of deciding for themselves from `problem`.
@@ -86,6 +177,28 @@ export interface OpenWrtCapabilities {
   hasDnsmasq: boolean
   /** `ip rule` actually ran. BusyBox `ip` on some targets has no rule support. */
   hasIpRule: boolean
+  /**
+   * The three things a binary in PATH says nothing about. An installed dnsmasq
+   * with a stopped service is the case that used to read as `hasDnsmasq: true`
+   * and then show an empty device table with no reason given.
+   */
+  services: { dnsmasq: ServiceState; netifd: ServiceState; fw4: ServiceState }
+  /** Rules that outrank this module's, most important first; capped. */
+  foreignRules: ForeignRule[]
+  /** How many there were in total, which may exceed what `foreignRules` holds. */
+  foreignRuleCount: number
+  /** Whether the competing-rule scan ran at all, as opposed to finding none. */
+  foreignRulesRead: boolean
+  /** mwan3 on this router. It writes rules far below anything managed here. */
+  mwan3: { config: boolean; running: boolean }
+  /** What "below the managed window" meant when this verdict was reached. */
+  rulePrefBase: number
+  /**
+   * The router-side agent. Always present, `installed: false` when there is
+   * none - a surface asking "is there an agent" must not have to tell an absent
+   * object from an object saying no.
+   */
+  agent: AgentCapability
   /** -1 when `id -u` said nothing. */
   uid: number
   isRoot: boolean
@@ -109,6 +222,14 @@ export interface OpenWrtCapabilities {
   missingPackages: MissingPackage[]
   /** Something is missing that this module knows how to install from here. */
   setupNeeded: boolean
+  /**
+   * Whether an install could run at all: a working router, with apk, logged
+   * in as root. `setupNeeded` is this plus "and something is missing", and
+   * folding the two together left the install form unreachable on a router
+   * where nothing is missing - which is exactly the router somebody wants to
+   * reinstall a group on.
+   */
+  canInstall: boolean
 }
 
 /** The raw answers one probe produced, before any judgement is made about them. */
@@ -131,8 +252,43 @@ export interface ProbeFacts {
   /** -1 when unknown. */
   overlayFreeKb: number
   hasIpRule: boolean
+  services: { dnsmasq: ServiceState; netifd: ServiceState; fw4: ServiceState }
+  /** Already filtered to below `rulePrefBase` and capped by the router. */
+  foreignRules: readonly ForeignRule[]
+  /** What the router counted before the cap was applied. */
+  foreignRuleCount: number
+  /**
+   * Whether the scan ran at all, as opposed to finding nothing. Its own fact
+   * rather than something read off `hasIpRule`: that now means numeric routing
+   * tables, which BusyBox's `ip` refuses while still listing rules fine.
+   */
+  foreignRulesRead: boolean
+  mwan3: { config: boolean; running: boolean }
+  /** Exactly what the agent answered, before any judgement about it. */
+  agent: AgentFacts
+  /**
+   * The preference this module starts writing assignment rules at, carried in
+   * as a fact so the verdict can name it without reading the configuration.
+   * That is what keeps `buildReadiness` a pure function of its argument, which
+   * is the only reason every branch of it is reachable from a test.
+   */
+  rulePrefBase: number
   /** Why nothing usable came back. Only ever read when `probed` is false. */
   transportError: string
+}
+
+/** No agent, said in the shape a reader expects rather than as a null. */
+export function emptyAgentFacts(): AgentFacts {
+  return {
+    installed: false,
+    running: false,
+    release: '',
+    apiVersion: 0,
+    schema: 0,
+    dataSchema: null,
+    provides: [],
+    guard: null
+  }
 }
 
 export function emptyFacts(): ProbeFacts {
@@ -148,6 +304,13 @@ export function emptyFacts(): ProbeFacts {
     uid: -1,
     overlayFreeKb: -1,
     hasIpRule: false,
+    services: { dnsmasq: 'unknown', netifd: 'unknown', fw4: 'unknown' },
+    foreignRules: [],
+    foreignRuleCount: 0,
+    foreignRulesRead: false,
+    mwan3: { config: false, running: false },
+    agent: emptyAgentFacts(),
+    rulePrefBase: DEFAULT_RULES.rulePrefBase,
     transportError: ''
   }
 }

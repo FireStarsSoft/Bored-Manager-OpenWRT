@@ -1,0 +1,38 @@
+#!/bin/sh /etc/rc.common
+
+# The commit-confirm timer, as a service of its own rather than a thread inside
+# bm-agent. That separation is the whole safety property: the thing that puts a
+# change back must not be able to be stopped by the change. An agent that hangs
+# applying something, or that is killed by the very `ip rule` it just wrote,
+# leaves this running.
+#
+# Enabled at boot, and it starts nothing unless a guard record exists - so a
+# router that reboots part way through a guarded change comes up, sees the
+# record, and expires it immediately. Which is correct: a router that rebooted
+# mid-change was never confirmed.
+#
+# START is after bm-agent because expiring calls bmctl, and after the network so
+# that a restore has interfaces to reload.
+START=96
+STOP=09
+
+USE_PROCD=1
+
+GUARD="/etc/bm/state/guard.json"
+
+start_service() {
+	# No record, no timer. `bmctl config guard` writes the record and then calls
+	# `start`, in that order, precisely so that this check is the one that
+	# decides.
+	[ -f "$GUARD" ] || return 0
+
+	procd_open_instance bm-guard
+	procd_set_param command /bin/sh /usr/share/bm/guard-timer.sh
+	# Five retries, five seconds apart, and then procd gives up. Retrying at all
+	# is what stops a killed timer from silently disarming the guard; giving up
+	# is what stops a resolved guard - where the script exits 0 straight away -
+	# from becoming a process procd restarts for ever.
+	procd_set_param respawn 3600 5 5
+	procd_set_param stderr 1
+	procd_close_instance
+}

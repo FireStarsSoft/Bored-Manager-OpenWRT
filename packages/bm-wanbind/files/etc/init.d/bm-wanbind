@@ -1,0 +1,83 @@
+#!/bin/sh /etc/rc.common
+
+# After the network, and after bm-agent.
+#
+# The daemon asks netifd which interfaces exist and which routing table each one
+# owns, so starting before netifd has answered would mean a first pass that
+# found no WANs - harmless, because the next pass thirty seconds later finds
+# them, but a router that binds nobody for half a minute after every reboot is
+# not what anybody wants to watch.
+#
+# Stopped early, and before bm-agent, so that a shutdown does not leave the
+# agent answering questions about a binder that has already gone.
+START=97
+STOP=11
+
+USE_PROCD=1
+
+DAEMON="/usr/share/bm/wanbindd.uc"
+
+start_service() {
+	# The schema gate, here rather than only inside the daemon.
+	#
+	# The daemon refuses to run against data written by a newer release and
+	# exits saying so. That refusal is correct, but procd does not look at the
+	# exit status - the third respawn field is a retry limit and it is 0, which
+	# means unlimited - so an instance registered here is restarted every five
+	# seconds forever, and the one line that explains why fills the log instead
+	# of standing in it.
+	#
+	# `bmctl schema` is the same check the daemon makes, run before anything is
+	# registered. A router in that state then has no instance to respawn, one
+	# line in the log, and a service that starts normally as soon as the right
+	# release is back.
+	if ! /usr/sbin/bmctl schema >/dev/null 2>&1; then
+		logger -t bm-wanbind -p daemon.err "the data on disk is written at a schema this build does not understand; not starting - run 'bmctl schema' to see why"
+		return 0
+	fi
+
+	procd_open_instance bm-wanbind
+	# Raw script, strict mode, said out loud rather than left to a shebang.
+	procd_set_param command /usr/bin/ucode -R -S "$DAEMON"
+	# Unlimited restarts, five seconds apart. This process owns every client's
+	# route; a crash that stops being retried is a router whose rules nobody is
+	# maintaining and whose catch-all is still blocking everyone it never got
+	# round to binding.
+	procd_set_param respawn 3600 5 0
+	# procd forwards stderr to syslog, which is where every notice() below ends
+	# up - `logread -e bm-agent` is the whole filter, the same as everything else
+	# in this project.
+	procd_set_param stderr 1
+	# procd restarts the instance when this file's contents change, which is how
+	# an edit to an instance takes effect. It is also why nothing in the daemon
+	# re-reads the configuration: there is no half-reloaded state to get wrong.
+	procd_set_param file /etc/config/bm_wanbind
+	procd_close_instance
+}
+
+# Everything comes off when the service stops. All of it, including the
+# catch-all.
+#
+# `service_stopped` rather than `stop_service`, because rc.common runs the first
+# after `procd_kill` and the second before it - and flushing while the daemon is
+# still alive is a race with its own reconcile pass putting the rules back.
+#
+# Removing the catch-all as well is a deliberate difference from stopping one
+# *instance* from the app, which leaves it in place so that nobody silently
+# starts sharing a line. Stopping the *service* is a different act: it happens
+# during an update and during an uninstall, and a router whose whole LAN is
+# pointed at an unreachable table with nothing left to maintain it is a total
+# outage that nothing on the router can explain. Falling back to the router's
+# ordinary routing for the second or two a restart takes is the softer failure,
+# and the first thing `start` does is a full pass that puts it all back.
+#
+# `bmwan flush` is a separate process that reads the configuration and the
+# router rather than asking the daemon, so this works whether or not the daemon
+# was still answering when it was killed.
+service_stopped() {
+	/usr/sbin/bmwan flush >/dev/null 2>&1 || true
+}
+
+service_triggers() {
+	procd_add_reload_trigger "bm_wanbind"
+}

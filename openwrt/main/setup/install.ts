@@ -17,7 +17,7 @@ import { shQuote, splitSections } from '@shared/shell'
 import type { OkResult } from '@shared/types'
 import type { JobItemSpec, OpenWrtJob } from '../jobs'
 import { isInstallablePackage, packageGroup, type PackageGroup } from '../packages'
-import { freeKbFromDf } from '../probe'
+import { SPACE_BAD_KB, freeKbFromDf } from '../probe'
 import { asRecord, type SetupRuntime } from './runtime'
 
 const CHECK_TIMEOUT_MS = 15_000
@@ -50,6 +50,32 @@ export function installCommand(name: string): string {
   // is what makes that guarantee local to this line instead of something a
   // reader has to go and verify two files away.
   return `apk add ${shQuote(name)}`
+}
+
+/**
+ * The same install, forced onto a package apk already believes it has.
+ *
+ * `--force-reinstall` is OpenWRT's own patch to apk-tools
+ * (`package/system/apk/patches/0100-add-add-force-reinstall-option.patch`),
+ * and it is the verb repair mode needed: without it `apk add` on an installed
+ * package is a no-op, so "reinstall" restored a package that had gone missing
+ * and did nothing at all for one whose files had been damaged.
+ *
+ * It landed in v25.12.3, so a router on 25.12.0 to .2 does not have it. That is
+ * not decided from the release string - a snapshot build calls itself
+ * `SNAPSHOT` and this module never gates on version text - but by running it
+ * and reading what apk says, which is the same way every other question here is
+ * answered.
+ */
+export function reinstallCommand(name: string): string {
+  return `apk add --force-reinstall ${shQuote(name)}`
+}
+
+/** apk on a release older than the `--force-reinstall` patch. */
+const NO_SUCH_OPTION = /unrecogni[sz]ed option|invalid option|unknown option|unknown argument/i
+
+export function rejectedTheOption(result: ModuleExecResult): boolean {
+  return result.code !== 0 && NO_SUCH_OPTION.test(allOutput(result))
 }
 
 /** LuCI's Software page takes the apk database lock and holds it while open. */
@@ -208,11 +234,55 @@ export function applySetup(runtime: SetupRuntime, raw: unknown): OkResult {
       }
     }
   ]
-  for (const name of plan.packages) {
+  plan.packages.forEach((name, index) => {
     items.push({
-      name: `Install ${name}`,
+      name: `${plan.repair ? 'Run the install again for' : 'Install'} ${name}`,
       run: async (cancelled) => {
         if (cancelled()) return
+        // Read again, per package. The gate in `plan.ts` measured the overlay
+        // once, before a single byte had been written, and a three-package
+        // group on a router with a few megabytes free can run it out half way
+        // through - which apk reports as a failed install of whatever happened
+        // to be next, on a router that is now also full. The first package is
+        // exempt: nothing has been written since the check, and a second `df`
+        // over SSH for a reading taken seconds ago buys nothing.
+        if (index > 0) {
+          const room = await preflight(runtime)
+          if (room.freeKb >= 0 && room.freeKb < SPACE_BAD_KB) {
+            throw new Error(
+              `stopped before installing ${name}: only ${room.freeKb} KB left on the overlay. Free some space and run this again - what has been installed so far stays.`
+            )
+          }
+        }
+        if (plan.repair) {
+          // Forced first, because that is what "install it again" has to mean
+          // for a package apk already lists. A router older than v25.12.3 has
+          // no such option and says so, and the plain command below is then the
+          // whole of what this router can do - which the warning names, rather
+          // than letting a step report success for having changed nothing.
+          const forced = await runPackageCommand(
+            runtime,
+            reinstallCommand(name),
+            INSTALL_TIMEOUT_MS,
+            cancelled
+          )
+          if (forced.code === 0) return
+          if (!rejectedTheOption(forced)) {
+            throw new Error(`${name} failed to install: ${packageFailure(forced)}`)
+          }
+          const plain = await runPackageCommand(
+            runtime,
+            installCommand(name),
+            INSTALL_TIMEOUT_MS,
+            cancelled
+          )
+          if (plain.code !== 0) {
+            throw new Error(`${name} failed to install: ${packageFailure(plain)}`)
+          }
+          return {
+            warning: `this router's apk has no --force-reinstall (it arrived in OpenWrt 25.12.3), so ${name} was only reinstalled if it had gone missing`
+          }
+        }
         const result = await runPackageCommand(
           runtime,
           installCommand(name),
@@ -224,7 +294,7 @@ export function applySetup(runtime: SetupRuntime, raw: unknown): OkResult {
         }
       }
     })
-  }
+  })
   items.push({
     name: 'Verify what the router can do now',
     run: async () => {
@@ -247,13 +317,15 @@ export function applySetup(runtime: SetupRuntime, raw: unknown): OkResult {
   try {
     job = runtime.deps.jobs.start({
       kind: 'openwrt-setup',
-      label: `Install ${plan.packages.length} package(s) with ${plan.manager}`,
+      label: `${plan.repair ? 'Reinstall' : 'Install'} ${plan.packages.length} package(s) with ${plan.manager}`,
       items,
       onError: 'abort',
       onFinished: async (finished) => {
         runtime.deps.event(
           'packages-install',
-          `Package install ${finished.state}: ${plan.packages.join(', ')} via ${plan.manager}`
+          `Package ${plan.repair ? 'reinstall' : 'install'} ${finished.state}: ${plan.packages.join(
+            ', '
+          )} via ${plan.manager}`
         )
         // A job that aborted never reached its verify step, so the readiness
         // checklist would otherwise still be showing what was true before.

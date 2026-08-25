@@ -27,6 +27,7 @@ import {
   vlanSectionName,
   waitCancelable
 } from '../uci'
+import { hasFeature, poolDelete, routerPoolId } from '../agent'
 import { recordLayout } from '../records'
 import { carrierScopesOverlap } from '../util'
 import { inspectNetworkDevices } from './inspect'
@@ -93,7 +94,50 @@ export function batchDelete(runtime: PppoeRuntime, idRaw: unknown): OkResult {
   const present = new Set<string>()
   let zonePresent = false
 
-  const items: JobSpec['items'] = [{
+  const items: JobSpec['items'] = []
+
+  /**
+   * If the router created this pool, the router forgets it - first.
+   *
+   * `bm-pppoe-pool` keeps a `config pool` record in `/etc/config/bm_pppoe`
+   * naming the sequence range it owns, and that record is what makes "delete
+   * this pool" mean something more precise than "delete every PPPoE interface
+   * on the router". Removing the sections without it would leave `bmpppoe
+   * status` reporting a pool whose interfaces are gone.
+   *
+   * The rest of the delete still runs afterwards and is unchanged. It has to:
+   * the firewall zone membership and the VLAN devices are this module's, not
+   * the package's, and `uci delete` on a section that is already gone is a
+   * case this path has always tolerated - a create that failed part way
+   * produces exactly that.
+   *
+   * Not fatal. A router that will not answer leaves a stale record in
+   * `bm_pppoe`, which `bmpppoe status` shows and `bmpppoe delete` removes; a
+   * delete that stopped here would leave the sections themselves behind, which
+   * is much worse.
+   */
+  const capability = runtime.agent?.()
+  if (capability && hasFeature(capability, 'pppoe')) {
+    items.push({
+      name: 'Ask the router to release the pool',
+      run: async () => {
+        const result = await poolDelete(
+          { ctx: runtime.ctx, capability: () => capability },
+          routerPoolId(id)
+        )
+        forceDump(runtime)
+        if (!result.ok) {
+          return {
+            warning: `the router did not release its record of this pool: ${
+              result.error ?? 'no reason given'
+            }`
+          }
+        }
+      }
+    })
+  }
+
+  items.push({
     name: 'Inspect batch VLAN devices',
     run: async () => {
       const inventory = await inspectNetworkDevices(runtime, timeoutMs(rules))
@@ -110,7 +154,7 @@ export function batchDelete(runtime: PppoeRuntime, idRaw: unknown): OkResult {
         return `${names.length - present.size} of ${names.length} interfaces are already gone`
       }
     }
-  }]
+  })
   for (const [index, wave] of waves.entries()) {
     items.push({
       name: `Stop batch wave ${index + 1}/${waves.length}`,
@@ -188,6 +232,24 @@ export function batchDelete(runtime: PppoeRuntime, idRaw: unknown): OkResult {
       const remaining = runtime.store.read().batches.filter((entry) => entry.id !== id)
       firewallMutated = true
       await runFirewall(runtime, async () => {
+        // A binding instance forwards into this zone too, and its forwardings
+        // are not this path's to remove.
+        //
+        // `installFirewallForwardings` commits `bmf<slot>_<n>` sections whose
+        // `dest` is this zone, and fw4 refuses to load a forwarding whose
+        // destination zone does not exist - it stops on the whole ruleset, not
+        // on the one section. So deleting the zone here because the last batch
+        // went away left a router whose firewall would not load at all, on the
+        // next reload and on every boot after it, for a reason nothing on
+        // either page mentions.
+        //
+        // The zone stays while anything still points at it. It is rebuilt from
+        // the records on the next create, and the binding teardown removes its
+        // own forwardings, so the last one out still takes it with them.
+        const boundInstances = runtime.service.bindingCarriers?.().length ?? 0
+        if (!remaining.length && boundInstances > 0) {
+          return
+        }
         if (!remaining.length) {
           // Nothing is left for the zone to hold. Rebuilding it here left every
           // router this module had finished with carrying an empty zone that

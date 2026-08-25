@@ -8,6 +8,7 @@
  * the two in step when the job stops half-way.
  */
 import type { OkResult } from '@shared/types'
+import { hasFeature, poolCreate, routerPoolId } from '../agent'
 import { managedLayout, type PppoeBatchRecord } from '../records'
 import type { JobSpec, OpenWrtJob } from '../jobs'
 import {
@@ -137,6 +138,22 @@ export async function applyPppoe(runtime: PppoeRuntime, raw: unknown): Promise<O
     })
   }
 
+  /**
+   * Which half writes the sections.
+   *
+   * Read once, here, rather than per chunk: a create is one operation and it
+   * must not write half its pool through one path and half through the other.
+   *
+   * Unlike binding, this is not a boundary that has to hold - there is nothing
+   * for two writers to fight over, because netifd owns the sections whichever
+   * half wrote them. It is a choice about cost and about credentials, so a
+   * router whose agent fails mid-create simply fails the job, and running it
+   * again on a router without the package writes the same sections the slow
+   * way.
+   */
+  const capability = runtime.agent?.()
+  const routerWrites = capability !== undefined && hasFeature(capability, 'pppoe')
+
   const jobItems: JobSpec['items'] = []
   jobItems.push({
     /**
@@ -179,7 +196,52 @@ export async function applyPppoe(runtime: PppoeRuntime, raw: unknown): Promise<O
    * router, which delete tolerates, rather than miss sections that did.
    */
   const ownsStore = (): boolean => managerGeneration === runtime.generation
-  jobItems.push(...chunks.map((chunk, index): JobSpec['items'][number] => ({
+
+  if (routerWrites && capability) {
+    jobItems.push({
+      name: `Create ${plan.rows.length} PPPoE interfaces on the router`,
+      run: async () => {
+        const result = await poolCreate(
+          { ctx: runtime.ctx, capability: () => capability },
+          {
+            id: routerPoolId(id),
+            prefix: plan.prefix,
+            carrier: plan.carrier,
+            seqFrom: plan.seqFrom,
+            tableBase: rules.tableBase,
+            ...(plan.vlan === undefined ? {} : { vlan: plan.vlan })
+          },
+          // The one place in this module where a password is held in a variable
+          // longer than a line. It goes from here into a 0600 file on the
+          // router and nowhere else: not into the record, not into an event,
+          // not into the job label, and not onto any command line on either
+          // side of the connection.
+          plan.rows.map((row) => ({
+            user: row.user,
+            pass: row.pass,
+            ...(row.vlan === undefined ? {} : { vlan: row.vlan })
+          }))
+        )
+
+        if (!result.ok) {
+          throw new Error(result.error ?? 'the router refused to create the pool')
+        }
+
+        // Every chunk, in one step. The record already covers the whole range,
+        // so `shrinkToCommitted` has nothing to shrink - which is correct: the
+        // router wrote all of them or none.
+        for (let index = 0; index < chunks.length; index++) committed.add(index)
+        forceDump(runtime)
+      }
+    })
+  }
+
+  // The chunked path, unchanged and still the one most routers take. It is not
+  // a fallback for the step above failing - a create either goes one way or the
+  // other - it is what a router without the package does, which is every router
+  // until somebody installs it.
+  if (!routerWrites) {
+    jobItems.push(...chunks.map((chunk, index): JobSpec['items'][number] => ({
     name: `Apply PPPoE chunk ${chunk.index}/${chunk.total} (${chunk.seqFrom}-${chunk.seqTo})`,
     run: async (cancelled) => {
       try {
@@ -214,7 +276,9 @@ export async function applyPppoe(runtime: PppoeRuntime, raw: unknown): Promise<O
         }
       }
     }
-  })))
+    })))
+  }
+
   jobItems.push({
     /**
      * Now that the interfaces exist: add them to the zone in `networks` mode,

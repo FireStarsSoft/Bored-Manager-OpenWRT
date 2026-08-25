@@ -1,0 +1,49 @@
+#!/bin/sh
+# A lease changed. Tell the daemon, and get out of the way.
+#
+# This is the whole reason binding is worth doing on the router. dnsmasq calls
+# /usr/lib/dnsmasq/dhcp-script.sh on every lease, that forwards it to
+# `ubus call hotplug.dhcp`, and procd sources every file in this directory - so
+# the rule for a new client is written while it is still finishing its DHCP
+# exchange, rather than at whatever poll happens next.
+#
+# Its mere presence is also the switch. dnsmasq's init script adds
+# `--dhcp-script` when *any* file exists in /etc/hotplug.d/dhcp/ (`has_handler`
+# in dnsmasq.init), so this package needs no `option dhcpscript` - which is just
+# as well, because only one package on a router can hold that.
+#
+# Sourced, not executed: hotplug-call runs `. $script` inside a subshell. So
+# there is no argv here, only the environment, and `exit` ends the subshell
+# rather than anything that matters.
+#
+# Deliberately tiny. It runs once per lease on a router that may have thousands
+# of them, and every decision it could make is one the daemon can make better
+# with the state it already holds.
+
+case "$ACTION" in
+	add|update|remove) ;;
+	*) exit 0 ;;
+esac
+
+# No MAC, nothing to bind. dnsmasq sets this for add, update and remove alike.
+[ -n "$MACADDR" ] || exit 0
+
+# jshn rather than a hand-built JSON string, because HOSTNAME is whatever the
+# client said its name was. A client that calls itself `","x":"` would otherwise
+# be writing the message this sends, and a DHCP client is not somebody to let
+# compose ubus calls.
+. /usr/share/libubox/jshn.sh
+
+json_init
+json_add_string action "$ACTION"
+json_add_string mac "$MACADDR"
+json_add_string ip "$IPADDR"
+json_add_string host "$HOSTNAME"
+
+# Two seconds, and failure is not reported. The daemon may be stopped, mid
+# restart, or simply not interested in this LAN - none of which is this script's
+# business, and all of which the thirty-second reconcile pass picks up anyway.
+# What must not happen is dnsmasq's lease handling blocking on us.
+ubus -t 2 call bm.wanbind lease "$(json_dump)" >/dev/null 2>&1
+
+exit 0

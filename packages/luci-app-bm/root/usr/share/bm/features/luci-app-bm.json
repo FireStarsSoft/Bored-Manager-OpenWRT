@@ -1,0 +1,8 @@
+{
+	"name": "luci-app-bm",
+	"version": "1.4.0",
+	"ubus": "",
+	"apiVersion": 1,
+	"provides": [ "luci" ],
+	"description": "The Bored Manager pages, served by the router itself"
+}

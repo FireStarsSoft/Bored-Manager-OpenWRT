@@ -83,8 +83,8 @@ Modules**, by any of:
 
 It needs Bored Manager **0.4.1** or newer - as well as OpenWrt **25.12.0** or
 newer on the router, above - and installs switched off; enable it in the same
-place. (The 1.0.x line runs on 0.3.3; 2.0.0 uses page blocks that only 0.4.1
-has, so an older app refuses it rather than rendering it empty.)
+place. (The 1.0.x line runs on 0.3.3; the 2.x line uses page blocks that only
+0.4.1 has, so an older app refuses it rather than rendering it empty.)
 Source, issues and changelog live in
 [FireStarsSoft/Bored-Manager-OpenWRT](https://github.com/FireStarsSoft/Bored-Manager-OpenWRT).
 
@@ -114,17 +114,53 @@ checks behind it and what a missing one costs. It fills in from a single probe
 that also reads which package manager the router has, whether the login is root,
 and how much room `/overlay` has left.
 
-**Install missing packages** sits underneath it. It carries a checkbox per group
-while there is something installable, and otherwise says which of the reasons
-applies rather than showing an empty form. Check reports what is genuinely
-absent, re-reads free space (a warning under 2 MiB, a refusal under 512 KiB) and
-warns if the router has no default route to fetch from. Apply runs a job:
-refresh the package index, then one install per package as its own cancellable
-step, then a re-probe - which fails the job if the capability is still missing
-afterwards, rather than reporting a success the router does not agree with. That
-re-probe is also what puts the new capability into force: the readiness cards go
-green and the create forms that were refusing stop refusing. There is no
-reconnect step, and nothing has to be switched off and on again.
+The probe asks three kinds of question, and the difference between them matters.
+A **binary in PATH** is not a working feature - BusyBox `ip` has no `rule`, and
+an apk router keeps an `opkg` shim that installs nothing - so wherever it can,
+the probe runs the thing instead of looking for it. A binary that is present is
+also not a **running service**: dnsmasq stopped still answers `command -v`, and
+the only symptom used to be a device table that emptied out under the words "No
+active DHCP leases". And a router can have everything and still not do what this
+module tells it, which is what *Competing policy routing* is about, below.
+
+Where a question could not be asked, the answer is `unknown` rather than "no".
+A router without `pidof` cannot say whether dnsmasq is running, and nothing here
+is allowed to turn that into a refusal: an invented fault is worse than a
+missing one.
+
+**Install missing packages** sits underneath it, on any router where an install
+could run at all - a working router, with apk, logged in as root - and otherwise
+says which of those is in the way rather than showing an empty form. Check
+reports what is genuinely absent, re-reads free space (a warning under 2 MiB, a
+refusal under 512 KiB) and warns if the router has no default route to fetch
+from. Apply runs a job: refresh the package index, then one install per package
+as its own cancellable step, then a re-probe - which fails the job if the
+capability is still missing afterwards, rather than reporting a success the
+router does not agree with. That re-probe is also what puts the new capability
+into force: the readiness cards go green and the create forms that were refusing
+stop refusing. There is no reconnect step, and nothing has to be switched off
+and on again.
+
+Free space is read again **between packages**, not only at the check. A group of
+three on a router with a few megabytes spare can run the overlay out on the
+second one, and apk then reports that as a failed install on a router which is
+now also full; the job stops before the command instead, names the package it
+did not start, and says that what is already installed stays installed.
+
+**Run the install again** is the last checkbox on the form. Off - the default -
+a group the router already reports is skipped, and a form with nothing missing
+is refused. On, every ticked group is installed again with the same `apk add`.
+The report says plainly what that does and does not do: it puts back a package
+that has gone missing, it leaves alone anything apk still considers installed,
+and the verify step at the end says which of the two it was. That is narrower
+than "repair" sounds, and it is deliberately worded that way - but it is more
+than this page had before, which was *"Everything selected is already
+installed"* and no path at all.
+
+The same install form appears a second time, on the Automation page's **Create**
+tab, whenever something the two forms below it depend on is missing. It is the
+same check, the same job and the same allowlist; putting it there is only about
+not answering "this needs ip-full" with directions to another page.
 
 Installing needs root, and the only package manager is `apk`: a router still on
 opkg is blocked well before this section, for the reasons under *Requirements*,
@@ -147,6 +183,63 @@ reach an install command line - no value typed into a form is ever part of one.
 A router that is not ready is re-checked every 30 seconds, but only while a page
 that shows readiness is open.
 
+### Competing policy routing
+
+WAN Binding works entirely by `ip rule`, and the **lowest preference wins**. The
+fast sweep filters `ip rule show` down to this module's own window on the router
+before sending anything back - which is what keeps the sweep small on a router
+with a thousand bound clients, and also means a rule *below* that window steers
+every packet while appearing nowhere in this module at all. Bindings read as
+applied, the dashboard is green, and the traffic leaves by another WAN.
+
+So the probe asks for exactly those rules, filtered and counted on the router,
+and reports them on the Firewall & routing card. mwan3 is named separately
+because it is the common case by a wide margin: `/etc/config/mwan3` is the
+durable evidence and a running `mwan3track` the live one, and somebody with both
+installed wants to be told which one is deciding rather than shown a list of
+preferences to interpret.
+
+It is a **warning, never a refusal**, on the card and on the WAN Binding check
+report alike. A router with deliberate policy routing of its own is a router
+somebody set up that way, and this module has no business overruling it. What it
+does have business doing is saying so before an apply.
+
+### What each control needs before it will run
+
+Every method the pages can call is listed in `main/requirements.ts`, and
+`runtime/handlers.ts` routes all thirty-four through the one gate that reads it.
+Before that, the requirements were two hand-written `if` chains inside the two
+create handlers: `pppoeBatchApply` would apply a plan the check had refused, and
+`bindingStart` on an instance created months ago never asked again whether
+`ip rule` still worked - a router that had lost `ip-full` answered a start with
+whatever BusyBox prints for a subcommand that does not exist.
+
+| Control | Needs |
+|---|---|
+| Every table, list and chip - `deviceRows`, `pppoeBatches`, `pppoeRows`, `bindingRows`, `eventRows`, `rulesEffective` | nothing. A table that refuses to render is strictly worse than an empty one that says why |
+| Check now / refresh (`sweepNow`), the hints toggle | nothing. It is the only way out of a stale verdict, so nothing derived from that verdict may block it |
+| Install missing packages (`setupCheck`, `setupApply`) | nothing. Gating the installer on the packages it exists to install is a loop with no way out; it does its own checking |
+| Create a PPPoE batch (`pppoeBatchCheck`, `pppoeBatchApply`) | PPPoE support - Firewall4 present - its ruleset loaded - netifd running |
+| Start / stop / redial a session (`pppoeBatchAction`, `pppoeConnAction`) | PPPoE support |
+| Create a binding instance (`bindingCheck`, `bindingApply`) and Start (`bindingStart`) | Firewall4 present - its ruleset loaded - `ip rule` support - dnsmasq present - dnsmasq running - netifd running |
+| Unassign / Reassign / Pin (`bindingUnassign`, `bindingReassign`, `bindingPin`) | `ip rule` support |
+| Rename an instance (`bindingUpdate`), the Rules editor, job bookkeeping | nothing. None of them touches the router |
+| Router packages (`agentRows`, `agentInstallCheck`, `agentInstallApply`, `agentUninstallCheck`, `agentUninstallApply`) | nothing, for the same reason the installer needs nothing: these are the flows that put a router into the state everything else asks for. Each does its own checking, in far more detail than a capability flag could carry |
+| Stop and Delete (`bindingStop`, `bindingDelete`, `pppoeBatchDelete`) | nothing, deliberately. A pool on a router that has since lost ppp is exactly the pool somebody most wants to be able to delete |
+
+A requirement is worded in exactly one place, so the card, the create form and
+the row action cannot describe one router in three vocabularies. Where the fix
+is an install, the sentence is the same `installHint` the settings page uses;
+where it is a stopped service, it names the service and the command that starts
+it, and never offers to install a package that is already there.
+
+`npm run check` fails when the three lists disagree: a method declared in
+`module.json` with no entry in `requirements.ts`, an entry for a method the
+manifest does not declare, a handler registered with `ctx.handle` instead of
+through the gate, or a requirement key that does not exist. That is what makes
+"every future feature checks its requirements first" a property of the
+repository rather than a line in a document.
+
 ### What the pages show while the router is not ready
 
 The same verdict drives the Dashboard, the Automation page and the Overview
@@ -167,6 +260,111 @@ only the *interface list* is frozen - the rest of the sweep is still answering,
 the interface dump came back unreadable, and the interface table, the WAN tiles
 and every WAN state the automation reads are the last list that could be parsed.
 Both are better than stale numbers that look live.
+
+## The router-side packages
+
+Everything above is done over SSH, and always will work over SSH. But three
+things simply cannot be done from the far end of one, however good the code is:
+
+- **A change that cuts the connection cannot undo itself.** Once SSH is gone
+  there is nobody left to type the command that would put it back.
+- **Reconciling on an event costs nothing; polling for it costs a round trip.**
+  dnsmasq will call a script the moment a lease changes.
+- **A pool of thousands of sessions is a lot of shell**, one round trip per
+  chunk.
+
+So [`packages/`](../packages/README.md) builds a small agent that runs on the
+router, and Module settings has a **Router packages** section that installs,
+updates and removes it. A router without one is in **compatibility mode**: it
+works exactly as it always did, the Dashboard and Automation pages carry a
+banner saying so, and the readiness verdict is `attention` rather than `ready` -
+not because anything is broken, but because the difference is worth a banner
+rather than a sentence three pages deep.
+
+### Four sources, one execution path
+
+They differ in what they *trust*, not in what they install. Whatever route the
+files took, they end as a directory of checksummed archives on the router and a
+single `apk add --allow-untrusted`.
+
+| Source | Trusted because | Needs |
+|---|---|---|
+| The release this module was built against | the sha256 of each file is compiled into the module, so a replaced release cannot be substituted without replacing the module | the router can reach GitHub |
+| The latest release, fetched by the router | the release manifest is signed with `usign` and the agent has the public key | an agent already installed |
+| A `.apkbundle` from this machine | you chose the file | **nothing** - no internet on the router at all |
+| A path on the router | it is already on the router | you put it there |
+
+The bundle is base64 text rather than a binary archive, deliberately: the app's
+`file` input hands a module the file's *text*, and whether a binary survives
+that trip intact is not something to find out by shipping it. It also means the
+whole thing can be pasted into the box beside the picker, so the path does not
+depend on any particular browser behaviour.
+
+`apk upgrade` is as impossible to produce here as it is in the other install
+flow, and for the same reason.
+
+### The safety net
+
+Once an agent is installed, every job that changes the router's network
+configuration runs under the router's own commit-confirm guard: a snapshot and
+a countdown before, a confirm after. If the change takes the connection down,
+the confirm never arrives and the router restores itself - which is the one
+case nothing on this side could ever handle.
+
+The failure path needs no code, and that is the point of how it is wired: the
+confirm is the last item of the job, jobs abort at the first failed item, so a
+failure means nobody confirms. Nothing has to detect anything.
+
+The guard is added by wrapping the `jobs` object each domain is handed, so
+PPPoE and binding build their work exactly as they always did and know nothing
+about it. A router with no agent, or one too old to have the call, is handed
+straight through with no extra steps at all.
+
+### Removing them
+
+Uninstall refuses while a binding instance is running or a PPPoE pool exists,
+and names what to stop first: removing the packages underneath one would leave
+its ip rules and its fail-closed catch-all on the router with nothing
+maintaining them. It takes a snapshot first, and offers to delete the
+configuration and saved state as well - **except the baseline snapshot**, which
+is never deleted whatever else is asked for, because it is the only way back to
+how the router looked before any of this touched it.
+
+Taking the `ip rule`s off and stopping the services is each package's own
+`prerm`, not the module's. `apk del bm-agent` typed at a router shell has to
+leave exactly the same router behind as pressing Remove here, and the only way
+to promise that is for the module to do nothing the shell would not.
+
+Not every package takes something back, and the difference is the point.
+`bm-wanbind`'s ip rules are meaningless without the daemon maintaining them, so
+leaving them behind would be worse than never having installed it - its `prerm`
+removes them. A PPPoE pool is not like that: the sections live in
+`/etc/config/network`, they are the user's own configuration, and netifd dials
+them whether or not anything is watching. Removing `bm-pppoe-pool` must not take
+somebody's five thousand sessions down with it, so it takes nothing at all.
+
+### Which half does the work
+
+Three states, and the readiness list names all three rather than folding the
+middle one into either end:
+
+| The router has | Binding and pools are | The safety net is |
+|---|---|---|
+| nothing | this module's, over SSH | not available |
+| `bm-agent` only | this module's, over SSH | there |
+| the feature packages too | the router's own | there |
+
+The middle row is the one that used to have no name. It is not compatibility
+mode - snapshots and the commit-confirm guard are working - and it is not fully
+set up either, and a person looking at a router that binds a little slowly than
+they expected deserves to be told which of the two they have.
+
+When the router is binding, this module plans nothing and writes no ip rule at
+all. That is not a preference, it is the only safe arrangement: two writers in
+one priority range is worse than either being wrong alone. So a ubus call that
+fails means rows one tick stale, never a fall back to writing - the fall back
+lives at the capability verdict, where "no package" and "a stopped service" and
+"an API version this module does not know" all mean the same thing.
 
 ## Automation 1: PPPoE Dialer
 
@@ -424,8 +622,12 @@ the previous FIFO order among waiting clients is not.
 
 ## Manual verification
 
-These checks need a real OpenWRT router. They are not covered by the unit suite,
-and items 1 to 6 are what 2.0.0 changed most.
+These checks need a real OpenWRT router. They are not covered by the unit suite;
+items 1 to 6 are what 2.0.0 changed most, 15 to 19 what 2.1.0 did, 25 to 29
+what 2.2.0 did, 30 to 37 what the router packages at 1.3.0 and module 2.3.0 did
+together, and 38 to 49 the LuCI app, the two-writer fixes and the standing
+promise that the router keeps every capability with no app attached, all in
+1.4.0 / 2.4.0.
 
 1. **The probe reads the router correctly.** At a router shell, `for t in ubus uci ip fw4 logread nft netifd pppd dnsmasq opkg apk; do command -v "$t"; done` and compare the result with the cards under Router readiness. Nothing present should be listed as missing. (`command -v ubus uci ip …` on one line is the 1.0.x form, and answers only the first name - that is the bug 2.0.0 fixes, so the two outputs disagreeing is the expected result.) Confirm too that `df -k /overlay` and `id -u` match what the Install readiness card reports.
 2. **A 24.10 router is refused, and refused in the right words.** Connect one. Both pages must show the blocked panel - "This router cannot be managed yet" on the Dashboard, "This router cannot be automated yet" on Automation - with the Problem row reading *"This module needs OpenWrt 25.12 or newer. This router runs 24.10.2 and still uses opkg."*, naming the release the router actually runs. Nothing is collected, and **Install missing packages** must offer no form at all, only the sentence saying why. A router with neither package database instead reads *"No apk package database on this router. This module needs OpenWrt 25.12 or newer, which replaced opkg with apk."* - the two are deliberately different, because "no package manager" on a working 24.10 router sends the user hunting for a broken installer instead of at a firmware upgrade.
@@ -440,7 +642,132 @@ and items 1 to 6 are what 2.0.0 changed most.
 11. **Soak.** Create 100, then 500, then 1,000 sessions from a text list. Record apply time, router CPU/RAM, and whether the dashboard stays smooth. Use the Low (5 s) fast interval above roughly 2,000 sessions. Open a batch drawer on the large pool and confirm the **Needs attention** tab is what loads first.
 12. **Binding scenarios.** A new DHCP client gets an `ip rule` within two fast ticks and exits through its assigned WAN; a WAN that stays failed remaps after the grace period; an extra client waits with DNS but no internet; a lease IP change keeps the same WAN; a missing lease releases the WAN after its grace; a router reboot reapplies rules and shows a router event; an app restart rebuilds assignments from the router. LAN and WAN interfaces outside the instance stay untouched. On a router whose LAN firewall zone is not named `lan`, the check should name the zone it found rather than assuming one. Remove `option ip4table` from one pooled WAN by hand and confirm the audit repairs it, and that repeating the removal three times ends with the module saying it has stopped trying rather than writing on every slow tick.
 13. **The UCI filters.** `uci -q show firewall | grep -E '=zone$|\.name=|\.network='`, `uci -q show network | grep -E '\.(ip4table|username)='`, and the `dhcp`, `network` and `firewall` filters in the binding preparation probe all return what the parsers expect under BusyBox grep, not GNU grep.
+15. **A stopped service is not a missing package.** `service dnsmasq stop`. The Extras card must turn amber and read *"Installed, but the service is not running"* with `service dnsmasq start`, **not** "Present" and **not** an offer to install dnsmasq - it is already there. The WAN Binding create form must refuse in the same words. Start it again and both go back to green without a reconnect. Repeat with `service firewall stop`: Firewall & routing turns amber and says no `inet fw4` table is loaded. Then `service network stop` on a router you can still reach - the Core card must show netifd installed but not running, and the page must move to `attention` rather than to the blocked panel.
+16. **A router with no `pidof`.** On a build without it, every service row must read *"This router has no pidof, so whether the service is running could not be checked"* and nothing may refuse. An answer nobody could obtain must never become a fault.
+17. **Competing policy routing.** Install and enable mwan3. The Firewall & routing card and the WAN Binding check must both warn, name mwan3, say that the lowest preference wins, and **still let the check through** - it is a warning, not a refusal. Then remove mwan3 and add a rule of your own below the module's base, e.g. `ip -4 rule add from 192.168.9.0/24 lookup 42 pref 100`: the warning must name the preference and the rule text, and the count must be the number of such rules on the router, not the number shown. Delete it and the row goes back to green.
+18. **The gate is one gate.** With `ip-full` removed from a router that has a binding instance, **Start** must be refused by name - "The ip command on this router has no rule support" plus where to install it - rather than failing somewhere inside a reconcile. Check a PPPoE batch on a healthy router, then remove `ppp` before pressing Apply: the apply must be refused, because a token is not permission for a router that has changed. **Stop**, **Delete** and the Rules editor must keep working throughout.
+19. **Running the install again, and running out of room.** On a router with all three groups present, a plain check is refused and names the checkbox; with **Run the install again** ticked it plans `apk add` for every ticked group and the report says what that does and does not fix. Confirm the commands are still only `apk update` and `apk add <name>`. Then fill `/overlay` to a few hundred KB free part-way through a three-package group: the job must stop **before** the next `apk add`, name the package it did not start, and say the earlier ones stay installed - not fail inside apk on a router that is now full.
+
 14. **Disable / uninstall.** With the module connected, switch it off and uninstall it. Pollers stop, `data/app.log` shows no leftover `openwrt:` execs, and UCI leftovers remain only if batches or binding instances were not deleted first.
+
+25. **Install the agent from a bundle, on a router with no internet.** Unplug the WAN. Module settings, Router packages, source "A `.apkbundle` from this machine": the check must unpack and checksum it on the router and say nothing has been installed yet; apply must install it and the readiness card must go green without a reconnect. Then edit one byte of the bundle and check again - it must refuse before `apk add` runs, naming the checksum, and take its half-unpacked directory away with it.
+26. **The compatibility banner is honest.** On a router with no agent, both the Dashboard and Automation must carry it and everything below it must still work: create a PPPoE batch and a binding instance, and confirm neither refuses. Then install the agent and confirm both banners go without anything being switched off and on again.
+27. **The safety net does its job.** With an agent installed, create a binding instance and watch `logread -e bm-agent`: a guard is armed before the write and confirmed after it. Then, mid-apply, `killall -9 sshd` from a console - the confirm never arrives, and the router must restore the snapshot and reload the network on its own within the countdown.
+28. **Remove them.** Try with a binding instance running: refused, by instance name. Stop it, remove with "Delete the configuration" **off**, reinstall: the configuration is still there. Remove again with it **on**: `/etc/config/bm_*` and `/etc/bm/` are gone **except `/etc/bm/snapshots/baseline`**, and `ip -4 rule show` has nothing left of this module. Compare against `apk del bm-agent` typed at a shell - the two must leave the same router.
+29. **An agent from the future.** Set `apiVersion` higher than this module knows (edit `bm/version.uc` on the router and restart the service). Every page must keep working over SSH, the readiness row must say the module is the thing to update, and nothing anywhere may refuse.
+
+30. **A lease binds before the client has finished asking.** With `bm-wanbind`
+    installed and one instance running, plug a laptop in and watch
+    `logread -e bm-agent`: the bind line appears while the DHCP exchange is
+    still going, not at the next poll. Then `rm /etc/hotplug.d/dhcp/30-bm-wanbind`,
+    reload dnsmasq, and confirm binding still works within thirty seconds - the
+    reconcile pass is the floor, the hook is the speed.
+31. **The catch-all is what makes it one-to-one.** Fill the pool so one client
+    has no WAN, and confirm from that client that there is no route at all -
+    not a working connection through the router's own WAN. Then
+    `ip -4 route show table 253` and check `unreachable default` is there.
+32. **Removing it removes the rules.** `apk del bm-wanbind` at a router shell:
+    `ip -4 rule show` must have nothing left in the instance's priority range,
+    the catch-all must be gone, and table 253 must be empty. Compare against
+    pressing Remove in the app - the two must leave the same router.
+33. **A password never reaches a command line.** Create a pool of a few hundred
+    through `bm-pppoe-pool` and, while it runs, `grep -r pass /proc/*/cmdline`
+    on the router. Nothing. Then check `/tmp` holds no account file afterwards:
+    the daemon unlinks it before writing a single section.
+34. **Removing the PPPoE package leaves every session dialling.** `apk del
+    bm-pppoe-pool` with a pool up, then `ifstatus ppp00001` - still up, still
+    dialling. This is the opposite of item 32 and deliberately so: those
+    sections are the user's own configuration and netifd owns them.
+
+35. **The two halves never both write.** With `bm-wanbind` running, watch the
+    module's own traffic (`Jobs`, and `logread -e bm-agent` on the router): the
+    module must issue `ubus call bm.wanbind assignments` and never an
+    `ip -4 rule add`. Then stop the service on the router - `/etc/init.d/bm-wanbind
+    stop` - and confirm the module goes back to writing rules itself within one
+    readiness cycle, without a reconnect and without losing a client.
+36. **The instance list converges.** Create an instance, then edit
+    `/etc/config/bm_wanbind` by hand - change `sticky` to 0 - and wait for the
+    slow tick. The module must put it back, because the records are the truth
+    and the file is a projection of them. Then delete the instance from the app
+    and confirm both its section and its ip rules are gone.
+37. **Which half, on the readiness list.** Three routers, three answers: with no
+    agent both feature rows read "There is no agent to ask"; with the agent and
+    neither package they read "not installed" and say what is slower; with both
+    they read what the router is doing instead. None of the three may be red.
+
+38. **The countdown is on every tab.** With `luci-app-bm` installed, open
+    Services -> Bored Manager on a phone, in dark mode. Then from a console:
+    `bmctl config guard --timeout 120`. Every one of the five tabs must show the
+    banner within five seconds, counting down. Press **Keep these changes** and
+    it goes; arm it again and let it run out, and the router must restore on its
+    own while the banner says it is doing so. Confirm the countdown is right on a
+    router whose clock is wrong by a year - it is worked out from the seconds
+    remaining, not from a timestamp.
+39. **A tab explains itself when its package is missing.** On a router with only
+    `bm-agent`, the PPPoE and WAN Binding tabs must say which package is absent
+    and what happens without it, not show an empty table. Stop `bm-wanbind`
+    without removing it and the WAN Binding tab must still list what is
+    configured, say the service is not answering, and tell you how to start it.
+40. **The ACL is the shortest one that works.** From a LuCI session:
+    `ubus call bm.wanbind lease '{"action":"add","mac":"..","ip":".."}'` through
+    the web must be refused - a forged lease event could move any client onto
+    any line. So must `bm.pppoe pool_create`, which reads and unlinks a
+    caller-named file as root and is an arbitrary delete in /tmp for anyone who
+    can call it. `pool_add` does the same job and must work. Every button on
+    every tab must work anyway.
+41. **Stopping an instance stops it once.** With `bm-wanbind` running, press Stop
+    in the app and watch both `Jobs` and `logread -e bm-wanbind`: there must be a
+    `bm.wanbind flush` before the config is rewritten, and no `ip -4 rule del`
+    from the module at all. Then confirm `ip -4 rule show` has nothing left in
+    that instance's range - a disabled instance is one the daemon stops looking
+    at, so rules left behind would stay forever.
+42. **Two instances do not fight.** Two LANs, two carriers, two instances, both
+    running. Leave them for a few minutes and confirm neither loses a client:
+    they share a priority base and differ only in their catch-all, so an
+    instance that claimed by priority alone would delete the other's rules once
+    every thirty seconds.
+43. **An older batch still starts and stops.** Create a PPPoE batch over SSH,
+    then install `bm-pppoe-pool`, then press Stop on that batch. The router has
+    no pool record for it, so the ubus call is refused - and the job must still
+    succeed, over SSH, with the sessions actually down. Create a second batch
+    now that the package is there and confirm that one goes through the daemon.
+44. **Disconnect the app and lose nothing.** The rest of these are one test:
+    close the app, or point it at another router, and do a full day's work from
+    the router alone. Every one of them has to pass with nothing but a browser
+    and a console.
+45. **A pool of five thousand, created from a browser.** In LuCI, Create a pool,
+    paste five thousand `user<tab>password` lines and watch the counter under
+    the box agree before pressing anything. It must report progress in chunks
+    and finish; `ubus call bm.pppoe info` must then show five thousand and
+    `uci show network | grep ppp00001` the credentials. While it runs, check
+    `ps` and `/proc/*/cmdline` on the router: not one password may appear in
+    either. Close the browser tab half way through a second, smaller pool and
+    confirm what did arrive is a real pool - Delete removes it, and **Add
+    sessions** carries on from where it stopped.
+46. **Add sessions rather than a second pool.** With a pool `ppp` covering
+    1-500, try to create a second one with prefix `ppp` starting at 400: it must
+    be refused by name, saying which pool holds that range. Then press Add
+    sessions on `ppp`, add fifty, and confirm they are numbered from 00501 and
+    that the pool record covers them.
+47. **A binding instance, written from LuCI.** Add an instance with a priority
+    range of 32: the form must refuse it while you are typing, not after saving.
+    Fix it and add it. Then write a broken one by hand -
+    `uci set bm_wanbind.bad=instance; uci set bm_wanbind.bad.catch_all_table=254;
+    uci commit` - and confirm both the LuCI row and `bmwan check` name the
+    reason. It must not simply be missing from the table.
+48. **Stop, edit and delete all take the rules off first.** With an instance
+    bound to real clients, press Stop in LuCI and confirm `ip -4 rule show` has
+    nothing left in its range. Start it again, then Edit and move
+    `rule_pref_base`: the same must be true, and there must be exactly one set
+    of rules afterwards rather than two. Now stop `bm-wanbind` and press Stop on
+    another instance - it must refuse, and name `bmwan flush --instance NAME`.
+    Do that at a console, then `bmwan instance delete` the same one, and confirm
+    both the section and the rules are gone.
+49. **A snapshot that restores somewhere else.** Download a snapshot from the
+    Backup tab and open the file: it must be plain `uci export` text with a
+    `package` line per package and nothing wrapped around it. Copy it to a
+    second router that has never had any of this installed and run
+    `uci import < the-file` - it must be accepted.
 
 ## Safety and limitations
 

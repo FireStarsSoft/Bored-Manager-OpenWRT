@@ -529,6 +529,12 @@ describe('openwrt PPPoE action waves against a record the router only half has',
     })
 
     const runtime = activate(harness.ctx)
+    // The probe, and only the probe: dialing needs ppp, so the action is gated
+    // on the router having answered - but no poller has ticked, so the sweep
+    // model is still empty, which is the thing this test is about.
+    runtime.applyPollers?.()
+    await settle(20)
+
     expect(harness.handlers.get('pppoeBatchAction')?.('b1', 'stop')).toMatchObject({ ok: true })
     await settle(40)
 

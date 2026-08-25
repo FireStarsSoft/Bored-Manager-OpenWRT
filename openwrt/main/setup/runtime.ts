@@ -28,6 +28,8 @@ export interface SetupDeps {
 
 export interface FrozenSetupPlan {
   manager: PackageManager
+  /** The user asked for groups the probe already reports as present. */
+  repair: boolean
   groups: readonly PackageGroupKey[]
   packages: readonly string[]
 }

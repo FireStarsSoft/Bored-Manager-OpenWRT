@@ -6,17 +6,16 @@
  * asking for it over and over: `applied` is the poller layout that is currently
  * in force, `probing` is the one a probe is in flight for. Everything that
  * reads the verdict rather than the router lives here too - the readiness
- * poller's own gate, and the two sentences (`installHint`, `unprobed`) that
- * every create form shows when a package is missing.
+ * poller's own gate, and the timing of every probe.
+ *
+ * What the verdict then *means* to a caller is `requirements.ts`: which method
+ * needs which capability, and the sentence a user gets when the router has not
+ * got it. That is deliberately not here - it is read by handlers, and this file
+ * is read by the wiring.
  */
-import { failedCheck, type ModuleCheckReport } from '@shared/check'
 import type { ModuleContext, ModulePoller } from '@shared/modules'
-import {
-  APK_REQUIRED,
-  emptyCapabilities,
-  probeOpenWrt,
-  type OpenWrtCapabilities
-} from '../probe'
+import { DEFAULT_RULES } from '../config'
+import { emptyCapabilities, probeOpenWrt, type OpenWrtCapabilities } from '../probe'
 import type { FastSweep } from '../service'
 
 export const INTERVAL_KEY = 'openwrt'
@@ -46,6 +45,13 @@ export interface CapabilityLatch {
    */
   fastWanted: () => boolean
   /**
+   * The preference the binding engine starts writing assignment rules at. The
+   * probe needs it to decide what counts as a competing rule, and it is read
+   * per probe rather than captured once because the Rules editor can change it
+   * while the module is running.
+   */
+  prefBase: () => number
+  /**
    * The interval the fast poller is currently running at, or null while it is
    * stopped. Held so a tab switch can re-time it without going back through the
    * probe the layout key guards.
@@ -58,7 +64,8 @@ export interface CapabilityLatch {
 export function createCapabilityLatch(
   ctx: ModuleContext,
   service: FastSweep,
-  fastWanted: () => boolean = () => true
+  fastWanted: () => boolean = () => true,
+  prefBase: () => number = () => DEFAULT_RULES.rulePrefBase
 ): CapabilityLatch {
   const latch: CapabilityLatch = {
     ctx,
@@ -70,6 +77,7 @@ export function createCapabilityLatch(
     applied: null,
     probing: null,
     fastWanted,
+    prefBase,
     fastAppliedMs: null,
     readinessOn: false,
     poller: ctx.createPoller('openwrt:readiness', async () => {
@@ -127,7 +135,7 @@ export function refreshCapabilities(latch: CapabilityLatch): Promise<OpenWrtCapa
   if (latch.flight) return latch.flight
   const ctx = latch.ctx
   const generation = latch.generation
-  const pending = probeOpenWrt(ctx)
+  const pending = probeOpenWrt(ctx, latch.prefBase())
     .then((next) => {
       if (latch.stopped || generation !== latch.generation) return next
       const wasBlocked = isBlocked(latch.capabilities)
@@ -261,50 +269,3 @@ export function disposeLatch(latch: CapabilityLatch): void {
   stopReadinessPoller(latch)
 }
 
-/**
- * Where to send a user whose router is missing something. The module can now
- * install most of it, so pointing at a shell is only right when it cannot -
- * and then which reason it is decides what the user should do next.
- * `setupNeeded` folds four conditions into one boolean, so a single fallback
- * sentence sent a non-root login, a router with no package manager and a
- * router nobody had probed yet all off to the same shell.
- */
-export function installHint(caps: OpenWrtCapabilities, what: string): string {
-  if (caps.setupNeeded) {
-    return `Open Module settings and use "Install missing packages" - this module installs ${what} for you with the package manager this release ships.`
-  }
-  if (!caps.probed) {
-    return 'Open Module settings and run Check again first, so this page can see what the router actually has.'
-  }
-  if (caps.problem) {
-    return `Something more basic is in the way first: ${caps.problem} Router readiness, in Module settings, has the rest.`
-  }
-  if (!caps.pkgManager) {
-    // Reached only if the gate above ever stops treating a missing apk database
-    // as a blocking problem; the sentence is shared with the checklist card and
-    // the install form either way.
-    return `${APK_REQUIRED} Until that is sorted out, ${what} has to go on at a router shell.`
-  }
-  if (!caps.isRoot) {
-    return `Installing ${what} needs root. Connect this machine entry as root and Module settings can install it for you.`
-  }
-  // Probed, healthy, root, with a package manager - so the checklist believes
-  // nothing is missing while the gate above says otherwise. That is a stale
-  // snapshot rather than a router problem, and re-probing is what fixes it.
-  return `Module settings does not currently list ${what} as missing. Run Check again there to re-read the router.`
-}
-
-/**
- * Nothing has been read off this router yet, so every capability below is
- * false by default rather than by observation. Without this the create forms
- * assert that a perfectly healthy router is missing PPPoE, and then hand out
- * install instructions for it.
- */
-export function unprobed(caps: OpenWrtCapabilities): ModuleCheckReport | null {
-  return caps.probed
-    ? null
-    : failedCheck(
-        'The router has not been checked yet',
-        'Open Module settings and run Check again first, so this page knows what is actually missing.'
-      )
-}

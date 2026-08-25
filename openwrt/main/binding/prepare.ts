@@ -14,10 +14,11 @@ import type { JobSpec } from '../jobs'
 import { recordLayout } from '../records'
 import type { BindingInstanceRecord } from '../store'
 import { carrierScopesOverlap, parseCidr, subnetsOverlap } from '../util'
+import { isPppoePrefix } from '../uci'
 import { recordEvents } from './events'
 import { lanCidr } from './pool'
-import { reconcileModel } from './reconcile'
-import { MANAGED_PREF_CEILING, catchAllRoute } from './rules'
+import { applyChange } from './reconcile'
+import { MANAGED_PREF_CEILING, catchAllLocalRoute, catchAllRoute } from './rules'
 import {
   ENGINE_STOPPED,
   NO_SAMPLE,
@@ -203,7 +204,7 @@ function preparationJob(runtime: BindingRuntime, plan: BindingCreatePlan): JobSp
         }])
         runtime.options.requestDump?.()
         if (runtime.latestModel) {
-          const error = await reconcileModel(runtime, runtime.latestModel, {
+          const error = await applyChange(runtime, runtime.latestModel, {
             forceKernel: false,
             rebooted: false
           })
@@ -409,6 +410,15 @@ async function installFirewallForwardings(
     )
   }
   const prefix = `bmf${instance.slot}_`
+  // Every prefix the zone has to keep claiming: the one configured now, plus
+  // the one every existing batch was created under. Rebuilt from the records
+  // rather than appended to, so running this twice cannot leave a duplicate.
+  const prefixes = [
+    ...new Set([
+      runtime.options.rules().ifacePrefix,
+      ...runtime.store.read().batches.map((batch) => batch.prefix)
+    ])
+  ].filter((entry) => isPppoePrefix(entry))
   const lines = [
     // This is the module-owned masquerading zone used by managed PPPoE
     // wildcard devices. Existing DHCP/static WAN zones are left untouched.
@@ -418,7 +428,26 @@ async function installFirewallForwardings(
     `set firewall.${layout.zoneName}.output='ACCEPT'`,
     `set firewall.${layout.zoneName}.forward='REJECT'`,
     `set firewall.${layout.zoneName}.masq='1'`,
-    `set firewall.${layout.zoneName}.mtu_fix='1'`
+    `set firewall.${layout.zoneName}.mtu_fix='1'`,
+    // The device claim, which this path used to leave out entirely.
+    //
+    // A binding instance can be the first thing that ever creates this zone -
+    // before any PPPoE batch exists, and `uci/firewall.ts` is the only other
+    // place that gives it members - so the zone was committed to the router
+    // with no `list network` and no `list device` at all. A memberless zone
+    // matches nothing, so this was cruft rather than an outage; but it is
+    // persistent cruft that survives reboots and that the removal path never
+    // took away, on a router the user did not ask to have it.
+    //
+    // The same `pppoe-<prefix>+` glob the PPPoE path writes, so both produce
+    // one shape. `delete` first because `add_list` appends: without it a second
+    // instance would claim the same glob twice. `network` is deliberately left
+    // alone - in `networks` mode the PPPoE path owns that list, and clearing it
+    // here would strip the membership of every batch already in the zone.
+    `delete firewall.${layout.zoneName}.device`,
+    ...prefixes.map(
+      (entry) => `add_list firewall.${layout.zoneName}.device=${shQuote(`pppoe-${entry}+`)}`
+    )
   ]
   const cleanup: string[] = []
   for (let index = 0; index < 32; index++) {
@@ -472,6 +501,26 @@ export async function removeFirewallForwardings(
   })
 }
 
+/**
+ * The connected route that goes into the catch-all table beside the blackhole,
+ * or nothing when the LAN's device cannot be read.
+ *
+ * Nothing rather than a guess: a wrong device name here is a route pointing at
+ * the wrong interface, which is worse than the blackhole this is softening. The
+ * sweep reads the model every tick and `reconcileCatchAll` writes the pair
+ * again, so a device that is briefly unreadable is corrected on the next pass
+ * rather than being wrong until somebody notices.
+ */
+function localRouteFor(
+  runtime: BindingRuntime,
+  instance: BindingInstanceRecord,
+  cidr: string,
+  table: number
+): string[] {
+  const device = runtime.latestModel?.ifaces.find((iface) => iface.name === instance.lan)?.l3Device
+  return device ? [catchAllLocalRoute(table, cidr, device)] : []
+}
+
 export async function installCatchAll(
   runtime: BindingRuntime,
   instance: BindingInstanceRecord,
@@ -494,6 +543,9 @@ export async function installCatchAll(
     // through the router's own WAN in that window. Adding over the entry is
     // one atomic netlink message, so the blackhole never stops existing.
     catchAllRoute(layout.catchAllTable),
+    // Before the rule, not after: between the two the router would be selecting
+    // this table for its own LAN traffic with nothing in it but `unreachable`.
+    ...localRouteFor(runtime, instance, cidr, layout.catchAllTable),
     ...(replace
       ? [`while ip -4 rule del pref ${pref} 2>/dev/null; do :; done`]
       : []),

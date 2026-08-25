@@ -9,6 +9,7 @@ import type { CheckSession } from '@shared/check'
 import type { ModuleContext } from '@shared/modules'
 import type { ValueBadge } from '@shared/module-ui'
 import type { OwrtRules } from '../config'
+import type { AgentCapability } from '../probe'
 import type { JobSpec } from '../jobs'
 import type { BindingInstanceRecord, HostStore } from '../store'
 import type { IpRule, Lease, RouterModel } from '../types'
@@ -325,6 +326,15 @@ export type WanTableSource =
 export interface BindingEngineOptions {
   rules: () => OwrtRules
   jobs?: BindingJobRunner
+  /**
+   * The router-side capability verdict, read on every pass and never captured.
+   *
+   * When it says this router provides `binding`, `bm-wanbind` owns the ip rule
+   * range and this engine must not plan or write a thing - it reads the rows
+   * instead. An `apk del` lands between one readiness cycle and the next, so
+   * asking per pass is what makes the changeover a tick rather than a restart.
+   */
+  agent?: () => AgentCapability
   /** Latest slow-tick UCI section -> table mapping. */
   wanTables?: () => WanTableSource
   /** FastSweep uses this to force a fresh interface dump after mutations. */

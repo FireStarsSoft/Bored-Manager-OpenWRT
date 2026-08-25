@@ -6,7 +6,15 @@
  * verdict every surface renders. Import this barrel, never a file inside it.
  */
 export {
+  AGENT_API,
+  AGENT_API_GUARD,
+  AGENT_API_UPDATE,
+  emptyAgentFacts,
   emptyFacts,
+  type AgentCapability,
+  type AgentFacts,
+  type AgentGuard,
+  type ForeignRule,
   type MissingPackage,
   type OpenWrtCapabilities,
   type PackageManager,
@@ -15,13 +23,17 @@ export {
   type ReadinessCheck,
   type ReadinessChip,
   type ReadinessState,
-  type ReadinessStatus
+  type ReadinessStatus,
+  type ServiceState
 } from './types'
 export {
   APK_REQUIRED,
   FW4_MISSING,
+  SPACE_BAD_KB,
+  SPACE_WARN_KB,
   buildReadiness,
   emptyCapabilities,
+  judgeAgent,
   opkgNotSupported
 } from './readiness'
-export { PROBE_COMMAND, freeKbFromDf, probeOpenWrt } from './command'
+export { PROBE_COMMAND, buildProbeCommand, freeKbFromDf, probeOpenWrt } from './command'

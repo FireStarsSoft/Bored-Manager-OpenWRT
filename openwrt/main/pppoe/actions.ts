@@ -18,6 +18,7 @@ import {
   waitCancelable,
   type InterfaceAction
 } from '../uci'
+import { hasFeature, poolAction } from '../agent'
 import { allBatchNames } from './names'
 import {
   clearRowCache,
@@ -29,6 +30,15 @@ import {
 } from './runtime'
 import type { PppoeRow } from './types'
 import { emitSummary, rowsByBatch } from './view'
+
+/**
+ * The most sections `bm.pppoe action` will take in one call.
+ *
+ * ROW_LIMIT in the daemon's service.uc. Duplicated rather than asked for
+ * because it is a constant of the published API, and a wave is planned before
+ * anything has been called.
+ */
+const ROUTER_ACTION_LIMIT = 500
 
 function isAction(value: unknown): value is InterfaceAction {
   return value === 'start' || value === 'stop' || value === 'redial'
@@ -139,7 +149,20 @@ function startActionJob(
 ): OpenWrtJob {
   const rules = runtime.config.effectiveRules()
   const { live, skipped } = liveSubset(runtime, requested)
-  const size = effectivePppoeChunkSize(live.length, rules.uciChunkSize)
+
+  /**
+   * The daemon refuses more than 500 sections in one `action` call, so a wave
+   * bigger than that would be refused whole and re-run over SSH by the fall
+   * back below - correct, and pointlessly slow. Clamped only when the router
+   * has the package: on a router without it the chunk size is the user's own
+   * setting and there is nothing to match it to.
+   */
+  const planningCapability = runtime.agent?.()
+  const routerActs = planningCapability !== undefined && hasFeature(planningCapability, 'pppoe')
+  const size = Math.min(
+    effectivePppoeChunkSize(live.length, rules.uciChunkSize),
+    routerActs ? ROUTER_ACTION_LIMIT : Number.MAX_SAFE_INTEGER
+  )
   const waves = live.length ? chunkValues(live, size) : []
   const items: JobSpec['items'] = []
 
@@ -172,9 +195,47 @@ function startActionJob(
           // that stops half-way through leaves sessions down that nothing
           // will bring up again. The verification item below reads the real
           // state rather than trusting the exit code.
-          await applyInterfaceWave(runtime.ctx, wave, action, timeoutMs(rules), {
-            bestEffort: action !== 'stop'
-          })
+          // Through the agent when this router has it: one ubus call for the
+          // whole wave rather than one `ifup`/`ifdown` per session, and the
+          // daemon refuses any section that is not in one of its own pools -
+          // so a call naming the router's own WAN cannot take it down.
+          //
+          // The netifd verbs are the same either way, which is why the mapping
+          // is this short: netifd is what performs it in both halves.
+          const capability = runtime.agent?.()
+          let done = false
+
+          if (capability && hasFeature(capability, 'pppoe')) {
+            const result = await poolAction(
+              { ctx: runtime.ctx, capability: () => capability },
+              action === 'stop' ? 'down' : action === 'start' ? 'up' : 'redial',
+              wave
+            )
+            done = result.ok
+          }
+
+          /**
+           * And SSH when the router would not, which is not the same rule the
+           * binding half follows - deliberately.
+           *
+           * Binding refuses to fall back because two writers in one ip rule
+           * priority range cannot both be right. Nothing here is like that:
+           * netifd owns these sections whichever half asks it, `ifup` and the
+           * daemon's `up` are the same verb, and running both would at worst
+           * bring a session up twice.
+           *
+           * It is not a rare path either. The daemon only acts on sections
+           * belonging to a `config pool` record it wrote itself, so every
+           * batch created before bm-pppoe-pool was installed - which is every
+           * batch on a router that gained the package later - is refused by
+           * name. Without this, Stop failed the job and Start and Redial were
+           * dropped in silence while the wave still reported success.
+           */
+          if (!done) {
+            await applyInterfaceWave(runtime.ctx, wave, action, timeoutMs(rules), {
+              bestEffort: action !== 'stop'
+            })
+          }
           for (const name of wave) {
             if (action === 'stop') runtime.manuallyStopped.add(name)
             else runtime.manuallyStopped.delete(name)

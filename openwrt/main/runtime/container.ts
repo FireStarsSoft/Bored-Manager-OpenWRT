@@ -12,6 +12,7 @@
  * automations refer to each other lazily because neither can exist first.
  */
 import type { ModuleContext } from '@shared/modules'
+import { AgentManager, guardedJobs } from '../agent'
 import { BindingEngine } from '../binding'
 import { ConfigStore, RulesEditor } from '../config'
 import { EventLog } from '../events'
@@ -32,6 +33,7 @@ import {
 export interface OpenWrtRuntime {
   ctx: ModuleContext
   config: ConfigStore
+  agent: AgentManager
   store: HostStore
   events: EventLog<OwrtHostData>
   jobs: Jobs<OwrtHostData>
@@ -52,6 +54,19 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
 
   let pppoe!: PppoeManager<OwrtHostData>
   let binding!: BindingEngine
+  let latch!: CapabilityLatch
+
+  // Every job that changes the router's network configuration runs under the
+  // router's own commit-confirm guard, and no domain knows about it: the
+  // wrapper adds an item at each end of the spec, and a router with no agent -
+  // or one too old to have the call - is handed straight through unchanged.
+  //
+  // Hoisted like the two automations above, and for the same reason: the
+  // capability verdict is produced by the latch, the latch watches the
+  // collector, and the collector is built from the domains that need this. The
+  // closure is only ever called when a job starts, by which point all of them
+  // exist.
+  const guarded = guardedJobs(jobs, { ctx, capability: () => latch.capabilities.agent })
   const service = new FastSweep(ctx, config, store, {
     async onSample(model) {
       pppoe.onSample(model)
@@ -120,11 +135,22 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
     // constructed just below.
     bindingCarriers: () => binding.carriers()
   }
-  pppoe = new PppoeManager(ctx, config, store, jobs, sharedService)
+  // The same verdict the binding engine reads, and read the same way: per
+  // operation, never captured. Here it decides how a pool's sections are
+  // written rather than which half owns them - netifd owns them either way -
+  // so a router that loses the package mid-create fails that create and does
+  // the next one the slow way.
+  pppoe = new PppoeManager(ctx, config, store, guarded, sharedService, () => latch.capabilities.agent)
 
   binding = new BindingEngine(ctx, store, {
     rules: () => config.effectiveRules(),
-    jobs,
+    jobs: guarded,
+    // Which half binds. Read per pass, never captured: `bm-wanbind` arriving or
+    // being removed lands between two readiness cycles, and the engine has to
+    // change over on the next tick rather than on the next reconnect. Hoisted
+    // like the two automations for the same reason - the latch is built from
+    // the collector, which is built from these.
+    agent: () => latch.capabilities.agent,
     wanTables: () => service.uciTables,
     requestDump: () => service.forceDumpNextTick(),
     // The routing-table audit belongs to the router, not to any one binding
@@ -157,11 +183,41 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
   // every pooled machine the app is connected to. Re-read on every
   // applyPollers(), which the host already runs on each tab switch, connect and
   // settings change.
-  const latch = createCapabilityLatch(ctx, service, () => {
+  latch = createCapabilityLatch(ctx, service, () => {
     const data = store.read()
     if (data.batches.length > 0 || data.instances.length > 0) return true
     return ctx.streamActive('overview') || ctx.tabActive
   })
+  const agent = new AgentManager({
+    ctx,
+    capabilities: () => latch.capabilities,
+    agent: () => latch.capabilities.agent,
+    reprobe: () => refreshCapabilities(latch),
+    // The plain starter, not the guarded one. Installing a package is not a
+    // network change the guard's snapshot could undo - it snapshots UCI, and
+    // apk does not touch UCI - and the uninstall job takes a snapshot of its
+    // own, which is the part that is actually worth having.
+    jobs,
+    event: (kind, text) => events.record('router', kind, text),
+    // Read at the moment somebody asks, never captured: an instance can be
+    // started between reading an uninstall report and pressing the button, and
+    // the refusal exists precisely so that nothing is removed from underneath
+    // one.
+    // From the stored records, not from the engines' views. A snapshot is what
+    // the last sweep computed and is empty until one has landed, so asking it
+    // reported "nothing is running" on a router that had not been swept yet -
+    // which is the router most likely to be mid-something.
+    blockers: () => {
+      const data = store.read()
+      return {
+        instances: data.instances
+          .filter((instance) => instance.running)
+          .map((instance) => instance.name),
+        batches: data.batches.map((batch) => batch.name)
+      }
+    }
+  })
+
   const setup = new SetupManager(ctx, {
     capabilities: () => latch.capabilities,
     // The same call the rest of the module uses: it emits the new verdict and,
@@ -174,6 +230,7 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
   return {
     ctx,
     config,
+    agent,
     store,
     events,
     jobs,
@@ -210,6 +267,8 @@ export function snapshots(runtime: OpenWrtRuntime): Record<string, unknown> {
 /** Drop everything that described the machine this context just stopped pointing at. */
 export function resetRuntime(runtime: OpenWrtRuntime): void {
   resetLatch(runtime.latch)
+  // A token describes one router, and so does anything staged in its /tmp.
+  void runtime.agent.reset()
   runtime.service.reset()
   // A token describes one router; the machine behind this context changed.
   runtime.setup.reset()
@@ -229,6 +288,7 @@ export function resetRuntime(runtime: OpenWrtRuntime): void {
  */
 export function disposeRuntime(runtime: OpenWrtRuntime): void {
   disposeLatch(runtime.latch)
+  runtime.agent.dispose()
   runtime.events.dispose()
   runtime.service.dispose()
   runtime.setup.dispose()

@@ -1,0 +1,177 @@
+name: packages-release
+
+# A release of the router packages, on its own tag.
+#
+# `pkg-v*` and not `v*`, because `release.yml` owns `v*` and asserts that
+# **exactly one** .zip is attached to it - the app picks a module archive by
+# "the only zip asset there is", so a second file on that tag turns every module
+# install into an error. The two trees also version independently: the module is
+# 2.1.0 while the packages are 1.0.0, and forcing them onto one tag would mean
+# republishing one every time the other moved.
+on:
+  push:
+    tags: ['pkg-v*']
+
+permissions:
+  contents: write
+
+jobs:
+  # The same syntax check and the same SDK build main runs, called rather than
+  # copied. A tag must not be able to publish something that would have been
+  # rejected on a branch.
+  build:
+    uses: ./.github/workflows/packages.yml
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # packages/version.json is the only place the release version lives, so
+      # the tag has to agree with it rather than the other way round.
+      - name: Verify the tag matches packages/version.json
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p 'require("./packages/version.json").release')"
+          test "$GITHUB_REF_NAME" = "pkg-v$VERSION" || {
+            echo "tag $GITHUB_REF_NAME does not match packages/version.json release $VERSION" >&2
+            exit 1
+          }
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: bm-packages-${{ github.sha }}
+          path: apk
+
+      - name: Pack the manifest and the offline bundle
+        run: |
+          set -euo pipefail
+          rm -f apk/sha256sums.txt
+          node scripts/pack-bundle.mjs apk dist
+          cp apk/*.apk dist/
+
+      # The one thing a router checks before it will install anything fetched
+      # over the network. A sha256 taken from the same download only proves the
+      # bytes arrived intact; this is what says who sent them.
+      #
+      # Skipped, loudly, when no key has been set up. An unsigned release is
+      # still installable from the app - the pinned install and the bundle have
+      # their own trust roots - and a router asked to update itself from it
+      # refuses and says the manifest is unsigned, which is the correct answer.
+      - name: Sign the manifest
+        env:
+          SECKEY: ${{ secrets.BM_RELEASE_SECKEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SECKEY:-}" ]; then
+            echo "::warning::BM_RELEASE_SECKEY is not set - publishing an unsigned manifest, which routers will refuse to update from. See packages/bm-agent/files/usr/share/bm/keys/README.md"
+            exit 0
+          fi
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends signify-openbsd
+          KEYDIR="$(mktemp -d)"
+          trap 'shred -u "$KEYDIR"/* 2>/dev/null || true; rm -rf "$KEYDIR"' EXIT
+          umask 077
+          printf '%s\n' "$SECKEY" > "$KEYDIR/release.sec"
+          signify-openbsd -S -s "$KEYDIR/release.sec" \
+            -m dist/bm-packages.json -x dist/bm-packages.json.sig
+          # Verified here as well as on the router: a signature that does not
+          # check out against the committed public key means the secret in this
+          # repository is not the pair of it, and finding that out on somebody
+          # else's router is far too late.
+          PUB="$(ls packages/bm-agent/files/usr/share/bm/keys/*.pub 2>/dev/null | head -n1 || true)"
+          if [ -n "$PUB" ]; then
+            signify-openbsd -V -p "$PUB" -m dist/bm-packages.json -x dist/bm-packages.json.sig
+            echo "manifest verifies against $PUB"
+          else
+            echo "::warning::no public key is committed, so the signature just made cannot be checked against anything"
+          fi
+
+      - name: Publish
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p 'require("./packages/version.json").release')"
+          SIGNED="no"
+          [ -f dist/bm-packages.json.sig ] && SIGNED="yes"
+          {
+            echo "Router packages **$VERSION** for OpenWrt 25.12 or newer."
+            echo
+            echo 'Install them from Bored Manager: **Settings → Modules → OpenWRT → Router packages**.'
+            echo 'On the router itself, `bmctl check-update` reads `bm-packages.json` from this'
+            echo 'release and verifies its signature before downloading anything.'
+            echo
+            if [ "$SIGNED" = "no" ]; then
+              echo '> **This manifest is unsigned.** A router will refuse to update itself from it.'
+              echo '> Install from the app instead, or see `packages/bm-agent/.../keys/README.md`.'
+              echo
+            fi
+            echo '`bm-packages-'"$VERSION"'.apkbundle` is every package in one text file: the app can'
+            echo 'install it with no GitHub release and no internet on the router at all.'
+            echo
+            echo '```'
+            cat dist/*.apkbundle.sha256
+            sha256sum dist/*.apk | sed 's|dist/||'
+            echo '```'
+          } > notes.md
+
+          # `--latest=false`, and the reason is that one repository has two
+          # release series in it and only one "latest" pointer to share.
+          #
+          # The app resolves a module install through `/releases/latest` and
+          # takes the only .zip attached to it. A packages release carries no
+          # .zip, so while one of these was latest the app fell back to the
+          # default-branch zip, could not find `openwrt/module.json` two levels
+          # down, and every install and update of the module failed with
+          # MODULE_ARCHIVE_INVALID - and the Update button dimmed itself, having
+          # parsed `pkg-v1.4.0` as version 0.4.0.
+          #
+          # So `v*` owns latest, because that is the one an app has no other way
+          # to find. A router looking for packages is told the tag.
+          gh release create "$GITHUB_REF_NAME" \
+            dist/*.apk dist/bm-packages.json dist/*.apkbundle dist/*.apkbundle.sha256 \
+            $( [ -f dist/bm-packages.json.sig ] && echo dist/bm-packages.json.sig ) \
+            --latest=false \
+            --title "Router packages $VERSION" --notes-file notes.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # The fixed address a router reads, now that `releases/latest` belongs to
+      # the module.
+      #
+      # `bmctl check-update` needs one URL that always names the newest packages
+      # release, and GitHub has exactly one "latest" per repository - which the
+      # step above just gave away, for the good reason that nothing else can
+      # find a module release. A rolling tag is the remaining way to have a
+      # second one: `pkg-latest` carries a copy of this release's manifest and
+      # is moved on every publish, so the URL never changes and never resolves
+      # to a module release.
+      #
+      # The archives come with it, and that is not duplication for its own sake:
+      # `update.uc` derives the download directory from the manifest's own URL
+      # (`baseOf`, line 123), so the manifest and the files it names have to sit
+      # in one directory or the fetch looks somewhere empty. Attaching the same
+      # bytes twice is cheaper than teaching the router a second address, and it
+      # keeps the property that a signed manifest is only ever read beside the
+      # files it was signed over.
+      #
+      # Deleted and recreated rather than edited: `--clobber` leaves assets from
+      # a previous release that this one does not have, and a stale `.sig` or an
+      # orphaned `.apk` beside a fresh manifest is exactly what the signature is
+      # there to make impossible.
+      - name: Move the pkg-latest pointer
+        run: |
+          set -euo pipefail
+          gh release delete pkg-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create pkg-latest \
+            dist/*.apk dist/bm-packages.json dist/*.apkbundle dist/*.apkbundle.sha256 \
+            $( [ -f dist/bm-packages.json.sig ] && echo dist/bm-packages.json.sig ) \
+            --latest=false \
+            --title "Latest router packages" \
+            --notes "A moving copy of [\`$GITHUB_REF_NAME\`](../../releases/tag/$GITHUB_REF_NAME), so that \`bmctl check-update\` has one address that never changes. Install from the versioned release if you want a specific one."
+        env:
+          GH_TOKEN: ${{ github.token }}

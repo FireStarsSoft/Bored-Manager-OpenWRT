@@ -569,3 +569,158 @@ describe('openwrt readiness poller', () => {
     runtime.dispose?.()
   })
 })
+
+/**
+ * The two things the install flow could not do: put a group back on a router
+ * that reports it as present, and notice that the overlay filled up half way
+ * through a group of three.
+ */
+describe('openwrt setup: running the install again, and running out of room', () => {
+  it('refuses a present group without repair, and plans it with repair', async () => {
+    const { harness, runtime } = newRouter(router({ pppoe: true }))
+    runtime.applyPollers?.()
+    await settle(6)
+
+    // What this page said, and only said, to somebody whose ppp is installed
+    // and not working.
+    const plain = await check(harness, { pppoe: true })
+    expect(plain.ok).toBe(false)
+    expect(plain.findings[0].detail).toContain('Run the install again')
+
+    const repaired = await check(harness, { pppoe: true, repair: true })
+    expect(repaired.ok).toBe(true)
+    // Named for what it is, and honest about which router it is talking to:
+    // `--force-reinstall` genuinely unpacks the files again, and it arrived in
+    // OpenWrt 25.12.3, so the detail says what an older apk will do instead.
+    expect(labels(repaired, 'warning')).toContain(
+      'Running the install again, including what is already present'
+    )
+    expect(repaired.findings.map((one) => one.detail).join(' ')).toContain('25.12.3')
+    expect(labels(repaired, 'pass')).toEqual([
+      'Run the install again for ppp',
+      'Run the install again for ppp-mod-pppoe',
+      'Run the install again for kmod-pppoe'
+    ])
+    runtime.dispose?.()
+  })
+
+  it('still emits nothing but add, and still cannot emit upgrade', async () => {
+    const { harness, runtime, installs } = newRouter(router({ pppoe: true }))
+    runtime.applyPollers?.()
+    await settle(6)
+
+    const report = await check(harness, { pppoe: true, repair: true })
+    expect(await apply(harness, { token: report.token, values: { pppoe: true, repair: true } }))
+      .toMatchObject({ ok: true })
+    await settle(60)
+
+    // `--force-reinstall`, which OpenWrt patched into apk for 25.12.3, is what
+    // makes "install it again" mean anything at all: plain `apk add` on a
+    // package apk already lists does nothing.
+    expect(installs).toEqual([
+      'apk update',
+      "apk add --force-reinstall 'ppp'",
+      "apk add --force-reinstall 'ppp-mod-pppoe'",
+      "apk add --force-reinstall 'kmod-pppoe'"
+    ])
+    // The one command this module must never be able to produce, whatever a
+    // form sends: the OpenWRT documentation warns it can leave a running router
+    // unbootable.
+    expect(installs.join(' ')).not.toContain('upgrade')
+    runtime.dispose?.()
+  })
+
+  // A router on 25.12.0 to .2 has no --force-reinstall. It must not read as a
+  // failed install, and it must not read as a successful repair either.
+  it('falls back to a plain add when this apk has no --force-reinstall', async () => {
+    const { harness, runtime, installs } = newRouter(
+      router({
+        pppoe: true,
+        fail: ['apk add --force-reinstall'],
+        failStderr: "apk: unrecognized option '--force-reinstall'"
+      })
+    )
+    runtime.applyPollers?.()
+    await settle(6)
+
+    const report = await check(harness, { pppoe: true, repair: true })
+    expect(await apply(harness, { token: report.token, values: { pppoe: true, repair: true } }))
+      .toMatchObject({ ok: true })
+    await settle(60)
+
+    // Tried, refused, and then done the only way this router can do it.
+    expect(installs).toContain("apk add --force-reinstall 'ppp'")
+    expect(installs).toContain("apk add 'ppp'")
+    runtime.dispose?.()
+  })
+
+  it('keeps the repair flag out of the shell and inside the token', async () => {
+    const { harness, runtime, installs } = newRouter(router({ pppoe: true }))
+    runtime.applyPollers?.()
+    await settle(6)
+
+    const report = await check(harness, { pppoe: true, repair: true })
+    // The values the apply carries have to be the values that were checked, so
+    // an apply that quietly drops the flag is refused rather than run as a
+    // different plan.
+    expect(await apply(harness, { token: report.token, values: { pppoe: true } })).toMatchObject({
+      ok: false
+    })
+    expect(installs).toEqual([])
+    runtime.dispose?.()
+  })
+
+  it('stops between packages when the overlay filled up, and says what is done', async () => {
+    // The check reads free space once, before anything is written. A group of
+    // three on a router with a few megabytes spare can run it out on the second
+    // one, which apk then reports as a failed install on a router that is now
+    // also full.
+    const state = router({ freeKb: 8_192 })
+    const { harness, runtime, installs } = newRouter(state)
+    runtime.applyPollers?.()
+    await settle(6)
+
+    const report = await check(harness, { pppoe: true })
+    expect(report.ok).toBe(true)
+    // The first package goes on, and the overlay fills while it does.
+    state.freeKb = 64
+    expect(await apply(harness, { token: report.token, values: { pppoe: true } })).toMatchObject({
+      ok: true
+    })
+    await settle(80)
+
+    expect(installs).toEqual(['apk update', "apk add 'ppp'"])
+    const job = lastJobs(harness).finished[0]
+    // 'partial' rather than 'error': the index refresh and the first package
+    // both succeeded, and the job says so instead of reporting the whole run as
+    // a failure the user has to unpick.
+    expect(job?.state).toBe('partial')
+    const failed = job?.items.find((item) => item.status === 'error')
+    expect(failed?.message).toContain('stopped before installing ppp-mod-pppoe')
+    expect(failed?.message).toContain('64 KB')
+    // What is already on the router stays on it; nothing is rolled back.
+    expect(failed?.message).toContain('stays')
+    runtime.dispose?.()
+  })
+
+  it('does not pay for a second df before the first package', async () => {
+    const { harness, runtime } = newRouter(router())
+    runtime.applyPollers?.()
+    await settle(6)
+
+    const report = await check(harness, { pppoe: true })
+    const before = harness.exec.mock.calls.filter((call) =>
+      String(call[0]).includes("echo '===ROUTE==='")
+    ).length
+    await apply(harness, { token: report.token, values: { pppoe: true } })
+    await settle(80)
+
+    // One reading per package after the first, and not one for the first:
+    // nothing has been written since the check took its own seconds ago.
+    const after = harness.exec.mock.calls.filter((call) =>
+      String(call[0]).includes("echo '===ROUTE==='")
+    ).length
+    expect(after - before).toBe(2)
+    runtime.dispose?.()
+  })
+})

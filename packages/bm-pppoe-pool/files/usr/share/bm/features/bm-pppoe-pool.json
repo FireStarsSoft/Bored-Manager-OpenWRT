@@ -1,0 +1,8 @@
+{
+	"name": "bm-pppoe-pool",
+	"version": "1.4.0",
+	"ubus": "bm.pppoe",
+	"apiVersion": 1,
+	"provides": [ "pppoe" ],
+	"description": "Pools of PPPoE sessions, dialled and watched on the router"
+}

@@ -1,0 +1,24 @@
+# Bored Manager agent.
+#
+# An apk conffile: your edits survive an update. Anything the agent decides for
+# itself lives under /etc/bm/ instead, so the two never overwrite each other.
+
+config agent 'main'
+	# Set to 0 to keep the service installed but stopped. The module notices
+	# within one readiness cycle and goes back to driving the router over SSH.
+	option enabled '1'
+
+	# Nothing here ever reaches out to the internet on its own. This is what
+	# `bmctl check-update` reads when somebody asks it to look, and it is only
+	# ever read at that moment.
+	#
+	# `pkg-latest` and not `latest`: one repository holds two release series and
+	# GitHub gives it one "latest" pointer, which belongs to the module - an app
+	# has no other way to find a module release, while a router can be told a
+	# tag. `pkg-latest` is a copy of the newest packages release, moved by
+	# `packages-release.yml` on every publish, so this address never changes and
+	# never resolves to a release with no manifest in it.
+	#
+	# The archives are fetched from the directory this URL names, so point it at
+	# a release that carries both or at nothing at all.
+	option update_url 'https://github.com/FireStarsSoft/Bored-Manager-OpenWRT/releases/download/pkg-latest/bm-packages.json'

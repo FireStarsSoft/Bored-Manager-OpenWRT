@@ -42,8 +42,11 @@ export const PACKAGE_GROUPS: readonly PackageGroup[] = [
   {
     key: 'ipfull',
     title: 'Policy routing',
-    // BusyBox ships a cut-down `ip` with no `rule` subcommand on some targets.
-    // WAN binding is entirely built on ip rules, so it is dead without this.
+    // A stock image symlinks `/sbin/ip` at BusyBox, whose `ip` answers
+    // `rule show` but rejects a numeric routing table - and every rule and
+    // route WAN binding writes names one. So the capability this installs is
+    // not "ip rule" in general, it is numeric tables, which is what the probe
+    // now tests for.
     packages: ['ip-full'],
     purpose: 'Per-device WAN binding',
     capability: 'hasIpRule'

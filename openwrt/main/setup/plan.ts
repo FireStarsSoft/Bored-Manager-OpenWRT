@@ -15,12 +15,21 @@ import {
   type ModuleCheckReport
 } from '@shared/check'
 import { PACKAGE_GROUPS } from '../packages'
-import { APK_REQUIRED } from '../probe'
+import { APK_REQUIRED, SPACE_BAD_KB, SPACE_WARN_KB } from '../probe'
 import { preflight, updateCommand } from './install'
 import { asRecord, type FrozenSetupPlan, type SetupRuntime } from './runtime'
 
-const SPACE_BLOCK_KB = 512
-const SPACE_WARN_KB = 2_048
+/**
+ * The checkbox that turns "install what is missing" into "run the install again
+ * for everything ticked".
+ *
+ * Without it the only answer this page had for a group the probe reports as
+ * present was "Everything selected is already installed" - which is the exact
+ * situation somebody is on this page for when a package is there but not
+ * working. It is off by default: re-running an install nobody asked for is a
+ * change to a router for no reason.
+ */
+const REPAIR_KEY = 'repair'
 
 /** Checkbox values arrive as booleans, strings or nothing at all. */
 function selected(values: Record<string, unknown>, key: string): boolean {
@@ -68,22 +77,26 @@ export async function checkSetup(
   }
 
   const values = asRecord(raw)
+  const repair = selected(values, REPAIR_KEY)
   const chosen = PACKAGE_GROUPS.filter((group) => selected(values, group.key))
   if (!chosen.length) {
     return failedCheck('Nothing selected', 'Tick at least one group to install.')
   }
-  const wanted = chosen.filter((group) => !caps[group.capability])
+  // Repair deliberately keeps the groups the probe says are already there. That
+  // is the whole point of it: the capability test reads artefacts on disk, and
+  // a package can satisfy it while being broken in a way nothing here can see.
+  const wanted = repair ? chosen : chosen.filter((group) => !caps[group.capability])
   if (!wanted.length) {
     return failedCheck(
       'Everything selected is already installed',
-      'The router already reports support for all of it.'
+      'The router already reports support for all of it. Tick "Run the install again" as well if a package is present but not working.'
     )
   }
   const packages = wanted.flatMap((group) => [...group.packages])
 
   const findings: ModuleCheckFinding[] = []
   const reading = await preflight(runtime)
-  if (reading.freeKb >= 0 && reading.freeKb < SPACE_BLOCK_KB) {
+  if (reading.freeKb >= 0 && reading.freeKb < SPACE_BAD_KB) {
     findings.push({
       level: 'error',
       label: `Only ${reading.freeKb} KB free on the overlay`,
@@ -113,16 +126,33 @@ export async function checkSetup(
     })
   }
 
+  if (repair) {
+    // What this can and cannot do depends on the router, and it is decided by
+    // running the command rather than by reading a version string. OpenWRT
+    // patched `--force-reinstall` into apk for v25.12.3; on that router or
+    // newer the files are genuinely written again, and on an older one apk
+    // rejects the option, the install falls back to the plain command, and the
+    // job says so in a warning rather than reporting a step that changed
+    // nothing as a success.
+    findings.push({
+      level: 'warning',
+      label: 'Running the install again, including what is already present',
+      detail:
+        'Each package is unpacked again with `apk add --force-reinstall`, so a package whose files were damaged is repaired and not just re-recorded. That option arrived in OpenWrt 25.12.3; on an older router apk refuses it, the plain install runs instead, and the job says that all it could restore was anything genuinely missing.'
+    })
+  }
+
   findings.push({
     level: 'info',
     label: 'Refresh the apk package index first',
     detail: updateCommand()
   })
   for (const group of wanted) {
+    const already = caps[group.capability]
     for (const name of group.packages) {
       findings.push({
         level: 'pass',
-        label: `Install ${name}`,
+        label: `${already ? 'Run the install again for' : 'Install'} ${name}`,
         detail: group.purpose
       })
     }
@@ -131,6 +161,7 @@ export async function checkSetup(
   if (hasBlockingFinding(findings)) return { ok: false, findings }
   const plan: FrozenSetupPlan = Object.freeze({
     manager: caps.pkgManager,
+    repair,
     groups: Object.freeze(wanted.map((group) => group.key)),
     packages: Object.freeze(packages)
   })

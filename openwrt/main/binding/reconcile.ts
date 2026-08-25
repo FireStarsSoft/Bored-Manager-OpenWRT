@@ -8,6 +8,7 @@
  * only afterwards: a rule that failed to land must not be remembered as though
  * it had.
  */
+import { hasFeature, wanbindFlush, wanbindReconcile, wanbindSection } from '../agent'
 import { recordLayout } from '../records'
 import type { OwrtHostData } from '../store'
 import type { RouterModel } from '../types'
@@ -18,11 +19,14 @@ import { lanCidr, plannerPolicy, plannerWans, poolIfaces } from './pool'
 import { planBindingReconciliation } from './planner'
 import {
   applyRuleDiffInMemory,
+  catchAllLocalRoute,
   catchAllRoute,
   chunkRuleCommands,
   emptyRuleDiff
 } from './rules'
+import { routerSample } from './router'
 import { ENGINE_STOPPED, currentWanTables, execScript, exclusive } from './runtime'
+import { syncRouterInstances } from './sync'
 import { buildWanTableIndex } from './tables'
 import { emitSnapshot, emptyDeviceSummary, emptyWanSummary } from './view'
 import type {
@@ -44,6 +48,112 @@ const STICKY_TOUCH_MS = 10_000
  * one lower without the router having gone anywhere.
  */
 const REBOOT_SLACK_SEC = 5
+
+/**
+ * Which half does this pass, asked once per tick.
+ *
+ * The verdict is read here rather than captured anywhere, because an `apk del`
+ * or an `apk add` lands between one readiness cycle and the next: this is what
+ * makes the changeover a tick rather than a reconnect.
+ *
+ * The two are exclusive and must stay that way. With `bm-wanbind` running, the
+ * router owns the ip rule priority range; this engine planning against it as
+ * well would be two writers with two ideas of the truth, which is worse than
+ * either being wrong on its own. So a router-side pass that fails publishes the
+ * reason and stops - it does not fall back. The only fall back is the verdict
+ * itself saying the router is not binding.
+ */
+async function pass(
+  runtime: BindingRuntime,
+  model: RouterModel,
+  flags: { forceKernel: boolean; rebooted: boolean }
+): Promise<string | null> {
+  const capability = runtime.options.agent?.()
+
+  if (capability && hasFeature(capability, 'binding')) {
+    const failed = await routerSample(
+      runtime,
+      { ctx: runtime.ctx, capability: () => capability },
+      model
+    )
+    if (failed && !runtime.disposed) emitSnapshot(runtime, model.t, failed)
+    return failed
+  }
+
+  return reconcileModel(runtime, model, flags)
+}
+
+/**
+ * The same choice, for a change this module just made.
+ *
+ * `pass` is for a sweep; this is for Start, Stop, Delete and Apply, and it
+ * exists because those used to call `reconcileModel` unconditionally. On a
+ * router running `bm-wanbind` that is the second writer the whole boundary is
+ * built to prevent: the fast sweep reads `ip -4 rule show` whether or not the
+ * agent is there, so the daemon's own rules arrive as this instance's "actual",
+ * and stopping an instance planned a `rule del` for every one of them.
+ *
+ * On the router-owned half the work is not skipped, it is handed over: write
+ * the sections, tell the service, and ask for a pass now rather than waiting
+ * for its timer.
+ *
+ * `flushInstanceId` is for Stop and Delete, and the order it implies is the
+ * point. The daemon drops a disabled instance when it loads its config and
+ * does not remove its rules on the way past, so an instance switched off after
+ * the reload would leave every client bound to a table nothing maintains. The
+ * flush therefore happens first, while the daemon still has the instance.
+ */
+/**
+ * Whether this tick's binding work belongs to the router rather than to us.
+ *
+ * The way out of a broken state depends on the answer. On the router-owned half
+ * the flush inside `applyChange` is the only thing that takes an instance's
+ * rules off, so a failure there has to stop a Stop or a Delete - dropping the
+ * record would strand every rule the daemon had written. On the SSH half it is
+ * the opposite: the instance's own catch-all is removed by an explicit command
+ * afterwards, and the rest of what `reconcileModel` does is other instances'
+ * business. Letting that fail a Delete is how a router ends up carrying a
+ * record nothing can remove.
+ */
+export function routerOwnsBinding(runtime: BindingRuntime): boolean {
+  const capability = runtime.options.agent?.()
+  return !!capability && hasFeature(capability, 'binding')
+}
+
+export async function applyChange(
+  runtime: BindingRuntime,
+  model: RouterModel,
+  flags: { forceKernel: boolean; rebooted: boolean },
+  options: { flushInstanceId?: string } = {}
+): Promise<string | null> {
+  const capability = runtime.options.agent?.()
+  if (!capability || !hasFeature(capability, 'binding')) {
+    return reconcileModel(runtime, model, flags)
+  }
+
+  const deps = { ctx: runtime.ctx, capability: () => capability }
+
+  try {
+    if (options.flushInstanceId) {
+      const flushed = await wanbindFlush(deps, wanbindSection(options.flushInstanceId))
+      if (!flushed.ok) {
+        return flushed.error ?? 'the router would not take this instance\'s rules off'
+      }
+    }
+
+    const synced = await syncRouterInstances(runtime, capability)
+    if (synced.skipped) return `the router's instance list was not updated: ${synced.skipped}`
+
+    // Best effort, and deliberately not checked. The daemon reconciles on its
+    // own timer anyway, so a refused pass costs a few seconds rather than
+    // correctness - and failing a Start that did start would be reporting the
+    // wrong thing.
+    await wanbindReconcile(deps)
+    return null
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
+}
 
 export async function onSample(
   runtime: BindingRuntime,
@@ -71,7 +181,7 @@ export async function onSample(
     // long the router has been up, and remembering it as zero would make the
     // next readable sample look like a reboot in the other direction.
     if (model.sys.uptimeSec > 0) runtime.lastUptime = model.sys.uptimeSec
-    const error = await reconcileModel(runtime, model, {
+    const error = await pass(runtime, model, {
       forceKernel: forceKernel || rebooted,
       rebooted
     })
@@ -111,6 +221,12 @@ export async function reconcileModel(
    * the table its rules actually point at.
    */
   const catchTables = new Set<number>()
+  /**
+   * The connected routes that keep the router answering on the LANs it is
+   * blackholing, deduplicated because several instances share one table.
+   * Written whenever the blackhole beside them is, so the two never exist apart.
+   */
+  const catchLocalRoutes = new Set<string>()
   let repairCatchAll = flags.forceKernel
 
   for (const instance of instances) {
@@ -187,6 +303,9 @@ export async function reconcileModel(
     if (!correct) {
       repairCatchAll = true
       catchTables.add(layout.catchAllTable)
+      if (iface?.l3Device) {
+        catchLocalRoutes.add(catchAllLocalRoute(layout.catchAllTable, cidr, iface.l3Device))
+      }
       for (let count = 0; count < atPref.length; count++) {
         catchDeletes.push(`ip -4 rule del pref ${pref} 2>/dev/null || true`)
       }
@@ -205,6 +324,9 @@ export async function reconcileModel(
       })
     } else if (flags.forceKernel) {
       catchTables.add(layout.catchAllTable)
+      if (iface?.l3Device) {
+        catchLocalRoutes.add(catchAllLocalRoute(layout.catchAllTable, cidr, iface.l3Device))
+      }
     }
   }
 
@@ -212,7 +334,7 @@ export async function reconcileModel(
     if (repairCatchAll) {
       await execScript(
         runtime,
-        [...catchTables].map((table) => catchAllRoute(table)),
+        [...[...catchTables].map((table) => catchAllRoute(table)), ...catchLocalRoutes],
         'repair binding catch-all'
       )
       for (const chunk of chunkRuleCommands(

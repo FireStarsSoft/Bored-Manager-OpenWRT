@@ -5,10 +5,31 @@
  * the interesting branches belong to routers that are hard to keep around: one
  * still on fw3, one whose BusyBox `ip` has no `rule`, one that answered nothing
  * at all. A function of its arguments is a function a test can reach.
+ *
+ * The sentences live in `text.ts` and the checklist rows in `checks.ts`; what
+ * is left here is the part worth reading in one piece. Both are re-exported
+ * below, so the split is an arrangement of this folder rather than something
+ * every caller has to know about.
  */
 import { PACKAGE_GROUPS } from '../packages'
+import { CARDS, observedChecks, type CheckSeed } from './checks'
 import {
+  APK_REQUIRED,
+  CORE_TOOLS,
+  MIN_RELEASE,
+  NOT_CONNECTED,
+  NOT_OPENWRT,
+  UNANSWERED,
+  opkgNotSupported,
+  releaseNumber
+} from './text'
+import {
+  AGENT_API,
+  AGENT_API_GUARD,
+  AGENT_API_UPDATE,
   emptyFacts,
+  type AgentCapability,
+  type AgentFacts,
   type MissingPackage,
   type OpenWrtCapabilities,
   type PackageManager,
@@ -19,93 +40,60 @@ import {
   type ReadinessStatus
 } from './types'
 
-const NOT_CONNECTED = 'Not connected to a router yet.'
-const NOT_OPENWRT =
-  'The connected machine is not an OpenWRT router. Connect this machine entry directly to the router over SSH.'
-
-/** Every row of a router that has not said a word yet reads this. */
-const UNANSWERED = 'The router has not answered yet.'
-
 /**
- * The one sentence for a router with no apk database, read by all three places
- * that have to say it: this checklist's `pkgmgr` row, the install form's own
- * refusal, and `installHint` on every create form. They used to carry three
- * copies of "Neither opkg nor apk is present", which is how the card and the
- * form came to describe one router in two voices the moment one was edited.
+ * What the module does with the agent it found, and why.
+ *
+ * Every branch that ends in `usable: false` is a fall back to SSH, never a
+ * failure: a router with no agent is the router this module has always managed,
+ * and an agent from a release the module has not met has to leave that router
+ * working rather than take it away. The only thing lost is speed and the safety
+ * net, and the surfaces say so rather than going quiet.
  */
-export const APK_REQUIRED =
-  'No apk package database on this router. This module needs OpenWrt 25.12 or newer, which replaced opkg with apk.'
+export function judgeAgent(facts: AgentFacts): AgentCapability {
+  const base = { ...facts, canGuard: false, canUpdate: false }
 
-/**
- * The refusal for a router that is simply too old. Naming the release it runs
- * is the whole point: "no package manager" on a working 24.10 router sends the
- * user looking for a broken installer instead of at a firmware upgrade.
- */
-export function opkgNotSupported(release: string): string {
-  return `This module needs OpenWrt 25.12 or newer. This router runs ${
-    release || 'an unknown release'
-  } and still uses opkg.`
-}
-
-/** The first release that ships apk. Below it the module is untested, not broken. */
-const MIN_RELEASE = 25.12
-
-/**
- * `24.10.2` as a number to compare, or null for anything that is not a release
- * number at all - a snapshot build calls itself `SNAPSHOT` or `r28417`. That is
- * exactly why no gate in this file is allowed to key off the version string:
- * the apk database on disk decides, and this only ever produces a warning.
- */
-function releaseNumber(release: string): number | null {
-  const match = release.trim().match(/^(\d{2})\.(\d{2})/)
-  return match ? Number(`${match[1]}.${match[2]}`) : null
-}
-
-/** Blocking requirements, in the order they are reported. */
-const CORE_TOOLS = ['ubus', 'uci', 'ip', 'netifd']
-
-/** Free kilobytes below which an install is refused outright / warned about. */
-const SPACE_BAD_KB = 512
-const SPACE_WARN_KB = 2_048
-
-/**
- * One condition, one sentence. The readiness card, the PPPoE create gate and
- * the binding create gate all describe this same missing firewall, and used to
- * do it in three vocabularies - none of which said that this is the one
- * readiness failure the install flow deliberately cannot fix, so a user reading
- * "Firewall4: Not found" above an "Install missing packages" section went
- * looking for it there.
- */
-export const FW4_MISSING =
-  'Managed PPPoE pools and WAN binding both need nftables masquerading, which routers still on fw3 do not have. It cannot be installed from here: moving a router to fw4 is a firmware upgrade, done at a router shell.'
-
-type CardKey = 'core' | 'firewall' | 'pppoe' | 'extras' | 'install'
-
-interface CardShape {
-  key: CardKey
-  title: string
-  /** Shown when every check in the card passed. */
-  okNote: string
-}
-
-const CARDS: readonly CardShape[] = [
-  { key: 'core', title: 'Core', okNote: 'This is an OpenWRT router and every required tool answered.' },
-  {
-    key: 'firewall',
-    title: 'Firewall & routing',
-    okNote: 'nftables masquerading and policy routing are both available.'
-  },
-  { key: 'pppoe', title: 'PPPoE dialing', okNote: 'The router can dial PPPoE sessions.' },
-  { key: 'extras', title: 'Extras', okNote: 'Device discovery and router logs are available.' },
-  {
-    key: 'install',
-    title: 'Install readiness',
-    okNote: 'Missing packages can be installed from this page.'
+  if (!facts.installed) {
+    return { ...base, usable: false, problem: null }
   }
-]
 
-interface CheckSeed extends ReadinessCheck {
-  card: CardKey
+  if (!facts.running) {
+    return {
+      ...base,
+      usable: false,
+      problem:
+        'The Bored Manager agent is installed but its service is not running, so this router is being managed over SSH instead. `/etc/init.d/bm-agent start` at a router shell, or check `logread -e bm-agent` for why it stopped.'
+    }
+  }
+
+  // Data written by a newer build than the one installed. The agent refuses to
+  // start on this and says so; if it is somehow running anyway, the module is
+  // not going to be the one that writes through it.
+  if (facts.dataSchema !== null && facts.schema > 0 && facts.dataSchema > facts.schema) {
+    return {
+      ...base,
+      usable: false,
+      problem: `This router's data is at schema ${facts.dataSchema} and the installed agent only understands ${facts.schema}. Install the newer packages again, or restore a snapshot taken before the downgrade.`
+    }
+  }
+
+  if (facts.apiVersion < AGENT_API.min || facts.apiVersion > AGENT_API.max) {
+    return {
+      ...base,
+      usable: false,
+      problem:
+        facts.apiVersion > AGENT_API.max
+          ? `The agent on this router speaks version ${facts.apiVersion} of the module API and this module knows up to ${AGENT_API.max}, so it is being managed over SSH. Update Bored Manager's OpenWRT module.`
+          : `The agent on this router speaks version ${facts.apiVersion} of the module API and this module needs at least ${AGENT_API.min}. Update the router packages.`
+    }
+  }
+
+  return {
+    ...base,
+    usable: true,
+    problem: null,
+    canGuard: facts.apiVersion >= AGENT_API_GUARD,
+    canUpdate: facts.apiVersion >= AGENT_API_UPDATE
+  }
 }
 
 const RANK: Record<ReadinessStatus, number> = { bad: 0, warn: 1, unknown: 2, ok: 3 }
@@ -114,53 +102,6 @@ function worst(statuses: readonly ReadinessStatus[]): ReadinessStatus {
   let out: ReadinessStatus = 'ok'
   for (const status of statuses) if (RANK[status] < RANK[out]) out = status
   return out
-}
-
-function toolCheck(
-  key: string,
-  title: string,
-  present: boolean,
-  card: CardKey,
-  detailWhenMissing: string
-): CheckSeed {
-  return {
-    key,
-    title,
-    status: present ? 'ok' : 'bad',
-    detail: present ? 'Present' : detailWhenMissing,
-    required: true,
-    install: null,
-    card
-  }
-}
-
-function pppoeDetail(hasPppd: boolean, plugin: boolean, kmod: boolean): string {
-  const missing: string[] = []
-  if (!hasPppd) missing.push('the pppd daemon')
-  if (!plugin) missing.push('the rp-pppoe plugin')
-  if (!kmod) missing.push('kernel PPPoE support')
-  return missing.length
-    ? `Missing ${missing.join(', ')}.`
-    : 'pppd, the rp-pppoe plugin and kernel support are all present.'
-}
-
-function spaceCheck(freeKb: number, needed: boolean): CheckSeed {
-  const seed = { key: 'space', title: 'Free space', required: false, install: null, card: 'install' as const }
-  if (freeKb < 0) {
-    return { ...seed, status: 'unknown', detail: 'df did not report the overlay; installs may run out of room.' }
-  }
-  const size = `${Math.round(freeKb / 1024)} MB free on the overlay`
-  if (freeKb < SPACE_BAD_KB) {
-    return {
-      ...seed,
-      status: needed ? 'bad' : 'warn',
-      detail: `${size}. Too little to install anything; free some space first.`
-    }
-  }
-  if (freeKb < SPACE_WARN_KB) {
-    return { ...seed, status: 'warn', detail: `${size}. Enough for a small package, but only just.` }
-  }
-  return { ...seed, status: 'ok', detail: size }
 }
 
 function stateLabelFor(state: ReadinessState): string {
@@ -200,6 +141,8 @@ export function buildReadiness(facts: ProbeFacts): OpenWrtCapabilities {
   const oldRelease = release !== null && release < MIN_RELEASE
   const isRoot = facts.uid === 0
 
+  const agent = judgeAgent(facts.probed ? facts.agent : { ...facts.agent, installed: false })
+
   const capabilityValues = {
     hasPppoe,
     hasIpRule: facts.hasIpRule,
@@ -219,7 +162,7 @@ export function buildReadiness(facts: ProbeFacts): OpenWrtCapabilities {
     }
   }
 
-  const missingCore = CORE_TOOLS.filter((tool) => !tools.has(tool))
+  const missingCore = CORE_TOOLS.filter((tool: string) => !tools.has(tool))
   let problem: string | null = null
   if (!facts.connected) problem = NOT_CONNECTED
   else if (!facts.probed) {
@@ -241,104 +184,22 @@ export function buildReadiness(facts: ProbeFacts): OpenWrtCapabilities {
 
   const ready = facts.probed && problem === null
   const releaseLabel = [facts.release, facts.board].filter(Boolean).join(' · ') || 'OpenWRT'
-  const observed: CheckSeed[] = [
-    {
-      key: 'openwrt',
-      title: 'OpenWRT firmware',
-      status: !facts.isOpenwrt ? 'bad' : oldRelease ? 'warn' : 'ok',
-      detail: !facts.isOpenwrt
-        ? 'This machine did not identify itself as OpenWRT.'
-        : oldRelease
-          ? `${releaseLabel}. This module is built for OpenWrt 25.12 and newer; nothing below that is tested.`
-          : releaseLabel,
-      required: true,
-      install: null,
-      card: 'core'
-    },
-    toolCheck('ubus', 'ubus system bus', tools.has('ubus'), 'core', 'Not found in PATH.'),
-    toolCheck('uci', 'uci configuration', tools.has('uci'), 'core', 'Not found in PATH.'),
-    toolCheck('ip', 'iproute2 (ip)', tools.has('ip'), 'core', 'Not found in PATH.'),
-    toolCheck('netifd', 'netifd', tools.has('netifd'), 'core', 'Not found in PATH.'),
-    {
-      key: 'fw4',
-      title: 'Firewall4 (fw4 + nft)',
-      status: hasFw4 ? 'ok' : 'bad',
-      // No install entry on purpose: a router still on fw3 cannot be upgraded
-      // into fw4 from here without taking its firewall down.
-      detail: hasFw4 ? 'Present' : `Not found. ${FW4_MISSING}`,
-      required: false,
-      install: null,
-      card: 'firewall'
-    },
-    {
-      key: 'iprule',
-      title: 'Policy routing (ip rule)',
-      status: facts.hasIpRule ? 'ok' : 'warn',
-      detail: facts.hasIpRule
-        ? 'Present'
-        : 'This `ip` has no rule support. WAN binding cannot steer a device without it.',
-      required: false,
-      install: facts.hasIpRule ? null : 'ipfull',
-      card: 'firewall'
-    },
-    {
-      key: 'pppoe',
-      title: 'PPPoE support',
-      status: hasPppoe ? 'ok' : 'bad',
-      detail: pppoeDetail(hasPppd, facts.ppp.plugin, facts.ppp.kmod),
-      required: false,
-      install: hasPppoe ? null : 'pppoe',
-      card: 'pppoe'
-    },
-    {
-      key: 'dnsmasq',
-      title: 'dnsmasq (DHCP leases)',
-      status: hasDnsmasq ? 'ok' : 'warn',
-      detail: hasDnsmasq
-        ? 'Present'
-        : 'Without it there are no DHCP leases to read, so the device table stays empty.',
-      required: false,
-      install: hasDnsmasq ? null : 'dnsmasq',
-      card: 'extras'
-    },
-    {
-      key: 'logread',
-      title: 'logread',
-      status: hasLogread ? 'ok' : 'warn',
-      detail: hasLogread
-        ? 'Present'
-        : 'Part of the base system. PPPoE dial errors are read from it; without it a failed session gives no reason.',
-      required: false,
-      install: null,
-      card: 'extras'
-    },
-    {
-      key: 'pkgmgr',
-      title: 'Package manager (apk)',
-      status: pkgManager ? 'ok' : 'bad',
-      // The same strings the install form and every create form's install hint
-      // read, so the card and the form cannot describe one router in two
-      // vocabularies once either is edited.
-      detail: pkgManager ? 'apk is available' : (pkgProblem ?? APK_REQUIRED),
-      required: true,
-      install: null,
-      card: 'install'
-    },
-    {
-      key: 'root',
-      title: 'Root access',
-      status: isRoot ? 'ok' : facts.uid < 0 ? 'unknown' : 'warn',
-      detail: isRoot
-        ? 'Logged in as root'
-        : facts.uid < 0
-          ? 'The router did not report a user id.'
-          : `Logged in as uid ${facts.uid}. Installing packages needs root.`,
-      required: false,
-      install: null,
-      card: 'install'
-    },
-    spaceCheck(facts.overlayFreeKb, missingPackages.length > 0)
-  ]
+  const observed = observedChecks({
+    facts,
+    tools,
+    hasPppd,
+    hasFw4,
+    hasPppoe,
+    hasDnsmasq,
+    hasLogread,
+    oldRelease,
+    releaseLabel,
+    pkgManager,
+    pkgProblem,
+    isRoot,
+    agent,
+    missingPackages: missingPackages.length
+  })
 
   // Nothing has been read off this router, so ten of the thirteen rows above
   // were a default dressed up as an observation - "ubus: Not found in PATH",
@@ -375,10 +236,21 @@ export function buildReadiness(facts: ProbeFacts): OpenWrtCapabilities {
     }
   })
 
-  const setupNeeded = ready && missingPackages.length > 0 && pkgManager !== null && isRoot
+  const canInstall = ready && pkgManager !== null && isRoot
+  const setupNeeded = canInstall && missingPackages.length > 0
   // A warning is something the user may choose to live with; only a `bad` check
-  // on a working router is worth pulling them to the settings page for.
-  const attention = ready && (setupNeeded || checks.some((check) => check.status === 'bad'))
+  // on a working router is worth pulling them to the settings page for - with
+  // one deliberate exception.
+  //
+  // A router with no usable agent works, and every surface says so rather than
+  // refusing. But it works over SSH: no snapshots, no commit-confirm, a lease
+  // read on a timer instead of on the event, and a pool built one round trip at
+  // a time. That is a difference worth a banner, not a sentence three pages
+  // deep - so it earns `attention` without being a `bad` check, because the
+  // router is not faulty and the card should not be red.
+  const attention =
+    ready &&
+    (setupNeeded || !agent.usable || checks.some((check) => check.status === 'bad'))
   const state: ReadinessState = !facts.connected
     ? 'connecting'
     : !facts.probed
@@ -405,6 +277,18 @@ export function buildReadiness(facts: ProbeFacts): OpenWrtCapabilities {
     hasPppoe,
     hasDnsmasq,
     hasIpRule: facts.hasIpRule,
+    services: facts.probed
+      ? facts.services
+      : { dnsmasq: 'unknown', netifd: 'unknown', fw4: 'unknown' },
+    // Only from answers, the same way `missingPackages` is: an unprobed router
+    // has no rules and no mwan3 by default rather than by observation, and a
+    // gate reading these must not be handed a fact nobody established.
+    foreignRules: facts.probed ? [...facts.foreignRules] : [],
+    foreignRuleCount: facts.probed ? facts.foreignRuleCount : 0,
+    foreignRulesRead: facts.probed && facts.foreignRulesRead,
+    mwan3: facts.probed ? facts.mwan3 : { config: false, running: false },
+    agent,
+    rulePrefBase: facts.rulePrefBase,
     uid: facts.uid,
     isRoot,
     pkgManager,
@@ -418,6 +302,15 @@ export function buildReadiness(facts: ProbeFacts): OpenWrtCapabilities {
     checks,
     cards,
     missingPackages,
-    setupNeeded
+    setupNeeded,
+    canInstall
   }
 }
+
+export {
+  APK_REQUIRED,
+  FW4_MISSING,
+  SPACE_BAD_KB,
+  SPACE_WARN_KB,
+  opkgNotSupported
+} from './text'

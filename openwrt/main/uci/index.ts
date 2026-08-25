@@ -46,6 +46,7 @@ export {
   reloadFirewall,
   reloadNetwork,
   runUciBatch,
+  type UciPackage,
   waitCancelable,
   type ApplyChunkOptions,
   type ExecContext,

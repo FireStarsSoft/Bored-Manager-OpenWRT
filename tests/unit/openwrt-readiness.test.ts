@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ModuleExecResult } from '@shared/modules'
 import {
   buildReadiness,
+  emptyAgentFacts,
   emptyCapabilities,
   probeOpenWrt,
   type OpenWrtCapabilities,
@@ -50,7 +51,20 @@ interface ProbeOptions {
   uid?: string
   space?: string[]
   ipRule?: boolean
+  /** The `===SERVICE===` body: `pidof` first, then whatever is running. */
+  service?: string[]
+  /** The `===CONFLICT===` body, `total` line included. */
+  conflict?: string[]
+  /**
+   * What `bm.agent info` answers. The default is a healthy current agent, so
+   * that `ready` in these tests means a router that is genuinely set up;
+   * `null` is the router with none, which is its own case below.
+   */
+  agent?: Record<string, unknown> | null
 }
+
+/** A healthy, current agent, as the probe reads it back. */
+const AGENT = { release: '1.2.0', apiVersion: 3, schema: 1, dataSchema: 1, provides: [] }
 
 function probeOutput(options: ProbeOptions = {}): string {
   const openwrt = options.openwrt ?? true
@@ -77,6 +91,12 @@ function probeOutput(options: ProbeOptions = {}): string {
     ...(options.space ?? DF),
     '===IPRULE===',
     ...(options.ipRule ?? true ? ['ok'] : []),
+    '===SERVICE===',
+    ...(options.service ?? ['pidof', 'dnsmasq', 'netifd', 'nftok', 'fw4']),
+    '===CONFLICT===',
+    ...(options.conflict ?? ['total 0']),
+    '===AGENT===',
+    ...(options.agent === null ? [] : [JSON.stringify(options.agent ?? AGENT)]),
     // Last, and required: without it a half-carried answer parses as a whole
     // one, and the module reports a healthy router as a broken one.
     '===DONE==='
@@ -101,6 +121,15 @@ const facts = (patch: Partial<ProbeFacts> = {}): ProbeFacts => ({
   uid: 0,
   overlayFreeKb: 8_192,
   hasIpRule: true,
+  services: { dnsmasq: 'running', netifd: 'running', fw4: 'running' },
+  foreignRules: [],
+  foreignRuleCount: 0,
+  foreignRulesRead: true,
+  mwan3: { config: false, running: false },
+  // A router that is fully set up, so `ready` here means ready. The router
+  // with no agent is its own case, and says so by passing `emptyAgentFacts()`.
+  agent: { ...emptyAgentFacts(), installed: true, running: true, ...AGENT },
+  rulePrefBase: 20_000,
   transportError: '',
   ...patch
 })
@@ -301,6 +330,39 @@ describe('openwrt readiness: five states instead of one sentence', () => {
     expect(check(caps, 'netifd').required).toBe(true)
   })
 
+  it('says which half does the work, without calling either one a fault', () => {
+    // Three states, three sentences. No agent is one row saying so and two
+    // saying there is nothing to ask; an agent with neither package is a router
+    // that has the safety net and does the work over SSH; an agent with both is
+    // the router doing it itself. None of them is `bad`, because none of them
+    // is broken.
+    const none = buildReadiness(facts({ agent: emptyAgentFacts() }))
+    expect(check(none, 'feature-binding').status).toBe('unknown')
+    expect(check(none, 'feature-binding').detail).toContain('no agent to ask')
+
+    const bare = buildReadiness(facts())
+    expect(check(bare, 'feature-binding').status).toBe('warn')
+    expect(check(bare, 'feature-binding').detail).toContain('bm-wanbind is not installed')
+    expect(check(bare, 'feature-pppoe').detail).toContain('bm-pppoe-pool is not installed')
+
+    const full = buildReadiness(
+      facts({
+        agent: {
+          ...emptyAgentFacts(),
+          installed: true,
+          running: true,
+          ...AGENT,
+          provides: ['binding', 'pppoe']
+        }
+      })
+    )
+    expect(check(full, 'feature-binding').status).toBe('ok')
+    expect(check(full, 'feature-pppoe').status).toBe('ok')
+    // Still not a failure anywhere: these rows never make a router unusable.
+    expect(full.checks.some((entry) => entry.key.startsWith('feature-') && entry.status === 'bad'))
+      .toBe(false)
+  })
+
   it('is ready when everything answered, and asks for nothing', () => {
     const caps = buildReadiness(facts())
 
@@ -309,7 +371,16 @@ describe('openwrt readiness: five states instead of one sentence', () => {
     expect(caps.problem).toBeNull()
     expect(caps.setupNeeded).toBe(false)
     expect(caps.missingPackages).toEqual([])
-    expect(caps.checks.every((entry) => entry.status === 'ok')).toBe(true)
+    // Every row except the ones about the router-side packages, which this
+    // fixture's router does not have. Those are warnings and unknowns by
+    // design - a router managed over SSH is not a router with a fault - and
+    // each is covered on its own below.
+    const routerSide = ['agent', 'guard', 'feature-binding', 'feature-pppoe']
+    expect(
+      caps.checks
+        .filter((entry) => !routerSide.includes(entry.key))
+        .every((entry) => entry.status === 'ok')
+    ).toBe(true)
   })
 
   it('runs, but asks for attention, when an optional package is missing', () => {
@@ -400,7 +471,8 @@ describe('openwrt readiness cards', () => {
       'firewall',
       'pppoe',
       'extras',
-      'install'
+      'install',
+      'agent'
     ])
     const pppoe = caps.cards[2]
     expect(pppoe.status).toBe('bad')
@@ -413,12 +485,210 @@ describe('openwrt readiness cards', () => {
   })
 
   it('pins the chips that are not ok, so the card filter shows the faults', () => {
+    // A BusyBox `ip`: it refuses a numeric routing table, so policy routing is
+    // a fault - but it lists rules perfectly well, so the competing-rule scan
+    // ran and its answer stands. The two used to be one verdict, and reading
+    // the second off the first blanked this row on exactly the routers where a
+    // competing rule matters most.
     const caps = buildReadiness(facts({ hasIpRule: false }))
     const firewall = caps.cards[1]
 
     expect(firewall.checks).toEqual([
       { label: 'Firewall4 (fw4 + nft)', status: 'ok', pinned: false },
-      { label: 'Policy routing (ip rule)', status: 'warn', pinned: true }
+      { label: 'Policy routing (ip rule)', status: 'warn', pinned: true },
+      { label: 'Competing policy routing', status: 'ok', pinned: false }
     ])
+  })
+
+  it('pins competing rules as unknown when the scan itself did not run', () => {
+    // The scan not running is its own fact. `unknown` pins too - a blank on
+    // this card is a fault, not a clean bill of health.
+    const caps = buildReadiness(facts({ foreignRulesRead: false }))
+
+    expect(caps.cards[1].checks).toContainEqual({
+      label: 'Competing policy routing',
+      status: 'unknown',
+      pinned: true
+    })
+  })
+})
+
+/**
+ * A binary in PATH is not a running service, and one ip rule at a lower
+ * preference beats everything this module writes. Both faults used to be
+ * invisible: the first showed an empty device table with no reason given, the
+ * second a green dashboard while the traffic left by another WAN.
+ */
+describe('openwrt readiness: running services and competing rules', () => {
+  it('separates an installed dnsmasq from a running one', async () => {
+    const stopped = await probe({ service: ['pidof', 'netifd', 'nftok', 'fw4'] })
+
+    // Still installed - offering to install it again would be nonsense.
+    expect(stopped.hasDnsmasq).toBe(true)
+    expect(stopped.missingPackages.some((entry) => entry.name === 'dnsmasq')).toBe(false)
+    expect(stopped.services.dnsmasq).toBe('stopped')
+    expect(check(stopped, 'dnsmasq').status).toBe('warn')
+    expect(check(stopped, 'dnsmasq').detail).toContain('service is not running')
+    expect(check(stopped, 'dnsmasq').detail).toContain('service dnsmasq start')
+
+    const running = await probe()
+    expect(running.services.dnsmasq).toBe('running')
+    expect(check(running, 'dnsmasq').status).toBe('ok')
+  })
+
+  it('will not call a service stopped on a router that has no pidof', async () => {
+    // The sentinel is the whole point: without it every router missing one
+    // BusyBox applet is told its dnsmasq and its netifd are both down.
+    const caps = await probe({ service: ['nftok', 'fw4'] })
+
+    expect(caps.services.dnsmasq).toBe('unknown')
+    expect(caps.services.netifd).toBe('unknown')
+    expect(check(caps, 'dnsmasq').status).toBe('ok')
+    expect(check(caps, 'dnsmasq').detail).toContain('no pidof')
+    expect(check(caps, 'netifdrun').status).toBe('unknown')
+    // Nothing about a missing applet may make the router unmanageable.
+    expect(caps.problem).toBeNull()
+    expect(caps.ready).toBe(true)
+  })
+
+  it('reports netifd installed but not running as a fault worth pulling the user in for', async () => {
+    const caps = await probe({ service: ['pidof', 'dnsmasq', 'nftok', 'fw4'] })
+
+    expect(check(caps, 'netifd').status).toBe('ok')
+    expect(check(caps, 'netifdrun').status).toBe('bad')
+    expect(check(caps, 'netifdrun').detail).toContain('not running')
+    // A `bad` check on a working router is what `attention` is for; it must not
+    // become `problem`, which would stop the collector on a router that runs.
+    expect(caps.problem).toBeNull()
+    expect(caps.state).toBe('attention')
+  })
+
+  it('tells fw4 installed-but-unloaded apart from a router still on fw3', async () => {
+    const unloaded = await probe({ service: ['pidof', 'dnsmasq', 'netifd', 'nftok'] })
+
+    expect(unloaded.hasFw4).toBe(true)
+    expect(check(unloaded, 'fw4').status).toBe('warn')
+    expect(check(unloaded, 'fw4').detail).toContain('service firewall start')
+
+    // The fw3 router keeps the refusal it always had, wording and all.
+    const fw3 = await probe({
+      tools: ['/sbin/ubus', '/sbin/uci', '/sbin/ip', '/sbin/netifd', '/usr/sbin/dnsmasq', '/usr/bin/apk'],
+      service: ['pidof', 'dnsmasq', 'netifd']
+    })
+    expect(fw3.hasFw4).toBe(false)
+    expect(check(fw3, 'fw4').status).toBe('bad')
+    expect(check(fw3, 'fw4').detail).toContain('fw3')
+    // No nft to load a ruleset with, so "not loaded" is not an answer anyone has.
+    expect(fw3.services.fw4).toBe('unknown')
+  })
+
+  it('names mwan3 rather than listing the preferences it wrote', async () => {
+    const caps = await probe({
+      conflict: [
+        'mwan3conf',
+        'mwan3run',
+        'rule 1001: from all fwmark 0x100/0x3f00 lookup 1',
+        'total 1'
+      ]
+    })
+
+    expect(caps.mwan3).toEqual({ config: true, running: true })
+    const conflict = check(caps, 'conflict')
+    expect(conflict.status).toBe('warn')
+    expect(conflict.detail).toContain('mwan3')
+    expect(conflict.detail).toContain('and running')
+    expect(conflict.detail).toContain('lowest preference wins')
+    // A warning, never a refusal: someone chose to run mwan3 on this router.
+    expect(caps.ready).toBe(true)
+    expect(caps.problem).toBeNull()
+  })
+
+  it('reports a foreign rule below the managed window, and how many there were', async () => {
+    const caps = await probe({
+      conflict: [
+        'rule 100: from 192.168.9.0/24 lookup 42',
+        'rule 200: from all iif eth2 lookup 43',
+        'rule 300: from all lookup 44',
+        'rule 400: from all lookup 45',
+        // The count comes from awk, not from the lines that survived the cap.
+        'total 9'
+      ]
+    })
+
+    expect(caps.foreignRuleCount).toBe(9)
+    expect(caps.foreignRules).toHaveLength(4)
+    // Ascending: the lowest preference is the one that actually decides.
+    expect(caps.foreignRules[0]).toEqual({ pref: 100, text: 'from 192.168.9.0/24 lookup 42' })
+    const conflict = check(caps, 'conflict')
+    expect(conflict.status).toBe('warn')
+    expect(conflict.detail).toContain('9 ip rule(s)')
+    expect(conflict.detail).toContain('100: from 192.168.9.0/24 lookup 42')
+    expect(conflict.detail).toContain('and 6 more')
+  })
+
+  it('says nothing about competing rules when the scan produced no count', async () => {
+    // No `total` line means the awk never reached its END block - the scan did
+    // not run, and a body with no rules in it is then evidence of nothing at
+    // all rather than of a clean router.
+    const caps = await probe({ conflict: [] })
+
+    expect(check(caps, 'conflict').status).toBe('unknown')
+    expect(check(caps, 'conflict').detail).toContain('Nothing could be read back')
+  })
+
+  it('still reports competing rules on a router whose ip cannot do numeric tables', async () => {
+    // The case that made this its own fact. `ipRule: false` is a BusyBox `ip`,
+    // which fails policy routing and lists rules perfectly well - so the count
+    // it produced is real and is worth showing. Reading this row off the
+    // policy-routing verdict hid a competing rule behind a missing package.
+    const caps = await probe({
+      ipRule: false,
+      conflict: ['rule 100: from all lookup 42', 'total 1']
+    })
+
+    expect(caps.hasIpRule).toBe(false)
+    expect(check(caps, 'conflict').status).toBe('warn')
+    expect(caps.foreignRuleCount).toBe(1)
+  })
+
+  it('calls a clean router clean, and names the preference it checked below', async () => {
+    const caps = await probe()
+
+    expect(caps.foreignRuleCount).toBe(0)
+    expect(check(caps, 'conflict').status).toBe('ok')
+    expect(check(caps, 'conflict').detail).toContain('20000')
+    expect(caps.state).toBe('ready')
+  })
+
+  it('filters on the router, at the preference base actually configured', async () => {
+    const harness = moduleHarness('openwrt', () => ok(probeOutput()))
+
+    const caps = await probeOpenWrt(harness.ctx, 12_345)
+
+    const command = harness.exec.mock.calls[0]?.[0] ?? ''
+    // Router-side, because an unfiltered `ip rule show` on a router with a
+    // thousand bound clients dwarfs everything else this probe collects.
+    expect(command).toContain('-v B=12345')
+    expect(command).toContain("echo '===CONFLICT==='")
+    expect(caps.rulePrefBase).toBe(12_345)
+  })
+
+  it('falls back to the shipped base rather than filtering against nothing', async () => {
+    const harness = moduleHarness('openwrt', () => ok(probeOutput()))
+
+    // An empty `-v B=` would make the comparison `$1+0 < 0` and report every
+    // router on earth as free of competing rules.
+    await probeOpenWrt(harness.ctx, 0)
+
+    expect(harness.exec.mock.calls[0]?.[0] ?? '').toContain('-v B=20000')
+  })
+
+  it('claims nothing about a router that never answered', () => {
+    const caps = emptyCapabilities()
+
+    expect(caps.services).toEqual({ dnsmasq: 'unknown', netifd: 'unknown', fw4: 'unknown' })
+    expect(caps.foreignRules).toEqual([])
+    expect(caps.mwan3).toEqual({ config: false, running: false })
+    expect(check(caps, 'conflict').detail).toBe('The router has not answered yet.')
   })
 })

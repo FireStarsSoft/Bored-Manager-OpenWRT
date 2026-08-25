@@ -72,6 +72,16 @@ type NumericRule = {
   [K in keyof OwrtRules]: OwrtRules[K] extends number ? K : never
 }[keyof OwrtRules]
 
+/**
+ * The narrowest client priority range either half will accept.
+ *
+ * MIN_PREF_SPAN in bm-wanbind's config.uc, and the same number for the same
+ * reason: a range that cannot hold a useful number of clients is a
+ * misconfiguration rather than a small pool, and both halves have to agree
+ * about it or one of them accepts a setting the other will not run.
+ */
+const MIN_PREF_SPAN = 64
+
 export const RULE_BOUNDS: Record<NumericRule, { min: number; max: number; label: string }> = {
   tableBase: { min: 1_000, max: 25_000, label: 'Routing table base' },
   rulePrefBase: { min: 1_000, max: 28_999, label: 'Assignment rule priority base' },
@@ -177,7 +187,14 @@ function normalize(raw: unknown): OwrtConfig {
   const spanned = { ...DEFAULT_RULES, ...rules }
   // The same span test the tables get, for the preferences. One client rule per
   // WAN, so a range narrower than a batch runs into the catch-all preferences.
-  if (spanned.rulePrefBase + spanned.maxBatchRows >= spanned.catchAllPrefBase) {
+  // The floor applies whatever the batch size: bm-wanbind refuses an instance
+  // with less than that between the two, and refuses it by leaving the section
+  // out of its own list - which shows up as an instance with no devices, no
+  // error and nothing to say why.
+  if (
+    spanned.rulePrefBase + spanned.maxBatchRows >= spanned.catchAllPrefBase ||
+    spanned.catchAllPrefBase - spanned.rulePrefBase < MIN_PREF_SPAN
+  ) {
     delete rules.rulePrefBase
     delete rules.catchAllPrefBase
     delete rules.maxBatchRows
@@ -529,6 +546,18 @@ export class RulesEditor {
         level: 'error',
         label: 'The client rule priority range overlaps the catch-all priority range',
         detail: `Each bound device takes one ip rule priority from ${candidate.rulePrefBase} upwards and a batch can hold ${candidate.maxBatchRows}, so the catch-all base has to sit at least that far above it. Raise the catch-all priority base or lower the rule priority base / maximum batch size.`
+      })
+    }
+    // A floor as well as a gap, because the router half has one. A narrow range
+    // passes every test above when the batch size is small, and `bm-wanbind`
+    // then refuses the instance by omitting it from its own list - so the
+    // binding table shows nothing bound, nothing waiting and no error, and the
+    // only explanation is a line in the router's syslog.
+    if (candidate.catchAllPrefBase - candidate.rulePrefBase < MIN_PREF_SPAN) {
+      findings.push({
+        level: 'error',
+        label: 'The client rule priority range is too narrow',
+        detail: `There are ${candidate.catchAllPrefBase - candidate.rulePrefBase} priorities between the two bases, and at least ${MIN_PREF_SPAN} are needed. The router's own binding service refuses an instance narrower than that, and it refuses it silently.`
       })
     }
     if (candidate.tableBase + candidate.maxBatchRows >= candidate.catchAllTable) {

@@ -1,0 +1,404 @@
+'use strict';
+'require baseclass';
+'require rpc';
+'require ui';
+'require poll';
+'require dom';
+
+/*
+ * One place that knows how to talk to the three daemons, and one place that
+ * knows how to say what went wrong.
+ *
+ * Every view begins the same way: ask bm.agent what this router has. That call
+ * is the only one whose absence has an unambiguous meaning - no agent, no
+ * pages worth drawing - and its reply carries `provides`, which is how a view
+ * knows whether the daemon it is about is installed at all. Guessing that from
+ * a ubus error code would be guessing: "object not found" is also what a
+ * daemon that crashed two seconds ago looks like, and those two need different
+ * sentences and different buttons.
+ *
+ * The other rule here is that nothing rejects into a view. `ask` turns every
+ * failure into { ok: false, error: <a sentence> }, so a table renders its own
+ * explanation rather than leaving an empty box and a stack trace in the
+ * console. It is the same rule the app's pages follow, for the same reason: a
+ * blank table is the one state a person cannot act on.
+ */
+
+const AGENT = 'bm.agent';
+const WANBIND = 'bm.wanbind';
+const PPPOE = 'bm.pppoe';
+
+/*
+ * `expect: { '': {} }` returns the whole reply, defaulting to an empty object.
+ * `reject: true` turns a nonzero ubus status into a rejection instead of
+ * quietly handing back the default, which is what lets `ask` tell "the router
+ * said no" from "the router said nothing".
+ *
+ * Our own methods answer refusals inside the payload - { ok: false, reason } -
+ * so those arrive here as successful calls and are handled by `run`.
+ */
+function declare(object, method, params) {
+	return rpc.declare({
+		object: object,
+		method: method,
+		params: params,
+		expect: { '': {} },
+		reject: true
+	});
+}
+
+const calls = {
+	agentInfo: declare(AGENT, 'info'),
+	agentStats: declare(AGENT, 'stats'),
+
+	configList: declare(AGENT, 'config_list'),
+	configShow: declare(AGENT, 'config_show', { id: '' }),
+	configDiff: declare(AGENT, 'config_diff', { id: '' }),
+	configExport: declare(AGENT, 'config_export', { id: '' }),
+	configRestore: declare(AGENT, 'config_restore', { id: '', dry_run: false }),
+	configSnapshot: declare(AGENT, 'config_snapshot', { reason: '' }),
+	configDelete: declare(AGENT, 'config_delete', { id: '' }),
+
+	guardStatus: declare(AGENT, 'guard_status'),
+	guardArm: declare(AGENT, 'guard_arm', { timeout: 0, reason: '' }),
+	guardConfirm: declare(AGENT, 'guard_confirm'),
+	guardCancel: declare(AGENT, 'guard_cancel'),
+
+	updateCheck: declare(AGENT, 'update_check'),
+	updateApply: declare(AGENT, 'update_apply', { dry_run: false, guard: true, timeout: 0 }),
+	updateRollback: declare(AGENT, 'update_rollback', { guard: true, timeout: 0 }),
+	updateStatus: declare(AGENT, 'update_status'),
+
+	wanbindInfo: declare(WANBIND, 'info'),
+	wanbindStats: declare(WANBIND, 'stats'),
+	wanbindAssignments: declare(WANBIND, 'assignments', { instance: '' }),
+	wanbindWaiting: declare(WANBIND, 'waiting', { instance: '' }),
+	wanbindPin: declare(WANBIND, 'pin', { instance: '', mac: '', wan: '' }),
+	wanbindReassign: declare(WANBIND, 'reassign', { instance: '', mac: '' }),
+	wanbindUnassign: declare(WANBIND, 'unassign', { instance: '', mac: '' }),
+	wanbindRelease: declare(WANBIND, 'release', { instance: '', mac: '' }),
+	wanbindReconcile: declare(WANBIND, 'reconcile', { instance: '' }),
+	wanbindFlush: declare(WANBIND, 'flush', { instance: '' }),
+
+	poolInfo: declare(PPPOE, 'info'),
+	poolStats: declare(PPPOE, 'stats'),
+	poolSessions: declare(PPPOE, 'sessions', { id: '', scope: '' }),
+	poolAction: declare(PPPOE, 'action', { action: '', sections: [] }),
+	poolAdd: declare(PPPOE, 'pool_add', {
+		id: '', prefix: '', carrier: '', seq_from: 0, table_base: 0, vlan: 0, accounts: []
+	}),
+	poolAppend: declare(PPPOE, 'pool_append', { id: '', accounts: [] }),
+	poolDelete: declare(PPPOE, 'pool_delete', { id: '' }),
+	poolReconcile: declare(PPPOE, 'reconcile')
+};
+
+/** A ubus failure as something a person can act on. */
+function describe(error) {
+	const text = String((error && error.message) || error || '');
+
+	if (/ubus code 4\b/.test(text))
+		return _('The router has no such service listening. It may have stopped, or the package may have just been removed.');
+	if (/ubus code 6\b/.test(text))
+		return _('This login is not allowed to make that call. The ACL that grants it is luci-app-bm.');
+	if (/ubus code (2|7)\b/.test(text))
+		return _('The router rejected the arguments of that call.');
+	if (/ubus code 9\b/.test(text))
+		return _('The router took too long to answer.');
+	if (/HTTP error|NetworkError/i.test(text))
+		return _('The router did not answer. The connection may have gone.');
+
+	return text.length ? text : _('The call failed and the router did not say why.');
+}
+
+return baseclass.extend({
+	AGENT: AGENT,
+	WANBIND: WANBIND,
+	PPPOE: PPPOE,
+
+	calls: calls,
+
+	/**
+	 * Make a call and never reject.
+	 *
+	 * Resolves to { ok: true, data } or { ok: false, error } where `error` is a
+	 * finished sentence. Views branch on `ok` and print `error`; none of them
+	 * needs a catch of its own, and none of them can forget one.
+	 */
+	ask(fn, args) {
+		return fn(args ?? {})
+			.then(data => ({ ok: true, data: data ?? {}, error: null }))
+			.catch(error => ({ ok: false, data: null, error: describe(error) }));
+	},
+
+	/**
+	 * Make a call that changes something, and report either way.
+	 *
+	 * Two different failures land here and they are told apart on purpose: a
+	 * call that never arrived is an error, and a call the daemon answered with
+	 * { ok: false, reason } is a refusal - the router is fine and has said why
+	 * it would not do that. Showing the second as an error would send somebody
+	 * looking for a fault that is not there.
+	 */
+	run(fn, args, success) {
+		return this.ask(fn, args).then(result => {
+			if (!result.ok) {
+				ui.addNotification(null, E('p', {}, result.error), 'error');
+				return null;
+			}
+
+			const data = result.data ?? {};
+
+			if (data.ok === false) {
+				ui.addNotification(null, E('p', {}, data.reason ?? _('The router would not do that, and did not say why.')), 'warning');
+				return null;
+			}
+
+			if (success)
+				ui.addNotification(null, E('p', {}, success), 'info');
+
+			return data;
+		});
+	},
+
+	/** Whether an installed feature package claims this capability. */
+	has(info, capability) {
+		return !!info && Array.isArray(info.provides) && info.provides.indexOf(capability) >= 0;
+	},
+
+	/**
+	 * The router's own clock at the moment a reply was built.
+	 *
+	 * Every daemon reports `started` and `uptime`, so their sum is the epoch
+	 * second the router believed it was. Ages are worked out against that
+	 * rather than against the browser's clock, which on a router with no RTC
+	 * and no NTP yet can be years out - and an uptime of "-3 years" is how a
+	 * perfectly healthy daemon comes to look broken.
+	 */
+	routerNow(info) {
+		const started = (info && info.started) | 0;
+		const uptime = (info && info.uptime) | 0;
+		return started + uptime;
+	},
+
+	/** 3d 4h, 12m 30s, 45s. Never an empty string. */
+	duration(seconds) {
+		let left = Math.max(0, Math.trunc(seconds || 0));
+
+		const days = Math.floor(left / 86400); left -= days * 86400;
+		const hours = Math.floor(left / 3600); left -= hours * 3600;
+		const minutes = Math.floor(left / 60); left -= minutes * 60;
+
+		if (days) return '%dd %dh'.format(days, hours);
+		if (hours) return '%dh %dm'.format(hours, minutes);
+		if (minutes) return '%dm %ds'.format(minutes, left);
+		return '%ds'.format(left);
+	},
+
+	/** How long ago, against the router's clock. '-' when it never happened. */
+	ago(at, now) {
+		if (!at) return '-';
+		const delta = (now | 0) - (at | 0);
+		if (delta < 0) return '-';
+		return _('%s ago').format(this.duration(delta));
+	},
+
+	/** A wall-clock stamp from a router epoch second. */
+	when(at) {
+		if (!at) return '-';
+		return new Date(at * 1000).toLocaleString();
+	},
+
+	/**
+	 * Hand the browser a file to save.
+	 *
+	 * A blob and an object URL rather than a link to something on the router,
+	 * because there is nothing on the router to link to: the text came back
+	 * over the same rpc connection as everything else on the page, and giving
+	 * the browser a path would mean giving the session a way to ask for paths.
+	 */
+	download(name, text) {
+		const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+		const link = E('a', { 'href': url, 'download': name, 'style': 'display:none' });
+
+		document.body.appendChild(link);
+		link.click();
+
+		// After the click, and not before: some browsers read the blob after
+		// the event returns, and revoking it in the same tick gives them an
+		// empty file with the right name - which is worse than no file at all.
+		window.setTimeout(function() {
+			document.body.removeChild(link);
+			URL.revokeObjectURL(url);
+		}, 2000);
+	},
+
+	size(bytes) {
+		const value = bytes | 0;
+		if (value < 1024) return '%d B'.format(value);
+		if (value < 1024 * 1024) return '%.1f KB'.format(value / 1024);
+		return '%.1f MB'.format(value / (1024 * 1024));
+	},
+
+	rate(bitsPerSecond) {
+		const value = bitsPerSecond || 0;
+		if (value < 1000) return '%d bit/s'.format(Math.round(value));
+		if (value < 1000000) return '%.1f kbit/s'.format(value / 1000);
+		return '%.2f Mbit/s'.format(value / 1000000);
+	},
+
+	/**
+	 * A coloured dot and a word.
+	 *
+	 * The dot repeats what the word says rather than replacing it: a status
+	 * conveyed by colour alone is a status that is not there for a reader who
+	 * cannot see the difference, and LuCI's own tables read the same way.
+	 */
+	dot(kind, label) {
+		const colour = {
+			ok: '#37c837',
+			busy: '#ffb300',
+			bad: '#e04b4b',
+			idle: '#a0a0a0'
+		}[kind] ?? '#a0a0a0';
+
+		return E('span', {}, [
+			E('span', {
+				'style': 'display:inline-block;width:.6em;height:.6em;border-radius:50%%;background:%s;margin-right:.45em'.format(colour)
+			}),
+			label
+		]);
+	},
+
+	/**
+	 * The block that goes where a table would have been.
+	 *
+	 * Never an empty box. A page that shows nothing and explains nothing is the
+	 * one thing this whole project has been trying not to build.
+	 */
+	notice(title, text, children) {
+		return E('div', { 'class': 'cbi-section' }, [
+			E('h3', {}, title),
+			E('p', {}, text),
+			children ?? ''
+		]);
+	},
+
+	/** A titled block with a one-line explanation under the heading. */
+	section(title, description, children) {
+		return E('div', { 'class': 'cbi-section' }, [
+			title ? E('h3', {}, title) : '',
+			description ? E('div', { 'class': 'cbi-section-descr' }, description) : '',
+			children ?? ''
+		]);
+	},
+
+	/**
+	 * The row of big numbers at the top of a page.
+	 *
+	 * Flex with wrap rather than a grid with a fixed column count, so it
+	 * becomes one column on a phone without a media query of its own.
+	 */
+	figures(items) {
+		return E('div', {
+			'style': 'display:flex;flex-wrap:wrap;gap:1em;margin-bottom:1em'
+		}, items.map(item => E('div', {
+			'style': 'flex:1 1 10em;min-width:10em;padding:.75em 1em;border:1px solid rgba(128,128,128,.35);border-radius:4px'
+		}, [
+			E('div', { 'style': 'font-size:1.6em;line-height:1.2' }, item[1]),
+			E('div', { 'style': 'opacity:.75;font-size:.9em' }, item[0])
+		])));
+	},
+
+	/**
+	 * The commit-confirm countdown, at the top of every tab.
+	 *
+	 * It is at the top of every tab and not on a page of its own because of
+	 * when it matters: somebody has just applied a change that may be about to
+	 * take their connection away, and whichever page they are on is the page
+	 * that has to tell them. By the time it fires they are not looking at the
+	 * app - that is the whole reason the guard exists on the router.
+	 *
+	 * Two polls, and they do different things. The five-second one asks the
+	 * router; the one-second one only does arithmetic on the answer it already
+	 * has, so the countdown moves once a second without a call once a second.
+	 * The number it counts down is `remaining`, which the router worked out
+	 * against its own clock - a browser whose clock disagrees with the router's
+	 * still sees the right number of seconds.
+	 */
+	guardBanner() {
+		const node = E('div', {});
+		const self = this;
+
+		let state = null;
+		let fetchedAt = Date.now();
+
+		function paint() {
+			if (!state || state.armed !== true) {
+				dom.content(node, null);
+				return;
+			}
+
+			const elapsed = (Date.now() - fetchedAt) / 1000;
+			const left = Math.round((state.remaining || 0) - elapsed);
+
+			const heading = left > 0
+				? _('A change is waiting to be confirmed')
+				: _('The countdown has run out');
+
+			const sentence = left > 0
+				? _('This router will put its configuration back in %s unless somebody keeps the change.').format(self.duration(left))
+				: _('This router is putting its configuration back now. It will be a moment.');
+
+			dom.content(node, E('div', { 'class': 'alert-message warning' }, [
+				E('h4', {}, heading),
+				E('p', {}, sentence),
+				state.reason ? E('p', {}, _('Reason given: %s').format(state.reason)) : '',
+				E('div', { 'class': 'right' }, [
+					E('button', {
+						'class': 'btn cbi-button-neutral',
+						'click': ui.createHandlerFn(self, function() {
+							return self.run(calls.guardCancel, {}, _('Put back. The router is reloading now.'))
+								.then(() => self.refreshGuard(node));
+						})
+					}, _('Undo now')),
+					' ',
+					E('button', {
+						'class': 'btn cbi-button-apply',
+						'click': ui.createHandlerFn(self, function() {
+							return self.run(calls.guardConfirm, {}, _('Kept. The countdown has been cancelled.'))
+								.then(() => self.refreshGuard(node));
+						})
+					}, _('Keep these changes'))
+				])
+			]));
+		}
+
+		function fetch() {
+			return self.ask(calls.guardStatus).then(result => {
+				// A router that stopped answering keeps whatever it last said
+				// rather than dropping the banner: a countdown that vanishes
+				// because one poll failed is the single most alarming thing
+				// this page could do, and it would be a lie.
+				if (result.ok) {
+					state = result.data;
+					fetchedAt = Date.now();
+				}
+				paint();
+			});
+		}
+
+		node.bmRefresh = fetch;
+
+		poll.add(fetch, 5);
+		poll.add(paint, 1);
+
+		fetch();
+
+		return node;
+	},
+
+	/** Ask the banner to catch up now, after something that may have armed it. */
+	refreshGuard(node) {
+		return (node && typeof node.bmRefresh == 'function') ? node.bmRefresh() : Promise.resolve();
+	}
+});

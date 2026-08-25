@@ -10,6 +10,7 @@
  */
 import type { ModuleCheckReport } from '@shared/check'
 import type { ModuleContext } from '@shared/modules'
+import type { AgentCapability } from '../probe'
 import type { OkResult } from '@shared/types'
 import type { RouterModel } from '../types'
 import { batchAction, connAction, watchdog } from './actions'
@@ -37,9 +38,16 @@ export class PppoeManager<TData extends PppoeStoreData = PppoeStoreData> {
     config: PppoeConfigStore,
     store: PppoeHostStore<TData>,
     jobs: PppoeJobs,
-    service: PppoeService
+    service: PppoeService,
+    /**
+     * The router-side capability verdict. When it says this router provides
+     * `pppoe`, a create writes its sections through `bm-pppoe-pool` in one call
+     * instead of one round trip per chunk - and the credentials never become
+     * arguments to anything on either side.
+     */
+    agent?: () => AgentCapability
   ) {
-    this.runtime = createPppoeRuntime(ctx, config, store, jobs, service)
+    this.runtime = createPppoeRuntime(ctx, config, store, jobs, service, agent)
   }
 
   // ------------------------------------------------------------- check/apply

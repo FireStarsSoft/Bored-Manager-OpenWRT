@@ -12,6 +12,7 @@
  */
 import { createCheckSession, type CheckSession } from '@shared/check'
 import type { ModuleContext } from '@shared/modules'
+import type { AgentCapability } from '../probe'
 import type { RouterModel } from '../types'
 import type {
   FrozenBatchPlan,
@@ -64,6 +65,16 @@ export interface PppoeRuntime {
   store: PppoeHostStore<PppoeStoreData>
   jobs: PppoeJobs
   service: PppoeService
+  /**
+   * The router-side capability verdict, read per operation and never captured.
+   *
+   * When it says this router provides `pppoe`, the sections a pool is made of
+   * are written by `bm-pppoe-pool` in one call instead of by fifty round trips
+   * of `uci batch` - and, more to the point, the credentials never travel as
+   * arguments to anything. Everything else about a create is unchanged: the
+   * firewall zone, the record, the verify step are this module's either way.
+   */
+  agent?: () => AgentCapability
   session: CheckSession<FrozenBatchPlan>
   sample: RouterModel | null
   /** Renderer-visible username cache only; never written to HostStore. */
@@ -112,7 +123,8 @@ export function createPppoeRuntime<TData extends PppoeStoreData>(
   config: PppoeConfigStore,
   store: PppoeHostStore<TData>,
   jobs: PppoeJobs,
-  service: PppoeService
+  service: PppoeService,
+  agent?: () => AgentCapability
 ): PppoeRuntime {
   return {
     ctx,
@@ -120,6 +132,7 @@ export function createPppoeRuntime<TData extends PppoeStoreData>(
     store,
     jobs,
     service,
+    ...(agent ? { agent } : {}),
     session: createCheckSession<FrozenBatchPlan>(),
     sample: null,
     usernames: new Map(),

@@ -1,0 +1,76 @@
+# Bored Manager: one DHCP client, one WAN.
+#
+# Shipped with no instance, which is not an oversight: an instance names a LAN
+# and a WAN carrier that only exist on one router, and guessing them would mean
+# a package that starts writing ip rules the moment it is installed. Add one
+# from LuCI (Services -> Bored Manager -> WAN Binding), from the app, or by hand
+# below.
+#
+# An instance whose numbers do not make sense is refused and left out of every
+# list the daemon builds, which is a quiet way to fail. `bmwan check` prints
+# every instance in this file with the reason it was refused, and the LuCI page
+# shows the same sentence on the row - so a hand-edited section that is not
+# working will say why rather than simply not appearing.
+#
+# Everything here is a conffile, so an update leaves your edits alone.
+
+config wanbind 'main'
+	# The service reads this and nothing else before deciding whether to run.
+	# Off means the daemon starts, writes no rules and answers questions, which
+	# is a more useful "off" than a service that is not there to ask.
+	option enabled '1'
+
+	# Seconds between full reconciliations. Leases arrive as events and are
+	# handled in milliseconds; this is the self-healing pass that notices a rule
+	# somebody removed by hand, a WAN that came back, or a lease that expired
+	# without dnsmasq saying so. Below 5 it is refused: a full pass on a
+	# thousand clients is not free, and nothing here changes that fast.
+	option interval '30'
+
+# One instance is one LAN and one WAN carrier. A router with two independent
+# pools has two of these; most have one.
+#
+#config instance 'home'
+#	option enabled '1'
+#
+#	# The UCI interface name of the LAN whose clients are bound. Its subnet is
+#	# read from the router, so moving the LAN moves the catch-all with it.
+#	option lan 'lan'
+#
+#	# The physical device the WAN pool sits on. Every interface on this device
+#	# or a VLAN of it - eth1, eth1.101, eth1.102 - is in the pool.
+#	option carrier 'eth1'
+#
+#	# Remember which WAN a client had and give it the same one back when it
+#	# returns, if that WAN is free.
+#	option sticky '1'
+#
+#	# Move a client off a WAN that has been failing for wan_error_grace seconds,
+#	# onto a free one. Off means it waits for its own WAN to come back.
+#	option remap '1'
+#
+#	# The ip rule priority range this instance owns. Client rules are written
+#	# from rule_pref_base upwards and never reach catch_all_pref; a rule outside
+#	# the range belongs to somebody else and is never touched.
+#	#
+#	# Both are locked once the instance has written anything: moving them would
+#	# make the next pass fail to recognise its own rules and write a second copy
+#	# of every one of them.
+#	option rule_pref_base '20000'
+#	option catch_all_pref '30000'
+#
+#	# The routing table holding `unreachable default`. A client with no WAN
+#	# lands here and is blocked, rather than leaking out of whichever WAN the
+#	# router would have picked - which is the whole point of one-to-one.
+#	option catch_all_table '253'
+#
+#	# A WAN has to have been up this long before it is handed to a client.
+#	# Freshly dialled PPPoE sessions come up before they carry traffic.
+#	option wan_warn_uptime '5'
+#
+#	# How long a WAN must have been failing before remap moves its client.
+#	option wan_error_grace '20'
+#
+#	# How long a client keeps its WAN after its lease disappears. Covers a
+#	# reboot, a cable pulled for a minute, and dnsmasq restarting.
+#	option release_grace '120'

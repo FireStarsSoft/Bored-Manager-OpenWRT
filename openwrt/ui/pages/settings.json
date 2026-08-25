@@ -70,7 +70,7 @@
         {
           "type": "conditional",
           "when": {
-            "source": { "kind": "stream", "event": "capabilities", "path": "setupNeeded" },
+            "source": { "kind": "stream", "event": "capabilities", "path": "canInstall" },
             "op": "eq",
             "value": true
           },
@@ -95,14 +95,37 @@
               ]
             },
             {
-              "type": "list",
-              "source": { "kind": "stream", "event": "capabilities", "path": "missingPackages" },
-              "columns": [
-                { "key": "name", "label": "Package" },
-                { "key": "for", "label": "Needed for" }
+              "type": "conditional",
+              "when": {
+                "source": { "kind": "stream", "event": "capabilities", "path": "setupNeeded" },
+                "op": "eq",
+                "value": true
+              },
+              "blocks": [
+                {
+                  "type": "list",
+                  "source": {
+                    "kind": "stream",
+                    "event": "capabilities",
+                    "path": "missingPackages"
+                  },
+                  "columns": [
+                    { "key": "name", "label": "Package" },
+                    { "key": "for", "label": "Needed for" }
+                  ],
+                  "limit": 32,
+                  "emptyText": "nothing is missing"
+                }
               ],
-              "limit": 32,
-              "emptyText": "nothing is missing"
+              "else": [
+                {
+                  "type": "note",
+                  "title": "Nothing is missing on this router",
+                  "lines": [
+                    "Every group below is already present, so a plain check will refuse. Tick \"Run the install again\" as well when a package is there but not working - that is the one case this form exists for on a router with nothing missing."
+                  ]
+                }
+              ]
             },
             {
               "type": "checkForm",
@@ -123,7 +146,7 @@
                   "label": "Policy routing (ip-full)",
                   "input": "checkbox",
                   "initial": true,
-                  "help": "Required by WAN Binding. Some targets ship the BusyBox applet, which has no ip rule subcommand at all, so binding would start cleanly and steer nothing."
+                  "help": "Required by WAN Binding. A stock image symlinks /sbin/ip at BusyBox, whose ip answers 'ip rule show' but refuses a numeric routing table - and every rule and route binding writes names one, so an instance would be created and then steer nothing."
                 },
                 {
                   "key": "dnsmasq",
@@ -131,6 +154,13 @@
                   "input": "checkbox",
                   "initial": true,
                   "help": "Without it there are no DHCP leases to read, so the device table stays empty and binding has nobody to assign."
+                },
+                {
+                  "key": "repair",
+                  "label": "Run the install again, including groups already present",
+                  "input": "checkbox",
+                  "initial": false,
+                  "help": "Off, a group the router already reports is skipped and a form with nothing missing is refused. On, every ticked group is installed again with the same command - which restores a package that has gone missing, leaves alone anything apk still considers installed, and re-runs the readiness probe at the end so the result is read off the router rather than assumed."
                 }
               ]
             }
@@ -138,9 +168,9 @@
           "else": [
             {
               "type": "note",
-              "title": "Nothing to install from here",
+              "title": "Nothing can be installed from here",
               "lines": [
-                "Either everything this module knows how to install is already present, or one specific thing is in the way. What to do next names which, read off this router rather than listing every possibility."
+                "Something is in the way of installing anything at all - the login is not root, the firmware has no apk database, or the router has a problem more basic than a missing package. What to do next names which, read off this router rather than listing every possibility."
               ]
             },
             {
@@ -161,6 +191,114 @@
               "type": "terminal",
               "label": "Open a router shell",
               "commandTemplate": "sh"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "title": "Router packages",
+      "blocks": [
+        {
+          "type": "conditional",
+          "when": {
+            "source": { "kind": "stream", "event": "ui", "path": "hintsOn" },
+            "op": "eq",
+            "value": true
+          },
+          "blocks": [
+            {
+              "type": "note",
+              "title": "What these are for",
+              "lines": [
+                "Without them this module drives the router entirely over SSH, which works and always will. What it cannot do from there is undo a change that has just taken the connection down: once SSH is gone there is nobody left to type the command that would put it back.",
+                "The agent is that missing piece. It snapshots the configuration before every change, starts a countdown, and restores the router by itself if nothing confirms the change in time - which is exactly the case where nothing can.",
+                "It also makes the rest faster: leases arrive as events rather than being polled, and a pool of several thousand sessions is written by the router instead of one round trip at a time.",
+                "Nothing here calls out to the internet on its own. A router only checks for a new release when somebody presses the button."
+              ]
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "source": { "kind": "invoke", "method": "agentRows" },
+          "columns": [
+            { "key": "name", "label": "Package" },
+            { "key": "installed", "label": "On the router" },
+            { "key": "pinned", "label": "This module ships" },
+            { "key": "status", "label": "Service" },
+            { "key": "detail", "label": "Notes" }
+          ],
+          "emptyText": "nothing to show - run Check under Router readiness first"
+        },
+        {
+          "type": "checkForm",
+          "checkMethod": "agentInstallCheck",
+          "applyMethod": "agentInstallApply",
+          "checkLabel": "Check what would be installed",
+          "applyLabel": "Install now",
+          "fields": [
+            {
+              "key": "source",
+              "label": "Where the packages come from",
+              "input": "select",
+              "initial": "pinned",
+              "options": [
+                { "value": "pinned", "label": "The release this module was built against" },
+                { "value": "github", "label": "The latest release, fetched by the router" },
+                { "value": "bundle", "label": "A .apkbundle file from this machine" },
+                { "value": "path", "label": "A file already on the router" }
+              ],
+              "help": "The four differ in what they trust, not in what they install. Pinned: the router downloads, and each file is checked against a sha256 compiled into this module. Latest: the router fetches a signed release manifest and checks the signature itself - it needs an agent already installed to do that. Bundle: you choose the file, and it needs no internet on the router at all. A path on the router: trusted because it is already there."
+            },
+            {
+              "key": "bundleFile",
+              "label": "Bundle file",
+              "input": "file",
+              "accept": ".apkbundle",
+              "maxKb": 2048,
+              "help": "The bm-packages-<version>.apkbundle attached to a packages release. It is base64 text rather than a binary archive, so it survives being read as text and can be pasted into the box below instead."
+            },
+            {
+              "key": "bundleText",
+              "label": "…or paste the bundle here",
+              "input": "textarea",
+              "placeholder": "H4sIAAAAAAAA…",
+              "help": "Used only when no file is chosen above."
+            },
+            {
+              "key": "path",
+              "label": "Path on the router",
+              "input": "text",
+              "placeholder": "/tmp/bm-agent-1.2.0-r1.apk",
+              "help": "An absolute path to a .apk you have already copied onto the router. Nothing here checks it against a published checksum: it is trusted because you put it there."
+            }
+          ]
+        },
+        {
+          "type": "conditional",
+          "when": {
+            "source": { "kind": "stream", "event": "capabilities", "path": "agent.installed" },
+            "op": "eq",
+            "value": true
+          },
+          "blocks": [
+            {
+              "type": "checkForm",
+              "checkMethod": "agentUninstallCheck",
+              "applyMethod": "agentUninstallApply",
+              "checkLabel": "Check what would be removed",
+              "applyLabel": "Remove them",
+              "fields": [
+                {
+                  "key": "purge",
+                  "label": "Delete the configuration and saved state as well",
+                  "input": "checkbox",
+                  "initial": false,
+                  "help": "Off, /etc/config/bm_* and everything under /etc/bm stay, so reinstalling comes back to the same router. On, they go - except the baseline snapshot, which is never deleted because it is the only way back to how this router looked before any of this touched it. Either way, each package's own prerm takes back the ip rules and hooks it installed, so removing them here leaves the same router behind as `apk del` at a shell."
+                }
+              ]
             }
           ]
         }

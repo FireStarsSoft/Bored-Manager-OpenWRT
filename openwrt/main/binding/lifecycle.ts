@@ -12,7 +12,7 @@ import { recordLayout } from '../records'
 import { recordEvents } from './events'
 import { lanCidr } from './pool'
 import { installCatchAll, removeFirewallForwardings } from './prepare'
-import { reconcileModel } from './reconcile'
+import { applyChange, routerOwnsBinding } from './reconcile'
 import {
   ENGINE_STOPPED,
   NO_SAMPLE,
@@ -106,10 +106,23 @@ async function setRunning(
     }
     const old = instance.running
     persistRunning(runtime, id, running)
-    const error = await reconcileModel(runtime, model, {
-      forceKernel: true,
-      rebooted: false
-    })
+    const error = await applyChange(
+      runtime,
+      model,
+      { forceKernel: true, rebooted: false },
+      // Stopping only. A disabled instance is one the daemon drops the next
+      // time it reads its config, without touching the rules it had written -
+      // so they come off here, while it still knows about them.
+      running ? {} : { flushInstanceId: id }
+    )
+    // Both directions stay fatal here, unlike Delete.
+    //
+    // A stop leaves the instance in place and deliberately leaves its catch-all
+    // up, so "stopped" has to mean the router was actually told. Recording it
+    // anyway would show an instance as stopped while its rules were still
+    // steering traffic, which is the one inconsistency this whole file exists
+    // to prevent. Delete can afford the opposite answer because it removes the
+    // record and the rules with it.
     if (error) {
       persistRunning(runtime, id, old)
       return { ok: false, error }
@@ -152,8 +165,25 @@ async function deleteNow(runtime: BindingRuntime, id: string): Promise<OkResult>
     try {
       await removeFirewallForwardings(runtime, instance)
       if (!current(runtime, generation)) throw new Error(ENGINE_STOPPED)
-      const error = await reconcileModel(runtime, model, { forceKernel: false, rebooted: false })
-      if (error) throw new Error(error)
+      const error = await applyChange(
+        runtime,
+        model,
+        { forceKernel: false, rebooted: false },
+        { flushInstanceId: id }
+      )
+      // Fatal only where it means the rules are stranded. See
+      // `routerOwnsBinding`: on the SSH half the removal below is what takes
+      // this instance's catch-all off, and a sweep that could not repair some
+      // other instance - or could not write a rule at all, on a router whose
+      // `ip` turned out to be BusyBox - must not be what stops this one being
+      // deleted. Delete is documented as the way out of a broken state, and it
+      // was refusing on exactly the states it exists for.
+      if (error) {
+        if (routerOwnsBinding(runtime)) throw new Error(error)
+        runtime.ctx.log(
+          `openwrt: deleting ${instance.name}: the reconcile pass reported "${error}"; removing the instance anyway`
+        )
+      }
       if (!current(runtime, generation)) throw new Error(ENGINE_STOPPED)
       await execScript(
         runtime,
@@ -166,7 +196,7 @@ async function deleteNow(runtime: BindingRuntime, id: string): Promise<OkResult>
       if (current(runtime, generation) && cidr) {
         try {
           await installCatchAll(runtime, instance, cidr, true)
-          await reconcileModel(runtime, model, { forceKernel: true, rebooted: false })
+          await applyChange(runtime, model, { forceKernel: true, rebooted: false })
         } catch {
           // Keep the original failure; catch-all restore is best effort.
         }
