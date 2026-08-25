@@ -77,10 +77,14 @@ jobs:
       - name: Fetch and verify the OpenWrt SDK
         run: |
           set -euo pipefail
+          # python3-setuptools, not python3-distutils: distutils left the
+          # stdlib in Python 3.12 and Ubuntu dropped the package with 24.04,
+          # which is what ubuntu-latest is now. setuptools is what provides
+          # it, and it is what OpenWrt's own build prerequisites list.
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential ccache gawk gettext git libncurses-dev libssl-dev \
-            python3-distutils rsync unzip zlib1g-dev file wget zstd
+            python3-setuptools rsync unzip zlib1g-dev file wget zstd
 
           BASE="https://downloads.openwrt.org/releases/${OPENWRT_RELEASE}/targets/${OPENWRT_TARGET}"
           curl -fsSL "$BASE/sha256sums" -o sha256sums
