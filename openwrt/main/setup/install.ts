@@ -1,0 +1,267 @@
+/**
+ * Every string this module can send to a package manager, the one place that
+ * reads a package manager's output back, and the job that runs them.
+ *
+ * They live together on purpose. The commands are the part a firmware change
+ * rewrites - the move off opkg touched this file and nothing else - and they
+ * are also the part a reviewer has to be able to read end to end without first
+ * working through the check gates in `plan.ts`. The verb is `update` or `add`,
+ * a name comes from `../packages.ts`, and there is no third source of text
+ * anywhere below.
+ *
+ * `apk upgrade` is not here and must never be: the OpenWRT documentation warns
+ * that upgrading every package on a running router can leave it unbootable.
+ */
+import type { ModuleExecResult } from '@shared/modules'
+import { shQuote, splitSections } from '@shared/shell'
+import type { OkResult } from '@shared/types'
+import type { JobItemSpec, OpenWrtJob } from '../jobs'
+import { isInstallablePackage, packageGroup, type PackageGroup } from '../packages'
+import { freeKbFromDf } from '../probe'
+import { asRecord, type SetupRuntime } from './runtime'
+
+const CHECK_TIMEOUT_MS = 15_000
+/** An index refresh pulls a package list over whatever uplink the router has. */
+const UPDATE_TIMEOUT_MS = 120_000
+const INSTALL_TIMEOUT_MS = 180_000
+/** apk's database lock is not queued, so a single second attempt is the retry. */
+const LOCK_RETRY_MS = 3_000
+
+const PREFLIGHT_COMMAND = [
+  `echo '===SPACE==='; df -k /overlay 2>/dev/null || df -k / 2>/dev/null`,
+  `echo '===ROUTE==='; ip -4 route 2>/dev/null | grep '^default' | head -n 2`
+].join('; ')
+
+/**
+ * No flags, and deliberately none.
+ *
+ * `--no-interactive` and `-q` both look like obvious additions and neither can
+ * be verified across the apk-tools builds OpenWRT has shipped since 25.12.0. A
+ * flag this router's apk does not recognise is not a degraded install, it is a
+ * usage error on every single step - so the two commands stay exactly as the
+ * OpenWRT documentation writes them.
+ */
+export function updateCommand(): string {
+  return 'apk update'
+}
+
+export function installCommand(name: string): string {
+  // Quoted even though the name is a constant from the allowlist: the quoting
+  // is what makes that guarantee local to this line instead of something a
+  // reader has to go and verify two files away.
+  return `apk add ${shQuote(name)}`
+}
+
+/** LuCI's Software page takes the apk database lock and holds it while open. */
+const LOCKED = /unable to lock database|resource temporarily unavailable/i
+/** The index and the installed system disagree, usually after a sysupgrade. */
+const WORLD_BREAKS = /breaks:\s*world\[/i
+
+const LOCKED_HINT =
+  "LuCI's Software page is holding the package database - close it and try again"
+// Deliberately only an explanation. Editing /etc/apk/world to force this past
+// apk is a repair on the router's own package state, and doing it from here -
+// unattended, over SSH, on a router the user is not looking at - is how a
+// module that installs three packages ends up owning a broken sysupgrade.
+const WORLD_HINT = 'the package index and the installed system disagree after a sysupgrade'
+
+/** Whatever apk actually printed, whichever stream it went to. */
+function allOutput(result: ModuleExecResult): string {
+  return `${result.stderr || ''}\n${result.stdout || ''}`
+}
+
+function isDatabaseLocked(result: ModuleExecResult): boolean {
+  return result.code !== 0 && LOCKED.test(allOutput(result))
+}
+
+/** `https://user:pass@feed/...` as apk echoes a configured feed URL back. */
+function maskCredentials(line: string): string {
+  return line.replace(/\/\/[^\s/@]+:[^\s/@]*@/g, '//***:***@')
+}
+
+function lastLine(text: string): string {
+  return (
+    text
+      .split(/\r?\n/)
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0)
+      .pop() ?? ''
+  )
+}
+
+/**
+ * Why a package command failed, in one line.
+ *
+ * This is the one place in the module that repeats command output back to the
+ * user, and it is safe precisely because the command was built here: a fixed
+ * verb plus an allowlisted package name, with no credential anywhere near it.
+ * The reason an install failed - a dependency, a kernel mismatch, a full
+ * overlay - is only ever in that output, and without it the step reads
+ * "install failed" and leaves the user exactly where they started.
+ *
+ * stderr first, and only stderr when it has anything at all: apk streams its
+ * `Downloading ...` progress to stdout, so concatenating the two and taking the
+ * last line reported a download that was still in flight as the cause of the
+ * failure. A feed URL can carry credentials, so one is masked before the line
+ * is kept anywhere.
+ */
+export function failureReason(result: ModuleExecResult): string {
+  const line = lastLine(result.stderr || '') || lastLine(result.stdout || '')
+  return line ? maskCredentials(line).slice(0, 200) : `exit ${result.code}`
+}
+
+/**
+ * The same line, with the two failures common enough to name translated into
+ * something a user can act on. Both read as apk internals otherwise, and both
+ * have a next step that is not "try again".
+ */
+export function packageFailure(result: ModuleExecResult): string {
+  const reason = failureReason(result)
+  const output = allOutput(result)
+  if (LOCKED.test(output)) return `${LOCKED_HINT} (${reason})`
+  if (WORLD_BREAKS.test(output)) return `${WORLD_HINT} (${reason})`
+  return reason
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * One apk command, retried exactly once when the database was locked. The lock
+ * belongs to a LuCI page a user can close in the few seconds this waits, and
+ * apk does not queue behind it - so without the retry an install fails on a
+ * condition that has usually already cleared.
+ */
+async function runPackageCommand(
+  runtime: SetupRuntime,
+  command: string,
+  timeoutMs: number,
+  cancelled: () => boolean
+): Promise<ModuleExecResult> {
+  const first = await runtime.ctx.exec(command, { timeoutMs })
+  if (!isDatabaseLocked(first)) return first
+  await sleep(LOCK_RETRY_MS)
+  if (cancelled()) return first
+  return runtime.ctx.exec(command, { timeoutMs })
+}
+
+export interface PreflightReading {
+  freeKb: number
+  hasDefaultRoute: boolean
+}
+
+/**
+ * The two router facts that decide whether an install can even start. Read
+ * here rather than beside the gate that uses it, so the shell side of this
+ * folder is one file.
+ */
+export async function preflight(runtime: SetupRuntime): Promise<PreflightReading> {
+  try {
+    const result = await runtime.ctx.exec(PREFLIGHT_COMMAND, { timeoutMs: CHECK_TIMEOUT_MS })
+    const sections = splitSections(result.stdout)
+    return {
+      freeKb: freeKbFromDf(sections.get('SPACE') ?? ''),
+      hasDefaultRoute: /^default\s/m.test((sections.get('ROUTE') ?? '').trim())
+    }
+  } catch {
+    // Not knowing is not a reason to refuse: the install itself will say so.
+    return { freeKb: -1, hasDefaultRoute: true }
+  }
+}
+
+/** Starts the install job and returns its id; progress arrives on `jobs`. */
+export function applySetup(runtime: SetupRuntime, raw: unknown): OkResult {
+  const payload = asRecord(raw)
+  const token = typeof payload.token === 'string' ? payload.token : ''
+  const taken = runtime.session.take(token, payload.values)
+  if (!taken) return { ok: false, error: 'that check expired or the form changed - check again' }
+  if (!runtime.ctx.connected) return { ok: false, error: 'the router disconnected after the check' }
+  if (runtime.deps.jobs.busy) {
+    return { ok: false, error: 'another job is still running - wait for it to finish' }
+  }
+
+  const plan = taken.payload
+  // The last gate before a shell. A plan that has been tampered with in any
+  // way that matters cannot get past this.
+  if (!plan.packages.length || !plan.packages.every(isInstallablePackage)) {
+    return { ok: false, error: 'that plan is not installable - check again' }
+  }
+
+  const items: JobItemSpec[] = [
+    {
+      name: 'Refresh the apk package index',
+      run: async (cancelled) => {
+        const result = await runPackageCommand(
+          runtime,
+          updateCommand(),
+          UPDATE_TIMEOUT_MS,
+          cancelled
+        )
+        if (result.code === 0) return
+        // A warning, and then on with the job. Aborting here cancelled an
+        // install of packages the router already had cached because one feed
+        // of several was unreachable - and an index that is genuinely unusable
+        // is reported by the install steps below, which are the ones that
+        // actually need it.
+        return { warning: `package index refresh failed: ${packageFailure(result)}` }
+      }
+    }
+  ]
+  for (const name of plan.packages) {
+    items.push({
+      name: `Install ${name}`,
+      run: async (cancelled) => {
+        if (cancelled()) return
+        const result = await runPackageCommand(
+          runtime,
+          installCommand(name),
+          INSTALL_TIMEOUT_MS,
+          cancelled
+        )
+        if (result.code !== 0) {
+          throw new Error(`${name} failed to install: ${packageFailure(result)}`)
+        }
+      }
+    })
+  }
+  items.push({
+    name: 'Verify what the router can do now',
+    run: async () => {
+      const next = await runtime.deps.reprobe()
+      const stillMissing = plan.groups
+        .map((key) => packageGroup(key))
+        .filter((group): group is PackageGroup => group !== null)
+        .filter((group) => !next[group.capability])
+      if (stillMissing.length) {
+        throw new Error(
+          `${stillMissing
+            .map((group) => group.title)
+            .join(', ')} still not available after installing; the router may need a reboot`
+        )
+      }
+    }
+  })
+
+  let job: OpenWrtJob
+  try {
+    job = runtime.deps.jobs.start({
+      kind: 'openwrt-setup',
+      label: `Install ${plan.packages.length} package(s) with ${plan.manager}`,
+      items,
+      onError: 'abort',
+      onFinished: async (finished) => {
+        runtime.deps.event(
+          'packages-install',
+          `Package install ${finished.state}: ${plan.packages.join(', ')} via ${plan.manager}`
+        )
+        // A job that aborted never reached its verify step, so the readiness
+        // checklist would otherwise still be showing what was true before.
+        if (finished.state !== 'done') await runtime.deps.reprobe()
+      }
+    })
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+  return { ok: true, data: job.id }
+}

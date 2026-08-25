@@ -8,12 +8,13 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "specs": "tsx scripts/check-specs.mjs",
+    "size": "node scripts/check-size.mjs",
     "compile": "tsx scripts/compile-module.mjs",
     "pack": "node scripts/package-module.mjs openwrt dist",
     "sdk:check": "node scripts/sync-sdk.mjs --check",
     "sdk:sync": "node scripts/sync-sdk.mjs",
     "sdk:drift": "node scripts/sync-sdk.mjs --against main",
-    "check": "npm run sdk:check && npm run typecheck && npm test && npm run specs && npm run compile"
+    "check": "npm run sdk:check && npm run typecheck && npm test && npm run specs && npm run size && npm run compile"
   },
   "devDependencies": {
     "@types/node": "^26.1.0",

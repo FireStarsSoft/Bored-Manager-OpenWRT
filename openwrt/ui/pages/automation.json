@@ -3,22 +3,32 @@
     {
       "type": "conditional",
       "when": {
-        "source": { "kind": "stream", "event": "capabilities", "path": "problem" },
-        "op": "exists"
+        "source": { "kind": "stream", "event": "capabilities", "path": "state" },
+        "op": "eq",
+        "value": "blocked"
       },
       "blocks": [
         {
           "type": "section",
-          "title": "OpenWRT is not ready",
+          "title": "This router cannot be automated yet",
           "blocks": [
             {
               "type": "keyValue",
               "source": { "kind": "stream", "event": "capabilities" },
               "rows": [
+                { "key": "stateLabel", "label": "Status" },
                 { "key": "release", "label": "Release" },
-                { "key": "hasPppoe", "label": "PPPoE support" },
-                { "key": "hasFw4", "label": "Firewall4" },
+                { "key": "board", "label": "Board" },
                 { "key": "problem", "label": "Problem" }
+              ]
+            },
+            {
+              "type": "note",
+              "title": "What to do",
+              "tone": "warning",
+              "lines": [
+                "PPPoE dialing and WAN Binding both write to the router, so neither is offered until the router answers for everything they depend on.",
+                "The OpenWRT Module settings page lists every check with what it costs. Once this blocking problem is cleared it also offers to install the missing packages it knows how to install."
               ]
             },
             {
@@ -30,632 +40,1514 @@
       ],
       "else": [
         {
-          "type": "subnav",
-          "initial": "pppoe",
-          "items": [
+          "type": "conditional",
+          "when": {
+            "source": { "kind": "stream", "event": "capabilities", "path": "state" },
+            "op": "eq",
+            "value": "connecting"
+          },
+          "blocks": [
             {
-              "id": "pppoe",
-              "label": "PPPoE Dialer",
-              "icon": "Cable",
-              "blocks": [
-                {
-                  "type": "conditional",
-                  "when": {
-                    "source": { "kind": "stream", "event": "ui", "path": "hintsOn" },
-                    "op": "eq",
-                    "value": true
-                  },
-                  "blocks": [
-                    {
-                      "type": "note",
-                      "title": "PPPoE account lists and operation",
-                      "lines": [
-                        "Use one account per line: username, password, and an optional VLAN. Separate fields with a tab, comma, semicolon, pipe, or repeated spaces; lines beginning with # are comments.",
-                        "The prefix is at most four lowercase letters or digits because the Linux device name pppoe-<section> cannot exceed 15 characters.",
-                        "Interfaces are committed and dialled in bounded chunks with a delay to avoid a PADI burst. Budget about 2 MiB of router RAM per session.",
-                        "Netifd retries failed sessions automatically. Stop is the operation that deliberately keeps a session down; deleting a batch removes its router configuration."
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "type": "section",
-                  "title": "PPPoE sessions",
-                  "columns": 4,
-                  "blocks": [
-                    {
-                      "type": "stat",
-                      "label": "Batches",
-                      "source": { "kind": "stream", "event": "pppoe", "path": "batchCount" },
-                      "format": "number"
-                    },
-                    {
-                      "type": "stat",
-                      "label": "Sessions",
-                      "source": { "kind": "stream", "event": "pppoe", "path": "total" },
-                      "format": "number"
-                    },
-                    {
-                      "type": "stat",
-                      "label": "Up",
-                      "source": { "kind": "stream", "event": "pppoe", "path": "up" },
-                      "format": "number"
-                    },
-                    {
-                      "type": "stat",
-                      "label": "Dialing",
-                      "source": { "kind": "stream", "event": "pppoe", "path": "dialing" },
-                      "format": "number"
-                    },
-                    {
-                      "type": "stat",
-                      "label": "Error",
-                      "source": { "kind": "stream", "event": "pppoe", "path": "error" },
-                      "format": "number"
-                    }
-                  ]
-                },
-                {
-                  "type": "section",
-                  "title": "Batches",
-                  "blocks": [
-                    {
-                      "type": "table",
-                      "source": { "kind": "invoke", "method": "pppoeBatches", "intervalKey": "openwrt" },
-                      "rowKey": "id",
-                      "columns": [
-                        { "key": "name", "label": "Batch" },
-                        { "key": "carrier", "label": "Carrier" },
-                        { "key": "prefix", "label": "Prefix" },
-                        { "key": "count", "label": "Total", "format": "number", "align": "right" },
-                        { "key": "up", "label": "Up", "format": "number", "align": "right" },
-                        { "key": "dialing", "label": "Dialing", "format": "number", "align": "right" },
-                        { "key": "error", "label": "Error", "format": "number", "align": "right" },
-                        { "key": "stopped", "label": "Stopped", "format": "number", "align": "right" }
-                      ],
-                      "sortDefault": { "key": "name", "dir": "asc" },
-                      "filterKeys": ["name", "carrier", "prefix"],
-                      "emptyText": "No PPPoE batch has been created",
-                      "rowActions": [
-                        { "label": "Start", "method": "pppoeBatchAction", "argsFromRow": ["id"], "args": ["start"] },
-                        {
-                          "label": "Stop",
-                          "method": "pppoeBatchAction",
-                          "argsFromRow": ["id"],
-                          "args": ["stop"],
-                          "confirm": "Stop every connection in this batch?"
-                        },
-                        {
-                          "label": "Redial",
-                          "method": "pppoeBatchAction",
-                          "argsFromRow": ["id"],
-                          "args": ["redial"],
-                          "confirm": "Disconnect and redial every connection in this batch?"
-                        },
-                        {
-                          "label": "Delete",
-                          "method": "pppoeBatchDelete",
-                          "argsFromRow": ["id"],
-                          "kind": "danger",
-                          "confirm": "Delete this batch and remove all of its PPPoE configuration from the router?"
-                        }
-                      ],
-                      "rowDetail": [
-                        {
-                          "type": "table",
-                          "source": {
-                            "kind": "invoke",
-                            "method": "pppoeRows",
-                            "args": ["$row.id"],
-                            "intervalKey": "openwrt"
-                          },
-                          "rowKey": "name",
-                          "selectable": true,
-                          "columns": [
-                            { "key": "name", "label": "Interface" },
-                            { "key": "username", "label": "Username" },
-                            { "key": "status", "label": "State" },
-                            { "key": "errorCode", "label": "Error" },
-                            { "key": "ip", "label": "IPv4" },
-                            { "key": "uptimeLabel", "label": "Uptime" }
-                          ],
-                          "sortDefault": { "key": "name", "dir": "asc" },
-                          "filterKeys": ["name", "username", "status", "errorCode", "ip"],
-                          "bulkActions": [
-                            { "label": "Start", "method": "pppoeConnAction", "args": ["start"] },
-                            {
-                              "label": "Stop",
-                              "method": "pppoeConnAction",
-                              "args": ["stop"],
-                              "confirm": "Stop the selected connections?"
-                            },
-                            {
-                              "label": "Redial",
-                              "method": "pppoeConnAction",
-                              "args": ["redial"],
-                              "confirm": "Disconnect and redial the selected connections?"
-                            }
-                          ],
-                          "emptyText": "No connection in this batch has been sampled yet"
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "type": "section",
-                  "title": "Sessions needing attention",
-                  "blocks": [
-                    {
-                      "type": "table",
-                      "source": {
-                        "kind": "invoke",
-                        "method": "pppoeRows",
-                        "args": ["errors"],
-                        "intervalKey": "openwrt"
-                      },
-                      "rowKey": "name",
-                      "columns": [
-                        { "key": "name", "label": "Interface" },
-                        { "key": "batch", "label": "Batch" },
-                        { "key": "username", "label": "Username" },
-                        { "key": "status", "label": "State" },
-                        { "key": "errorCode", "label": "Error" }
-                      ],
-                      "sortDefault": { "key": "name", "dir": "asc" },
-                      "filterKeys": ["name", "batch", "username", "status", "errorCode"],
-                      "emptyText": "No PPPoE session currently reports an error"
-                    }
-                  ]
-                },
-                {
-                  "type": "section",
-                  "title": "Create a PPPoE batch",
-                  "blocks": [
-                    {
-                      "type": "checkForm",
-                      "checkMethod": "pppoeBatchCheck",
-                      "applyMethod": "pppoeBatchApply",
-                      "checkLabel": "Check the batch",
-                      "applyLabel": "Create and dial",
-                      "fields": [
-                        {
-                          "key": "name",
-                          "label": "Batch name",
-                          "input": "text",
-                          "placeholder": "ISP accounts 01",
-                          "help": "A display label only. It must be non-empty and unique on this router."
-                        },
-                        {
-                          "key": "carrier",
-                          "label": "Physical WAN carrier",
-                          "input": "select",
-                          "optionsFrom": { "kind": "invoke", "method": "selectOptions", "args": ["carriers"] },
-                          "help": "The Ethernet device that reaches the PPPoE access concentrator. Every row in this batch uses it, unless a row supplies a VLAN."
-                        },
-                        {
-                          "key": "prefix",
-                          "label": "Interface prefix",
-                          "input": "text",
-                          "initial": "pd",
-                          "help": "One to four lowercase letters or digits, beginning with a letter. The default pd produces sections such as pd00001 and devices such as pppoe-pd00001."
-                        },
-                        {
-                          "key": "vlan",
-                          "label": "Default VLAN",
-                          "input": "number",
-                          "placeholder": "35",
-                          "help": "Optional VLAN ID from 1 to 4094. A VLAN in an individual input row overrides this value; zero or empty means the carrier itself."
-                        },
-                        {
-                          "key": "listFile",
-                          "label": "Account-list file",
-                          "input": "file",
-                          "accept": ".txt,text/plain",
-                          "maxKb": 1024,
-                          "omitOnApply": true,
-                          "help": "Optional UTF-8 text file, up to 1 MiB. Its content wins over pasted text when both are supplied. One line is username, password, and optional VLAN."
-                        },
-                        {
-                          "key": "listText",
-                          "label": "Paste account list",
-                          "input": "textarea",
-                          "omitOnApply": true,
-                          "placeholder": "account-001 password-001\naccount-002,password-002,35",
-                          "help": "Use this when no file is selected. Tab, comma, semicolon, pipe, or repeated whitespace can separate fields; lines beginning with # are comments."
-                        }
-                      ]
-                    }
-                  ]
-                }
+              "type": "note",
+              "title": "Waiting for the router",
+              "lines": [
+                "Automation appears here as soon as the router answers over SSH. Nothing is wrong yet - the readiness checks have simply not run."
               ]
-            },
+            }
+          ],
+          "else": [
             {
-              "id": "binding",
-              "label": "WAN Binding",
-              "icon": "Network",
+              "type": "conditional",
+              "when": {
+                "source": { "kind": "stream", "event": "capabilities", "path": "state" },
+                "op": "eq",
+                "value": "checking"
+              },
               "blocks": [
                 {
-                  "type": "conditional",
-                  "when": {
-                    "source": { "kind": "stream", "event": "ui", "path": "hintsOn" },
-                    "op": "eq",
-                    "value": true
-                  },
+                  "type": "section",
+                  "title": "Checking the router",
                   "blocks": [
                     {
                       "type": "note",
-                      "title": "One LAN client, one WAN",
+                      "title": "Automation is held back until the probe answers",
                       "lines": [
-                        "An instance owns exactly one logical LAN and one physical WAN carrier. Interfaces outside that pair remain independent.",
-                        "A sticky client keeps its WAN by MAC address. Optional remapping moves it only after the WAN has remained failed beyond the grace period.",
-                        "A newly leased device is assigned a random free WAN; when none is free it waits in FIFO order."
+                        "The machine is connected and the readiness probe is running. Nothing has been read off the router yet, so the batches and binding instances below would be drawn against no sample at all - and both create forms would refuse anyway, because neither can tell what this router supports.",
+                        "The probe repeats about every thirty seconds while this page is open. Check now asks immediately; if it never gets past this, Module settings names what the router is failing to answer."
                       ]
                     },
                     {
-                      "type": "note",
-                      "title": "Operational warning",
-                      "tone": "warning",
-                      "lines": [
-                        "A waiting device deliberately has no internet: a catch-all unreachable route prevents it from leaking through the router's default WAN.",
-                        "Pausing the fast OpenWRT interval pauses this automation. For more than 1,000 clients, read and apply the dnsmasq, conntrack, neighbor-table and flow-offload findings."
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "type": "section",
-                  "title": "Binding instances",
-                  "blocks": [
-                    {
-                      "type": "table",
-                      "source": { "kind": "stream", "event": "binding", "path": "rows" },
-                      "rowKey": "id",
-                      "columns": [
-                        { "key": "name", "label": "Instance" },
-                        { "key": "lan", "label": "LAN" },
-                        { "key": "carrier", "label": "WAN carrier" },
-                        { "key": "runningLabel", "label": "State" },
-                        { "key": "wanAvailable", "label": "WAN available", "format": "number", "align": "right" },
-                        { "key": "wanError", "label": "WAN error", "format": "number", "align": "right" },
-                        { "key": "wanWarning", "label": "WAN warning", "format": "number", "align": "right" },
-                        { "key": "deviceTotal", "label": "Devices", "format": "number", "align": "right" },
-                        { "key": "deviceBound", "label": "Bound", "format": "number", "align": "right" },
-                        { "key": "deviceWaiting", "label": "Waiting", "format": "number", "align": "right" }
-                      ],
-                      "sortDefault": { "key": "name", "dir": "asc" },
-                      "filterKeys": ["name", "lan", "carrier", "runningLabel"],
-                      "emptyText": "No WAN Binding instance has been configured",
-                      "rowActions": [
-                        { "label": "Start", "method": "bindingStart", "argsFromRow": ["id"] },
-                        {
-                          "label": "Stop",
-                          "method": "bindingStop",
-                          "argsFromRow": ["id"],
-                          "kind": "danger",
-                          "confirm": "Stop assigning clients? Their client rules are removed, but the safety catch-all remains, so scoped clients lose internet."
-                        },
-                        {
-                          "label": "Delete",
-                          "method": "bindingDelete",
-                          "argsFromRow": ["id"],
-                          "kind": "danger",
-                          "confirm": "Delete this binding instance and remove all of its client and safety rules?"
-                        }
-                      ],
-                      "rowDetail": [
-                        {
-                          "type": "section",
-                          "title": "WAN pool",
-                          "columns": 2,
-                          "blocks": [
-                            {
-                              "type": "keyValue",
-                              "source": { "kind": "stream", "event": "binding", "path": "$row.wan" },
-                              "rows": [
-                                { "key": "total", "label": "Total", "format": "number" },
-                                { "key": "available", "label": "Available", "format": "number" },
-                                { "key": "bound", "label": "Bound", "format": "number" },
-                                { "key": "dialing", "label": "Dialing", "format": "number" },
-                                { "key": "warning", "label": "Warning", "format": "number" },
-                                { "key": "error", "label": "Error", "format": "number" }
-                              ]
-                            },
-                            {
-                              "type": "keyValue",
-                              "source": { "kind": "stream", "event": "binding", "path": "$row.devices" },
-                              "rows": [
-                                { "key": "total", "label": "Devices", "format": "number" },
-                                { "key": "bound", "label": "Bound", "format": "number" },
-                                { "key": "waiting", "label": "Waiting", "format": "number" }
-                              ]
-                            }
-                          ]
-                        },
-                        {
-                          "type": "section",
-                          "title": "Assignments",
-                          "blocks": [
-                            {
-                              "type": "table",
-                              "source": {
-                                "kind": "invoke",
-                                "method": "bindingRows",
-                                "args": ["$row.id"],
-                                "intervalKey": "openwrt"
-                              },
-                              "rowKey": "key",
-                              "selectable": true,
-                              "columns": [
-                                { "key": "host", "label": "Host" },
-                                { "key": "mac", "label": "MAC" },
-                                { "key": "ip", "label": "IPv4" },
-                                { "key": "wan", "label": "WAN" },
-                                { "key": "wanIp", "label": "WAN IPv4" },
-                                { "key": "wanStatus", "label": "WAN state" },
-                                { "key": "sinceLabel", "label": "Assigned for" }
-                              ],
-                              "sortDefault": { "key": "host", "dir": "asc" },
-                              "filterKeys": ["host", "mac", "ip", "wan", "wanIp", "wanStatus"],
-                              "rowActions": [
-                                {
-                                  "label": "Unassign",
-                                  "method": "bindingUnassign",
-                                  "argsFromRow": ["instanceId", "mac"],
-                                  "confirm": "Release this device's WAN? It returns to the waiting queue if the lease is still active."
-                                },
-                                {
-                                  "label": "Reassign",
-                                  "method": "bindingReassign",
-                                  "argsFromRow": ["instanceId", "mac"],
-                                  "confirm": "Release the sticky choice and assign another free WAN when possible?"
-                                }
-                              ],
-                              "bulkActions": [
-                                {
-                                  "label": "Unassign",
-                                  "method": "bindingUnassign",
-                                  "confirm": "Release the WANs used by the selected devices?"
-                                },
-                                {
-                                  "label": "Reassign",
-                                  "method": "bindingReassign",
-                                  "confirm": "Give the selected devices another free WAN when possible?"
-                                }
-                              ],
-                              "emptyText": "No device is currently assigned"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "section",
-                          "title": "Waiting devices",
-                          "blocks": [
-                            {
-                              "type": "table",
-                              "source": {
-                                "kind": "invoke",
-                                "method": "bindingWaitingRows",
-                                "args": ["$row.id"],
-                                "intervalKey": "openwrt"
-                              },
-                              "rowKey": "key",
-                              "columns": [
-                                { "key": "host", "label": "Host" },
-                                { "key": "mac", "label": "MAC" },
-                                { "key": "ip", "label": "IPv4" },
-                                { "key": "waitingFor", "label": "Waiting for" },
-                                { "key": "heldLabel", "label": "Hold" }
-                              ],
-                              "rowActions": [
-                                {
-                                  "label": "Reassign",
-                                  "method": "bindingReassign",
-                                  "argsFromRow": ["instanceId", "mac"],
-                                  "confirm": "Release the hold and assign a free WAN when one is available?"
-                                }
-                              ],
-                              "emptyText": "No device is waiting for a WAN"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "section",
-                          "title": "Live binding events",
-                          "blocks": [
-                            { "type": "log", "event": "bindingLog", "argsFromScope": ["id"] },
-                            {
-                              "type": "list",
-                              "source": {
-                                "kind": "invoke",
-                                "method": "bindingEventRows",
-                                "args": ["$row.id"]
-                              },
-                              "columns": [
-                                { "key": "when", "label": "When" },
-                                { "key": "kind", "label": "Kind" },
-                                { "key": "text", "label": "Event" }
-                              ],
-                              "limit": 200,
-                              "emptyText": "No binding event has been recorded"
-                            }
-                          ]
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "type": "section",
-                  "title": "Create a WAN Binding instance",
-                  "blocks": [
-                    {
-                      "type": "checkForm",
-                      "checkMethod": "bindingCheck",
-                      "applyMethod": "bindingApply",
-                      "checkLabel": "Check the scope",
-                      "applyLabel": "Prepare and start",
-                      "kind": "danger",
-                      "fields": [
-                        {
-                          "key": "name",
-                          "label": "Instance name",
-                          "input": "text",
-                          "placeholder": "LAN 1 to ISP pool",
-                          "help": "A unique display label for this one LAN and one carrier pair."
-                        },
-                        {
-                          "key": "lan",
-                          "label": "DHCP LAN interface",
-                          "input": "select",
-                          "optionsFrom": { "kind": "invoke", "method": "selectOptions", "args": ["lan-ifaces"] },
-                          "help": "The logical OpenWRT interface whose IPv4 DHCP leases are assigned. It must have a subnet and a dnsmasq DHCP section."
-                        },
-                        {
-                          "key": "carrier",
-                          "label": "WAN carrier",
-                          "input": "select",
-                          "optionsFrom": { "kind": "invoke", "method": "selectOptions", "args": ["carriers"] },
-                          "help": "Every PPPoE, DHCP, or static WAN using this physical device, directly or through one of its VLANs, becomes part of the pool."
-                        },
-                        {
-                          "key": "sticky",
-                          "label": "Keep a device on the same WAN",
-                          "input": "checkbox",
-                          "initial": true,
-                          "help": "Remember the WAN by client MAC and prefer it after a lease IP change or reconnect, when that WAN is free and healthy."
-                        },
-                        {
-                          "key": "remap",
-                          "label": "Remap after a WAN failure",
-                          "input": "checkbox",
-                          "initial": true,
-                          "help": "When a WAN stays in error longer than the configured grace period, move its client to another free WAN."
-                        },
-                        {
-                          "key": "raiseDhcpLimits",
-                          "label": "Raise dnsmasq lease limits when needed",
-                          "input": "checkbox",
-                          "initial": false,
-                          "help": "Allow apply to raise this LAN's DHCP limit and the global dnsmasq lease cap to the size reported by the check. This restarts dnsmasq."
-                        }
-                      ]
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              "id": "jobs",
-              "label": "Jobs",
-              "icon": "ListTree",
-              "blocks": [
-                {
-                  "type": "conditional",
-                  "when": {
-                    "source": { "kind": "stream", "event": "ui", "path": "hintsOn" },
-                    "op": "eq",
-                    "value": true
-                  },
-                  "blocks": [
-                    {
-                      "type": "note",
-                      "title": "Bounded background work",
-                      "lines": [
-                        "A running job lives in memory and cannot resume after the app restarts. Reconciliation repairs the resulting router state.",
-                        "The most recent finished jobs are stored per router. Cancel stops later chunks; a command already running on the router is allowed to finish."
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "type": "section",
-                  "title": "Jobs",
-                  "blocks": [
-                    {
-                      "type": "table",
-                      "source": { "kind": "stream", "event": "jobs", "path": "running" },
-                      "rowKey": "id",
-                      "columns": [
-                        { "key": "label", "label": "Job" },
-                        { "key": "kind", "label": "Kind" },
-                        { "key": "state", "label": "State" },
-                        { "key": "progressPct", "label": "Progress", "format": "pct", "align": "right" },
-                        { "key": "done", "label": "Done", "format": "number", "align": "right" },
-                        { "key": "total", "label": "Steps", "format": "number", "align": "right" },
-                        { "key": "failed", "label": "Failed", "format": "number", "align": "right" },
-                        { "key": "startedAt", "label": "Started", "format": "duration", "align": "right" }
-                      ],
-                      "sortDefault": { "key": "startedAt", "dir": "desc" },
-                      "filterKeys": ["label", "kind", "state"],
-                      "emptyText": "No job is running",
-                      "rowActions": [
-                        {
-                          "label": "Cancel",
-                          "method": "jobCancel",
-                          "argsFromRow": ["id"],
-                          "confirm": "Stop this job after its current router command finishes?",
-                          "kind": "danger"
-                        }
-                      ],
-                      "rowDetail": [
-                        {
-                          "type": "list",
-                          "source": { "kind": "stream", "event": "jobs", "path": "$row.items" },
-                          "columns": [
-                            { "key": "name", "label": "Step" },
-                            { "key": "status", "label": "Result" },
-                            { "key": "message", "label": "Message" }
-                          ],
-                          "limit": 200,
-                          "emptyText": "No steps in this job"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "section",
-                      "title": "Finished history",
-                      "blocks": [
-                        {
-                          "type": "table",
-                          "source": { "kind": "stream", "event": "jobs", "path": "finished" },
-                          "rowKey": "id",
-                          "columns": [
-                            { "key": "label", "label": "Job" },
-                            { "key": "kind", "label": "Kind" },
-                            { "key": "state", "label": "State" },
-                            { "key": "progressPct", "label": "Progress", "format": "pct", "align": "right" },
-                            { "key": "done", "label": "Done", "format": "number", "align": "right" },
-                            { "key": "total", "label": "Steps", "format": "number", "align": "right" },
-                            { "key": "failed", "label": "Failed", "format": "number", "align": "right" },
-                            { "key": "startedAt", "label": "Started", "format": "duration", "align": "right" }
-                          ],
-                          "sortDefault": { "key": "startedAt", "dir": "desc" },
-                          "filterKeys": ["label", "kind", "state"],
-                          "emptyText": "No finished job is stored",
-                          "rowDetail": [
-                            {
-                              "type": "list",
-                              "source": { "kind": "stream", "event": "jobs", "path": "$row.items" },
-                              "columns": [
-                                { "key": "name", "label": "Step" },
-                                { "key": "status", "label": "Result" },
-                                { "key": "message", "label": "Message" }
-                              ],
-                              "limit": 200,
-                              "emptyText": "No retained steps in this job"
-                            }
-                          ]
-                        }
+                      "type": "keyValue",
+                      "source": { "kind": "stream", "event": "capabilities" },
+                      "rows": [
+                        { "key": "stateLabel", "label": "Status" },
+                        { "key": "release", "label": "Release" },
+                        { "key": "board", "label": "Board" }
                       ]
                     },
                     {
                       "type": "actions",
-                      "actions": [
+                      "actions": [{ "label": "Check now", "method": "sweepNow" }]
+                    }
+                  ]
+                }
+              ],
+              "else": [
+                {
+                  "type": "conditional",
+                  "when": {
+                    "source": { "kind": "stream", "event": "capabilities", "path": "state" },
+                    "op": "eq",
+                    "value": "attention"
+                  },
+                  "blocks": [
+                    {
+                      "type": "note",
+                      "title": "Part of this page may refuse to run",
+                      "tone": "warning",
+                      "lines": [
+                        "Something optional is missing. Creating a batch or a binding instance will say so with a specific reason; OpenWRT Module settings names it and installs it where it can."
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "conditional",
+                  "when": {
+                    "source": { "kind": "stream", "event": "overview", "path": "health.fastOk" },
+                    "op": "eq",
+                    "value": false
+                  },
+                  "blocks": [
+                    {
+                      "type": "section",
+                      "title": "The automation is not running",
+                      "blocks": [
                         {
-                          "label": "Clear finished",
-                          "method": "jobsClear",
-                          "confirm": "Forget every finished job? Running jobs are left alone."
+                          "type": "note",
+                          "title": "Nothing on this page is being acted on",
+                          "tone": "warning",
+                          "lines": [
+                            "WAN Binding reconciles on the fast probe, and the fast probe has stopped producing samples. No device is being assigned, no lease change is noticed, and no failed WAN is remapped until it recovers. The session and assignment tables below are the last good reading.",
+                            "Reason below is what the last attempt returned. Refresh now, on either tab, retries immediately; if it keeps failing, check that the machine entry is still connected over SSH."
+                          ]
+                        },
+                        {
+                          "type": "keyValue",
+                          "source": { "kind": "stream", "event": "overview", "path": "health" },
+                          "rows": [
+                            { "key": "lastError", "label": "Reason" },
+                            { "key": "lastFastT", "label": "Age of the frozen sample", "format": "duration" }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "conditional",
+                  "when": {
+                    "source": { "kind": "stream", "event": "overview", "path": "health.dumpOk" },
+                    "op": "eq",
+                    "value": false
+                  },
+                  "blocks": [
+                    {
+                      "type": "section",
+                      "title": "The interface list is frozen",
+                      "blocks": [
+                        {
+                          "type": "note",
+                          "title": "Session and WAN state below may be out of date",
+                          "tone": "warning",
+                          "lines": [
+                            "The rest of the fast probe is answering, but the interface dump came back unreadable and the module is keeping the last list it could parse. Every PPPoE session state, every WAN state and the free-WAN counts each binding instance reports are read from that old list.",
+                            "A session that has since dialled still reads as dialing, and a WAN that has since failed still reads as available - so binding can hand a client a WAN that is already down.",
+                            "The usual cause is a pool large enough that the dump no longer fits in one answer. Raising the fast interval, in Settings, General, Update intervals, or shrinking the managed pool is what clears it; the module retries on its own every few ticks."
+                          ]
+                        },
+                        {
+                          "type": "keyValue",
+                          "source": { "kind": "stream", "event": "overview", "path": "health" },
+                          "rows": [
+                            { "key": "lastError", "label": "Reason" },
+                            { "key": "lastFastT", "label": "Age of the last fast sample", "format": "duration" }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "subnav",
+                  "initial": "pppoe",
+                  "items": [
+                    {
+                      "id": "pppoe",
+                      "label": "PPPoE Dialer",
+                      "icon": "Cable",
+                      "blocks": [
+                        {
+                          "type": "conditional",
+                          "when": {
+                            "source": { "kind": "stream", "event": "ui", "path": "hintsOn" },
+                            "op": "eq",
+                            "value": true
+                          },
+                          "blocks": [
+                            {
+                              "type": "note",
+                              "title": "How dialing behaves",
+                              "lines": [
+                                "Interfaces are committed and dialled in bounded chunks with a delay between them, to avoid a PADI burst. Budget about 2 MiB of router RAM per session.",
+                                "Netifd retries failed sessions on its own. Stop is the operation that deliberately keeps a session down; deleting a batch removes its router configuration.",
+                                "Missing means this module still holds a record the router has no interface for - a create that stopped part way, or a section removed by hand. It is not the same as stopped, and Delete is what clears it.",
+                                "Unknown means no interface list has been read yet, so nothing is claimed about the session either way.",
+                                "New batches are created on the Create tab."
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "section",
+                          "title": "PPPoE sessions",
+                          "columns": 4,
+                          "slowTarget": "openwrt",
+                          "slowAt": { "kind": "stream", "event": "pppoe", "path": "t" },
+                          "blocks": [
+                            {
+                              "type": "stat",
+                              "label": "Batches",
+                              "source": { "kind": "stream", "event": "pppoe", "path": "batchCount" },
+                              "format": "number"
+                            },
+                            {
+                              "type": "stat",
+                              "label": "Sessions",
+                              "source": { "kind": "stream", "event": "pppoe", "path": "total" },
+                              "format": "number"
+                            },
+                            {
+                              "type": "stat",
+                              "label": "Up",
+                              "source": { "kind": "stream", "event": "pppoe", "path": "up" },
+                              "format": "number"
+                            },
+                            {
+                              "type": "stat",
+                              "label": "Dialing",
+                              "source": { "kind": "stream", "event": "pppoe", "path": "dialing" },
+                              "format": "number"
+                            },
+                            {
+                              "type": "stat",
+                              "label": "Error",
+                              "source": { "kind": "stream", "event": "pppoe", "path": "error" },
+                              "format": "number"
+                            },
+                            {
+                              "type": "stat",
+                              "label": "Stopped",
+                              "source": { "kind": "stream", "event": "pppoe", "path": "stopped" },
+                              "format": "number"
+                            },
+                            {
+                              "type": "stat",
+                              "label": "Missing",
+                              "source": { "kind": "stream", "event": "pppoe", "path": "missing" },
+                              "format": "number"
+                            },
+                            {
+                              "type": "stat",
+                              "label": "Not read yet",
+                              "source": { "kind": "stream", "event": "pppoe", "path": "unknown" },
+                              "format": "number"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "note",
+                          "lines": [
+                            "Up, Dialing, Error, Stopped, Missing and Not read yet add up to Sessions. Stopping a batch moves its sessions into Stopped rather than out of the count."
+                          ]
+                        },
+                        {
+                          "type": "actions",
+                          "actions": [{ "label": "Refresh now", "method": "sweepNow" }]
+                        },
+                        {
+                          "type": "conditional",
+                          "when": {
+                            "source": { "kind": "stream", "event": "pppoe", "path": "attention" },
+                            "op": "gt",
+                            "value": 0
+                          },
+                          "blocks": [
+                            {
+                              "type": "section",
+                              "title": "Sessions needing attention",
+                              "slowTarget": "openwrt",
+                              "slowAt": { "kind": "stream", "event": "pppoe", "path": "t" },
+                              "blocks": [
+                                {
+                                  "type": "note",
+                                  "lines": [
+                                    "Two different faults share this table. A row in error has an interface on the router, so Redial is what retries it and Stop is what keeps it down until you want it back.",
+                                    "A row marked missing has no interface at all - Redial and Stop have nothing to act on and will say so. Start recreates nothing either; what a missing row needs is Delete on its batch, in Batches below, and a fresh create."
+                                  ]
+                                },
+                                {
+                                  "type": "table",
+                                  "source": {
+                                    "kind": "invoke",
+                                    "method": "pppoeAttentionRows",
+                                    "intervalKey": "openwrt"
+                                  },
+                                  "rowKey": "name",
+                                  "selectable": true,
+                                  "columns": [
+                                    { "key": "name", "label": "Interface" },
+                                    { "key": "batch", "label": "Batch" },
+                                    { "key": "username", "label": "Username" },
+                                    {
+                                      "key": "statusBadges",
+                                      "label": "State",
+                                      "format": "badges",
+                                      "sortable": false
+                                    },
+                                    { "key": "status", "label": "Fault" },
+                                    { "key": "errorCode", "label": "Error" }
+                                  ],
+                                  "sortDefault": { "key": "name", "dir": "asc" },
+                                  "filterKeys": ["name", "batch", "username", "status", "errorCode"],
+                                  "groupModes": [
+                                    { "id": "fault", "label": "By fault", "key": "status" },
+                                    { "id": "batch", "label": "By batch", "key": "batch" }
+                                  ],
+                                  "rowActions": [
+                                    {
+                                      "label": "Start",
+                                      "method": "pppoeConnAction",
+                                      "argsFromRow": ["name"],
+                                      "args": ["start"]
+                                    },
+                                    {
+                                      "label": "Stop",
+                                      "method": "pppoeConnAction",
+                                      "argsFromRow": ["name"],
+                                      "args": ["stop"],
+                                      "confirm": "Stop this session and keep it down until it is started again?"
+                                    },
+                                    {
+                                      "label": "Redial",
+                                      "method": "pppoeConnAction",
+                                      "argsFromRow": ["name"],
+                                      "args": ["redial"],
+                                      "confirm": "Disconnect and redial this session?"
+                                    }
+                                  ],
+                                  "bulkActions": [
+                                    { "label": "Start", "method": "pppoeConnAction", "args": ["start"] },
+                                    {
+                                      "label": "Stop",
+                                      "method": "pppoeConnAction",
+                                      "args": ["stop"],
+                                      "confirm": "Stop the selected sessions and keep them down?"
+                                    },
+                                    {
+                                      "label": "Redial",
+                                      "method": "pppoeConnAction",
+                                      "args": ["redial"],
+                                      "confirm": "Disconnect and redial the selected sessions?"
+                                    }
+                                  ],
+                                  "emptyText": "No PPPoE session is failing or missing"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "section",
+                          "title": "Batches",
+                          "slowTarget": "openwrt",
+                          "slowAt": { "kind": "stream", "event": "pppoe", "path": "t" },
+                          "blocks": [
+                            {
+                              "type": "table",
+                              "source": {
+                                "kind": "invoke",
+                                "method": "pppoeBatches",
+                                "intervalKey": "openwrt"
+                              },
+                              "rowKey": "id",
+                              "columns": [
+                                { "key": "name", "label": "Batch" },
+                                { "key": "carrier", "label": "Carrier" },
+                                { "key": "prefix", "label": "Prefix" },
+                                {
+                                  "key": "stateBadges",
+                                  "label": "State",
+                                  "format": "badges",
+                                  "sortable": false
+                                },
+                                { "key": "count", "label": "Total", "format": "number", "align": "right" },
+                                { "key": "up", "label": "Up", "format": "number", "align": "right" },
+                                { "key": "error", "label": "Error", "format": "number", "align": "right" },
+                                { "key": "stopped", "label": "Stopped", "format": "number", "align": "right" },
+                                { "key": "missing", "label": "Missing", "format": "number", "align": "right" },
+                                {
+                                  "key": "createdAt",
+                                  "label": "Created",
+                                  "format": "datetime",
+                                  "align": "right"
+                                }
+                              ],
+                              "sortDefault": { "key": "name", "dir": "asc" },
+                              "filterKeys": ["name", "carrier", "prefix"],
+                              "emptyText": "No PPPoE batch has been created - use the Create tab",
+                              "rowActions": [
+                                {
+                                  "label": "Start",
+                                  "method": "pppoeBatchAction",
+                                  "argsFromRow": ["id"],
+                                  "args": ["start"]
+                                },
+                                {
+                                  "label": "Stop",
+                                  "method": "pppoeBatchAction",
+                                  "argsFromRow": ["id"],
+                                  "args": ["stop"],
+                                  "confirm": "Stop every connection in this batch?"
+                                },
+                                {
+                                  "label": "Redial",
+                                  "method": "pppoeBatchAction",
+                                  "argsFromRow": ["id"],
+                                  "args": ["redial"],
+                                  "confirm": "Disconnect and redial every connection in this batch?"
+                                },
+                                {
+                                  "label": "Delete",
+                                  "method": "pppoeBatchDelete",
+                                  "argsFromRow": ["id"],
+                                  "kind": "danger",
+                                  "confirm": "Delete this batch and remove all of its PPPoE configuration from the router?"
+                                }
+                              ],
+                              "rowDetail": [
+                                {
+                                  "type": "subnav",
+                                  "initial": "attention",
+                                  "items": [
+                                    {
+                                      "id": "attention",
+                                      "label": "Needs attention",
+                                      "icon": "Activity",
+                                      "blocks": [
+                                        {
+                                          "type": "note",
+                                          "lines": [
+                                            "Only the connections in this batch that are failing or missing. This tab is open by default because the other one re-reads every connection in the batch on each update - about a megabyte a tick on a five-thousand-account pool - and only the tab you are looking at is fetched."
+                                          ]
+                                        },
+                                        {
+                                          "type": "table",
+                                          "source": {
+                                            "kind": "invoke",
+                                            "method": "pppoeRows",
+                                            "args": ["$row.id", "attention"],
+                                            "intervalKey": "openwrt"
+                                          },
+                                          "rowKey": "name",
+                                          "selectable": true,
+                                          "columns": [
+                                            { "key": "name", "label": "Interface" },
+                                            { "key": "username", "label": "Username" },
+                                            {
+                                              "key": "statusBadges",
+                                              "label": "State",
+                                              "format": "badges",
+                                              "sortable": false
+                                            },
+                                            { "key": "errorCode", "label": "Error" },
+                                            { "key": "ip", "label": "IPv4" }
+                                          ],
+                                          "sortDefault": { "key": "name", "dir": "asc" },
+                                          "filterKeys": ["name", "username", "errorCode", "ip"],
+                                          "rowActions": [
+                                            {
+                                              "label": "Start",
+                                              "method": "pppoeConnAction",
+                                              "argsFromRow": ["name"],
+                                              "args": ["start"]
+                                            },
+                                            {
+                                              "label": "Stop",
+                                              "method": "pppoeConnAction",
+                                              "argsFromRow": ["name"],
+                                              "args": ["stop"],
+                                              "confirm": "Stop this connection and keep it down?"
+                                            },
+                                            {
+                                              "label": "Redial",
+                                              "method": "pppoeConnAction",
+                                              "argsFromRow": ["name"],
+                                              "args": ["redial"],
+                                              "confirm": "Disconnect and redial this connection?"
+                                            }
+                                          ],
+                                          "bulkActions": [
+                                            { "label": "Start", "method": "pppoeConnAction", "args": ["start"] },
+                                            {
+                                              "label": "Redial",
+                                              "method": "pppoeConnAction",
+                                              "args": ["redial"],
+                                              "confirm": "Disconnect and redial the selected connections?"
+                                            }
+                                          ],
+                                          "emptyText": "Every connection in this batch is up, dialing or deliberately stopped"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "id": "all",
+                                      "label": "All connections",
+                                      "icon": "ListTree",
+                                      "blocks": [
+                                        {
+                                          "type": "table",
+                                          "source": {
+                                            "kind": "invoke",
+                                            "method": "pppoeRows",
+                                            "args": ["$row.id"],
+                                            "intervalKey": "openwrt"
+                                          },
+                                          "rowKey": "name",
+                                          "selectable": true,
+                                          "columns": [
+                                            { "key": "name", "label": "Interface" },
+                                            { "key": "username", "label": "Username" },
+                                            {
+                                              "key": "statusBadges",
+                                              "label": "State",
+                                              "format": "badges",
+                                              "sortable": false
+                                            },
+                                            { "key": "errorCode", "label": "Error" },
+                                            { "key": "ip", "label": "IPv4" },
+                                            {
+                                              "key": "upSince",
+                                              "label": "Up for",
+                                              "format": "duration",
+                                              "align": "right"
+                                            }
+                                          ],
+                                          "sortDefault": { "key": "name", "dir": "asc" },
+                                          "filterKeys": ["name", "username", "errorCode", "ip"],
+                                          "rowActions": [
+                                            {
+                                              "label": "Start",
+                                              "method": "pppoeConnAction",
+                                              "argsFromRow": ["name"],
+                                              "args": ["start"]
+                                            },
+                                            {
+                                              "label": "Stop",
+                                              "method": "pppoeConnAction",
+                                              "argsFromRow": ["name"],
+                                              "args": ["stop"],
+                                              "confirm": "Stop this connection and keep it down?"
+                                            },
+                                            {
+                                              "label": "Redial",
+                                              "method": "pppoeConnAction",
+                                              "argsFromRow": ["name"],
+                                              "args": ["redial"],
+                                              "confirm": "Disconnect and redial this connection?"
+                                            }
+                                          ],
+                                          "bulkActions": [
+                                            { "label": "Start", "method": "pppoeConnAction", "args": ["start"] },
+                                            {
+                                              "label": "Stop",
+                                              "method": "pppoeConnAction",
+                                              "args": ["stop"],
+                                              "confirm": "Stop the selected connections?"
+                                            },
+                                            {
+                                              "label": "Redial",
+                                              "method": "pppoeConnAction",
+                                              "args": ["redial"],
+                                              "confirm": "Disconnect and redial the selected connections?"
+                                            }
+                                          ],
+                                          "emptyText": "No connection in this batch has been sampled yet"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "binding",
+                      "label": "WAN Binding",
+                      "icon": "Network",
+                      "blocks": [
+                        {
+                          "type": "conditional",
+                          "when": {
+                            "source": { "kind": "stream", "event": "ui", "path": "hintsOn" },
+                            "op": "eq",
+                            "value": true
+                          },
+                          "blocks": [
+                            {
+                              "type": "note",
+                              "title": "One LAN client, one WAN",
+                              "lines": [
+                                "An instance owns exactly one logical LAN and one physical WAN carrier. Interfaces outside that pair remain independent.",
+                                "A sticky client keeps its WAN by MAC address. Optional remapping moves it only after the WAN has stayed failed beyond the grace period.",
+                                "A newly leased device is assigned a random free WAN; when none is free it waits in FIFO order. New instances are created on the Create tab."
+                              ]
+                            },
+                            {
+                              "type": "note",
+                              "title": "Operational warning",
+                              "tone": "warning",
+                              "lines": [
+                                "A waiting device deliberately has no internet: a catch-all unreachable route stops it leaking through the router's default WAN.",
+                                "Pausing the fast OpenWRT interval pauses this automation."
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "section",
+                          "title": "Above roughly 1,000 clients, three limits are yours to raise",
+                          "blocks": [
+                            {
+                              "type": "note",
+                              "lines": [
+                                "At that size the check reports conntrack, neighbour-table and flow-offload findings. This module deliberately does not write them: they are router-wide sysctls, they affect every service on the box, and getting one wrong takes the router off the network rather than one instance.",
+                                "The shell below runs on the router itself. The check names the exact values; set them in /etc/sysctl.conf so they survive a reboot.",
+                                "The dnsmasq lease limits the same check reports are the exception - those the module can raise for you, by the checkbox on the Create tab."
+                              ]
+                            },
+                            {
+                              "type": "terminal",
+                              "label": "Open a router shell",
+                              "commandTemplate": "sh"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "actions",
+                          "actions": [{ "label": "Refresh now", "method": "sweepNow" }]
+                        },
+                        {
+                          "type": "conditional",
+                          "when": {
+                            "source": { "kind": "stream", "event": "binding", "path": "hookOk" },
+                            "op": "eq",
+                            "value": false
+                          },
+                          "blocks": [
+                            {
+                              "type": "section",
+                              "title": "The last reconcile did not finish",
+                              "blocks": [
+                                {
+                                  "type": "note",
+                                  "tone": "warning",
+                                  "lines": [
+                                    "The rows below are the last ones the module was able to compute, and the age next to them is theirs, not this moment's. Devices shown as bound may already have lost their ip rules."
+                                  ]
+                                },
+                                {
+                                  "type": "keyValue",
+                                  "source": { "kind": "stream", "event": "binding" },
+                                  "rows": [{ "key": "lastError", "label": "Reason" }]
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "section",
+                          "title": "Binding instances",
+                          "slowTarget": "openwrt",
+                          "slowAt": { "kind": "stream", "event": "binding", "path": "t" },
+                          "blocks": [
+                            {
+                              "type": "table",
+                              "source": { "kind": "stream", "event": "binding", "path": "rows" },
+                              "rowKey": "id",
+                              "columns": [
+                                { "key": "name", "label": "Instance" },
+                                { "key": "lan", "label": "LAN" },
+                                { "key": "carrier", "label": "WAN carrier" },
+                                {
+                                  "key": "stateBadges",
+                                  "label": "State",
+                                  "format": "badges",
+                                  "sortable": false
+                                },
+                                { "key": "wanTotal", "label": "WANs", "format": "number", "align": "right" },
+                                {
+                                  "key": "wanAvailable",
+                                  "label": "Free",
+                                  "format": "number",
+                                  "align": "right"
+                                },
+                                {
+                                  "key": "wanWarning",
+                                  "label": "WAN warning",
+                                  "format": "number",
+                                  "align": "right"
+                                },
+                                {
+                                  "key": "wanError",
+                                  "label": "WAN error",
+                                  "format": "number",
+                                  "align": "right"
+                                },
+                                {
+                                  "key": "deviceTotal",
+                                  "label": "Devices",
+                                  "format": "number",
+                                  "align": "right"
+                                },
+                                {
+                                  "key": "deviceBound",
+                                  "label": "Bound",
+                                  "format": "number",
+                                  "align": "right"
+                                },
+                                {
+                                  "key": "deviceWaiting",
+                                  "label": "Waiting",
+                                  "format": "number",
+                                  "align": "right"
+                                }
+                              ],
+                              "sortDefault": { "key": "name", "dir": "asc" },
+                              "filterKeys": ["name", "lan", "carrier"],
+                              "emptyText": "No WAN Binding instance has been configured - use the Create tab",
+                              "rowActions": [
+                                { "label": "Start", "method": "bindingStart", "argsFromRow": ["id"] },
+                                {
+                                  "label": "Stop",
+                                  "method": "bindingStop",
+                                  "argsFromRow": ["id"],
+                                  "kind": "danger",
+                                  "confirm": "Stop assigning clients? Their client rules are removed, but the safety catch-all stays, so scoped clients lose internet."
+                                },
+                                {
+                                  "label": "Delete",
+                                  "method": "bindingDelete",
+                                  "argsFromRow": ["id"],
+                                  "kind": "danger",
+                                  "confirm": "Delete this binding instance and remove all of its client and safety rules?"
+                                }
+                              ],
+                              "rowDetail": [
+                                {
+                                  "type": "section",
+                                  "title": "Settings",
+                                  "blocks": [
+                                    {
+                                      "type": "form",
+                                      "fields": [
+                                        {
+                                          "key": "name",
+                                          "label": "Instance name",
+                                          "input": "text",
+                                          "initialFromScope": "name",
+                                          "help": "A display label only. It must be unique on this router."
+                                        },
+                                        {
+                                          "key": "sticky",
+                                          "label": "Keep a device on the same WAN",
+                                          "input": "checkbox",
+                                          "initialFromScope": "sticky",
+                                          "help": "Remember the WAN by client MAC and prefer it after a lease IP change or a reconnect. Switching it off drops the choices already remembered for this instance."
+                                        },
+                                        {
+                                          "key": "remap",
+                                          "label": "Remap after a WAN failure",
+                                          "input": "checkbox",
+                                          "initialFromScope": "remap",
+                                          "help": "When a WAN stays in error longer than the configured grace period, move its client to another free WAN. Both flags take effect on the next reconcile."
+                                        }
+                                      ],
+                                      "submit": {
+                                        "label": "Save",
+                                        "method": "bindingUpdate",
+                                        "argsFromRow": ["id"]
+                                      }
+                                    },
+                                    {
+                                      "type": "note",
+                                      "title": "The LAN and the carrier are fixed",
+                                      "lines": [
+                                        "Every client rule and the safety catch-all were installed for this exact pair, so changing either would leave rules on the router pointing at a subnet that is no longer behind this instance. Delete the instance and create one for the new pair instead."
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "section",
+                                  "title": "WAN pool",
+                                  "columns": 2,
+                                  "blocks": [
+                                    {
+                                      "type": "keyValue",
+                                      "source": { "kind": "stream", "event": "binding", "path": "$row.wan" },
+                                      "rows": [
+                                        { "key": "total", "label": "Total", "format": "number" },
+                                        { "key": "available", "label": "Available", "format": "number" },
+                                        { "key": "bound", "label": "Bound", "format": "number" },
+                                        { "key": "dialing", "label": "Dialing", "format": "number" },
+                                        { "key": "warning", "label": "Warning", "format": "number" },
+                                        { "key": "error", "label": "Error", "format": "number" }
+                                      ]
+                                    },
+                                    {
+                                      "type": "keyValue",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "binding",
+                                        "path": "$row.devices"
+                                      },
+                                      "rows": [
+                                        { "key": "total", "label": "Devices", "format": "number" },
+                                        { "key": "bound", "label": "Bound", "format": "number" },
+                                        { "key": "waiting", "label": "Waiting", "format": "number" }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "section",
+                                  "title": "Assignments",
+                                  "slowTarget": "openwrt",
+                                  "slowAt": { "kind": "stream", "event": "binding", "path": "t" },
+                                  "blocks": [
+                                    {
+                                      "type": "subnav",
+                                      "initial": "attention",
+                                      "items": [
+                                        {
+                                          "id": "attention",
+                                          "label": "Needs attention",
+                                          "icon": "Activity",
+                                          "blocks": [
+                                            {
+                                              "type": "note",
+                                              "lines": [
+                                                "Only the devices whose WAN is not healthy right now - failing, dialing, still inside its warning window, or gone from the pool altogether. This tab is open by default because the other one re-reads every assignment on each update, and only the tab you are looking at is fetched."
+                                              ]
+                                            },
+                                            {
+                                              "type": "table",
+                                              "source": {
+                                                "kind": "invoke",
+                                                "method": "bindingRows",
+                                                "args": ["$row.id", "attention"],
+                                                "intervalKey": "openwrt"
+                                              },
+                                              "rowKey": "key",
+                                              "selectable": true,
+                                              "columns": [
+                                                { "key": "host", "label": "Host" },
+                                                { "key": "mac", "label": "MAC" },
+                                                { "key": "ip", "label": "IPv4" },
+                                                { "key": "wan", "label": "WAN" },
+                                                { "key": "wanIp", "label": "WAN IPv4" },
+                                                {
+                                                  "key": "wanStatusBadges",
+                                                  "label": "WAN state",
+                                                  "format": "badges",
+                                                  "sortable": false
+                                                },
+                                                {
+                                                  "key": "assignedAt",
+                                                  "label": "Assigned for",
+                                                  "format": "duration",
+                                                  "align": "right"
+                                                }
+                                              ],
+                                              "sortDefault": { "key": "host", "dir": "asc" },
+                                              "filterKeys": ["host", "mac", "ip", "wan", "wanIp"],
+                                              "rowActions": [
+                                                {
+                                                  "label": "Unassign",
+                                                  "method": "bindingUnassign",
+                                                  "argsFromRow": ["instanceId", "mac"],
+                                                  "confirm": "Release this device's WAN? It returns to the waiting queue if the lease is still active."
+                                                },
+                                                {
+                                                  "label": "Reassign",
+                                                  "method": "bindingReassign",
+                                                  "argsFromRow": ["instanceId", "mac"],
+                                                  "confirm": "Release the sticky choice and assign another free WAN when possible?"
+                                                },
+                                                {
+                                                  "label": "Pin to a WAN",
+                                                  "method": "bindingPin",
+                                                  "argsFromRow": ["instanceId", "mac"],
+                                                  "prompt": {
+                                                    "label": "WAN interface name, as it appears in the WAN column",
+                                                    "input": "text",
+                                                    "initialKey": "wan"
+                                                  }
+                                                }
+                                              ],
+                                              "bulkActions": [
+                                                {
+                                                  "label": "Reassign",
+                                                  "method": "bindingReassign",
+                                                  "confirm": "Give the selected devices another free WAN when possible?"
+                                                }
+                                              ],
+                                              "emptyText": "Every assigned device is on a healthy WAN"
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "id": "all",
+                                          "label": "All assignments",
+                                          "icon": "ListTree",
+                                          "blocks": [
+                                            {
+                                              "type": "table",
+                                              "source": {
+                                                "kind": "invoke",
+                                                "method": "bindingRows",
+                                                "args": ["$row.id"],
+                                                "intervalKey": "openwrt"
+                                              },
+                                              "rowKey": "key",
+                                              "selectable": true,
+                                              "columns": [
+                                                { "key": "host", "label": "Host" },
+                                                { "key": "mac", "label": "MAC" },
+                                                { "key": "ip", "label": "IPv4" },
+                                                { "key": "wan", "label": "WAN" },
+                                                { "key": "wanIp", "label": "WAN IPv4" },
+                                                {
+                                                  "key": "wanStatusBadges",
+                                                  "label": "WAN state",
+                                                  "format": "badges",
+                                                  "sortable": false
+                                                },
+                                                {
+                                                  "key": "assignedAt",
+                                                  "label": "Assigned for",
+                                                  "format": "duration",
+                                                  "align": "right"
+                                                }
+                                              ],
+                                              "sortDefault": { "key": "host", "dir": "asc" },
+                                              "filterKeys": ["host", "mac", "ip", "wan", "wanIp"],
+                                              "groupModes": [{ "id": "wan", "label": "By WAN", "key": "wan" }],
+                                              "rowActions": [
+                                                {
+                                                  "label": "Unassign",
+                                                  "method": "bindingUnassign",
+                                                  "argsFromRow": ["instanceId", "mac"],
+                                                  "confirm": "Release this device's WAN? It returns to the waiting queue if the lease is still active."
+                                                },
+                                                {
+                                                  "label": "Reassign",
+                                                  "method": "bindingReassign",
+                                                  "argsFromRow": ["instanceId", "mac"],
+                                                  "confirm": "Release the sticky choice and assign another free WAN when possible?"
+                                                },
+                                                {
+                                                  "label": "Pin to a WAN",
+                                                  "method": "bindingPin",
+                                                  "argsFromRow": ["instanceId", "mac"],
+                                                  "prompt": {
+                                                    "label": "WAN interface name, as it appears in the WAN column",
+                                                    "input": "text",
+                                                    "initialKey": "wan"
+                                                  }
+                                                }
+                                              ],
+                                              "bulkActions": [
+                                                {
+                                                  "label": "Unassign",
+                                                  "method": "bindingUnassign",
+                                                  "confirm": "Release the WANs used by the selected devices?"
+                                                },
+                                                {
+                                                  "label": "Reassign",
+                                                  "method": "bindingReassign",
+                                                  "confirm": "Give the selected devices another free WAN when possible?"
+                                                }
+                                              ],
+                                              "emptyText": "No device is currently assigned"
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "section",
+                                  "title": "Waiting devices",
+                                  "slowTarget": "openwrt",
+                                  "slowAt": { "kind": "stream", "event": "binding", "path": "t" },
+                                  "blocks": [
+                                    {
+                                      "type": "table",
+                                      "source": {
+                                        "kind": "invoke",
+                                        "method": "bindingWaitingRows",
+                                        "args": ["$row.id"],
+                                        "intervalKey": "openwrt"
+                                      },
+                                      "rowKey": "key",
+                                      "columns": [
+                                        { "key": "position", "label": "Queue", "format": "number" },
+                                        { "key": "host", "label": "Host" },
+                                        { "key": "mac", "label": "MAC" },
+                                        { "key": "ip", "label": "IPv4" },
+                                        {
+                                          "key": "holdBadges",
+                                          "label": "State",
+                                          "format": "badges",
+                                          "sortable": false
+                                        },
+                                        { "key": "reason", "label": "Reason" },
+                                        {
+                                          "key": "waitingSince",
+                                          "label": "Waiting for",
+                                          "format": "duration",
+                                          "align": "right"
+                                        }
+                                      ],
+                                      "sortDefault": { "key": "position", "dir": "asc" },
+                                      "filterKeys": ["host", "mac", "ip", "reason"],
+                                      "rowActions": [
+                                        {
+                                          "label": "Reassign",
+                                          "method": "bindingReassign",
+                                          "argsFromRow": ["instanceId", "mac"],
+                                          "confirm": "Release the hold and assign a free WAN when one is available?"
+                                        },
+                                        {
+                                          "label": "Pin to a WAN",
+                                          "method": "bindingPin",
+                                          "argsFromRow": ["instanceId", "mac"],
+                                          "prompt": {
+                                            "label": "WAN interface name, as it appears in the WAN column of the Assignments table",
+                                            "input": "text"
+                                          }
+                                        }
+                                      ],
+                                      "emptyText": "No device is waiting for a WAN"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "section",
+                                  "title": "Live binding events",
+                                  "blocks": [
+                                    { "type": "log", "event": "bindingLog", "argsFromScope": ["id"] },
+                                    {
+                                      "type": "list",
+                                      "source": {
+                                        "kind": "invoke",
+                                        "method": "bindingEventRows",
+                                        "args": ["$row.id"]
+                                      },
+                                      "columns": [
+                                        { "key": "kind", "label": "Kind" },
+                                        { "key": "text", "label": "Event" },
+                                        { "key": "t", "label": "When", "format": "time", "align": "right" }
+                                      ],
+                                      "limit": 200,
+                                      "emptyText": "No binding event has been recorded"
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "jobs",
+                      "label": "Jobs",
+                      "icon": "ListTree",
+                      "blocks": [
+                        {
+                          "type": "conditional",
+                          "when": {
+                            "source": { "kind": "stream", "event": "ui", "path": "hintsOn" },
+                            "op": "eq",
+                            "value": true
+                          },
+                          "blocks": [
+                            {
+                              "type": "note",
+                              "title": "Bounded background work",
+                              "lines": [
+                                "A running job lives in memory and cannot resume after the app restarts. Reconciliation repairs whatever router state that leaves behind.",
+                                "Cancel stops the steps that have not started; a command already running on the router is allowed to finish.",
+                                "A step can also finish as a warning: the router took the change and then did not show it. The job carries on, and the warning is kept in the history."
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "section",
+                          "title": "Running now",
+                          "blocks": [
+                            {
+                              "type": "statusCards",
+                              "source": { "kind": "stream", "event": "jobs", "path": "running" },
+                              "rowKey": "id",
+                              "titleKey": "label",
+                              "statusKey": "health",
+                              "subtitleKey": "progressLabel",
+                              "note": { "key": "note", "label": "Now", "startOpen": true },
+                              "items": {
+                                "key": "chips",
+                                "labelKey": "label",
+                                "statusKey": "status",
+                                "pinnedKey": "pinned",
+                                "visibleRows": 3,
+                                "pinnedFilterLabel": "Only what is not ok",
+                                "emptyText": "no steps yet"
+                              },
+                              "columns": { "default": 2, "min": 1, "max": 3 },
+                              "emptyText": "No job is running",
+                              "rowActions": [
+                                {
+                                  "label": "Cancel",
+                                  "method": "jobCancel",
+                                  "argsFromRow": ["id"],
+                                  "kind": "danger",
+                                  "confirm": "Stop this job after the router command that is running finishes?"
+                                }
+                              ],
+                              "rowDetail": [
+                                {
+                                  "type": "meter",
+                                  "label": "Progress",
+                                  "source": {
+                                    "kind": "stream",
+                                    "event": "jobs",
+                                    "path": "$row.progressPct"
+                                  },
+                                  "format": "pct",
+                                  "max": 100
+                                },
+                                {
+                                  "type": "list",
+                                  "source": { "kind": "stream", "event": "jobs", "path": "$row.items" },
+                                  "columns": [
+                                    { "key": "name", "label": "Step" },
+                                    { "key": "statusBadges", "label": "Result", "format": "badges" },
+                                    { "key": "message", "label": "Message" },
+                                    {
+                                      "key": "startedAt",
+                                      "label": "Started",
+                                      "format": "time",
+                                      "align": "right"
+                                    },
+                                    { "key": "ms", "label": "ms", "format": "number", "align": "right" }
+                                  ],
+                                  "limit": 200,
+                                  "emptyText": "no steps yet"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "section",
+                          "title": "Finished",
+                          "blocks": [
+                            {
+                              "type": "table",
+                              "source": { "kind": "stream", "event": "jobs", "path": "finished" },
+                              "rowKey": "id",
+                              "columns": [
+                                { "key": "label", "label": "Job" },
+                                { "key": "kind", "label": "Kind" },
+                                {
+                                  "key": "stateBadges",
+                                  "label": "Outcome",
+                                  "format": "badges",
+                                  "sortable": false
+                                },
+                                { "key": "done", "label": "Done", "format": "number", "align": "right" },
+                                { "key": "total", "label": "Steps", "format": "number", "align": "right" },
+                                { "key": "failed", "label": "Failed", "format": "number", "align": "right" },
+                                { "key": "tookLabel", "label": "Took", "align": "right" },
+                                {
+                                  "key": "startedAt",
+                                  "label": "Started",
+                                  "format": "datetime",
+                                  "align": "right"
+                                }
+                              ],
+                              "sortDefault": { "key": "startedAt", "dir": "desc" },
+                              "filterKeys": ["label", "kind"],
+                              "emptyText": "No finished job is stored",
+                              "rowDetail": [
+                                {
+                                  "type": "list",
+                                  "source": { "kind": "stream", "event": "jobs", "path": "$row.items" },
+                                  "columns": [
+                                    { "key": "name", "label": "Step" },
+                                    { "key": "statusBadges", "label": "Result", "format": "badges" },
+                                    { "key": "message", "label": "Message" },
+                                    {
+                                      "key": "startedAt",
+                                      "label": "Started",
+                                      "format": "time",
+                                      "align": "right"
+                                    },
+                                    { "key": "ms", "label": "ms", "format": "number", "align": "right" }
+                                  ],
+                                  "limit": 200,
+                                  "emptyText": "no retained steps in this job"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "actions",
+                          "actions": [
+                            {
+                              "label": "Clear finished",
+                              "method": "jobsClear",
+                              "confirm": "Forget every finished job? A running job is left alone."
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "events",
+                      "label": "Events",
+                      "icon": "Activity",
+                      "blocks": [
+                        {
+                          "type": "conditional",
+                          "when": {
+                            "source": { "kind": "stream", "event": "ui", "path": "hintsOn" },
+                            "op": "eq",
+                            "value": true
+                          },
+                          "blocks": [
+                            {
+                              "type": "note",
+                              "title": "What lands here",
+                              "lines": [
+                                "Everything the automation decided on its own: a device bound or moved, a session created or deleted, a firewall rule that verified empty, a watchdog redial, a router reboot the module recovered from.",
+                                "Binding events belong to one instance and also appear in that instance's own drawer on the WAN Binding tab. PPPoE and router events belong to the router rather than to any instance, so this table is the only place in the app that shows them.",
+                                "The list is bounded per router, so the oldest entries are dropped. Nothing here ever carries router command output, because a rejected uci line can contain a PPPoE password."
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "section",
+                          "title": "Live module events",
+                          "blocks": [
+                            { "type": "log", "event": "moduleLog" }
+                          ]
+                        },
+                        {
+                          "type": "section",
+                          "title": "Recent events",
+                          "blocks": [
+                            {
+                              "type": "table",
+                              "source": {
+                                "kind": "invoke",
+                                "method": "eventRows",
+                                "args": [""],
+                                "intervalKey": "openwrt"
+                              },
+                              "rowKey": "id",
+                              "columns": [
+                                { "key": "source", "label": "Source" },
+                                { "key": "instance", "label": "Instance" },
+                                { "key": "kind", "label": "Kind" },
+                                { "key": "text", "label": "Event" },
+                                { "key": "t", "label": "When", "format": "datetime", "align": "right" }
+                              ],
+                              "sortDefault": { "key": "t", "dir": "desc" },
+                              "filterKeys": ["source", "instance", "kind", "text"],
+                              "groupModes": [
+                                { "id": "source", "label": "By source", "key": "source" },
+                                { "id": "kind", "label": "By kind", "key": "kind" }
+                              ],
+                              "emptyText": "Nothing has happened on this router yet"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "create",
+                      "label": "Create",
+                      "icon": "Sparkles",
+                      "blocks": [
+                        {
+                          "type": "conditional",
+                          "when": {
+                            "source": { "kind": "stream", "event": "ui", "path": "hintsOn" },
+                            "op": "eq",
+                            "value": true
+                          },
+                          "blocks": [
+                            {
+                              "type": "note",
+                              "title": "Both forms check before they write",
+                              "lines": [
+                                "Check reads the router and changes nothing. It reports what apply would do and refuses outright when the router cannot support it; only then does the apply button unlock.",
+                                "A check result is single-use and expires after ten minutes, and it is tied to the exact values that were checked - editing a field means checking again.",
+                                "Applying starts a job. It writes to the router in bounded chunks and can be cancelled between them - whatever was already written stays on the router, and the module keeps only the part that committed."
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "note",
+                          "title": "The two select lists are read once, when this tab opens",
+                          "lines": [
+                            "Physical WAN carrier, DHCP LAN interface and WAN carrier are all built from the last router sample. Before the first sweep lands they are empty, and an interface added since this tab was opened is not in them.",
+                            "Refresh the router sample below, then leave this tab and come back: the lists are rebuilt each time the tab becomes visible."
+                          ]
+                        },
+                        {
+                          "type": "actions",
+                          "actions": [{ "label": "Refresh the router sample", "method": "sweepNow" }]
+                        },
+                        {
+                          "type": "section",
+                          "title": "Create a PPPoE batch",
+                          "blocks": [
+                            {
+                              "type": "conditional",
+                              "when": {
+                                "source": { "kind": "stream", "event": "ui", "path": "hintsOn" },
+                                "op": "eq",
+                                "value": true
+                              },
+                              "blocks": [
+                                {
+                                  "type": "note",
+                                  "title": "Account-list format",
+                                  "lines": [
+                                    "One account per line: username, password, and an optional VLAN. Separate the fields with a tab, comma, semicolon, pipe, or repeated spaces; lines beginning with # are comments.",
+                                    "The prefix is at most four lowercase letters or digits, because the Linux device name pppoe-<section> cannot exceed 15 characters.",
+                                    "OpenWRT stores these passwords in clear text in /etc/config/network. This module keeps them only long enough to write them there."
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "checkForm",
+                              "checkMethod": "pppoeBatchCheck",
+                              "applyMethod": "pppoeBatchApply",
+                              "checkLabel": "Check the batch",
+                              "applyLabel": "Create and dial",
+                              "fields": [
+                                {
+                                  "key": "name",
+                                  "label": "Batch name",
+                                  "input": "text",
+                                  "placeholder": "ISP accounts 01",
+                                  "help": "A display label only. It must be non-empty and unique on this router."
+                                },
+                                {
+                                  "key": "carrier",
+                                  "label": "Physical WAN carrier",
+                                  "input": "select",
+                                  "optionsFrom": {
+                                    "kind": "invoke",
+                                    "method": "selectOptions",
+                                    "args": ["carriers"]
+                                  },
+                                  "help": "The Ethernet device that reaches the PPPoE access concentrator. Every row in this batch uses it, unless a row supplies a VLAN."
+                                },
+                                {
+                                  "key": "prefix",
+                                  "label": "Interface prefix",
+                                  "input": "text",
+                                  "placeholder": "pd",
+                                  "initialFrom": {
+                                    "kind": "invoke",
+                                    "method": "rulesEffective",
+                                    "path": "ifacePrefix"
+                                  },
+                                  "help": "One to four lowercase letters or digits, beginning with a letter. This opens on the default PPPoE prefix set in Module settings, Rules; change it here to override that for this batch only. A prefix of pd produces sections such as pd00001 and devices such as pppoe-pd00001."
+                                },
+                                {
+                                  "key": "vlan",
+                                  "label": "Default VLAN",
+                                  "input": "number",
+                                  "placeholder": "35",
+                                  "help": "Optional VLAN ID from 1 to 4094. A VLAN in an individual input row overrides this value; zero or empty means the carrier itself."
+                                },
+                                {
+                                  "key": "listFile",
+                                  "label": "Account-list file",
+                                  "input": "file",
+                                  "accept": ".txt,text/plain",
+                                  "maxKb": 1024,
+                                  "omitOnApply": true,
+                                  "help": "Optional UTF-8 text file, up to 1 MiB. Its content wins over pasted text when both are supplied."
+                                },
+                                {
+                                  "key": "listText",
+                                  "label": "Paste account list",
+                                  "input": "textarea",
+                                  "omitOnApply": true,
+                                  "placeholder": "account-001 password-001\naccount-002,password-002,35",
+                                  "help": "Use this when no file is selected. Tab, comma, semicolon, pipe, or repeated whitespace can separate the fields."
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "section",
+                          "title": "Create a WAN Binding instance",
+                          "blocks": [
+                            {
+                              "type": "checkForm",
+                              "checkMethod": "bindingCheck",
+                              "applyMethod": "bindingApply",
+                              "checkLabel": "Check the scope",
+                              "applyLabel": "Prepare and start",
+                              "kind": "danger",
+                              "fields": [
+                                {
+                                  "key": "name",
+                                  "label": "Instance name",
+                                  "input": "text",
+                                  "placeholder": "LAN 1 to ISP pool",
+                                  "help": "A unique display label for this one LAN and one carrier pair."
+                                },
+                                {
+                                  "key": "lan",
+                                  "label": "DHCP LAN interface",
+                                  "input": "select",
+                                  "optionsFrom": {
+                                    "kind": "invoke",
+                                    "method": "selectOptions",
+                                    "args": ["lan-ifaces"]
+                                  },
+                                  "help": "The logical OpenWRT interface whose IPv4 DHCP leases are assigned. It must have a subnet and a dnsmasq DHCP section; when dnsmasq itself is missing, Module settings can install it."
+                                },
+                                {
+                                  "key": "carrier",
+                                  "label": "WAN carrier",
+                                  "input": "select",
+                                  "optionsFrom": {
+                                    "kind": "invoke",
+                                    "method": "selectOptions",
+                                    "args": ["binding-carriers"]
+                                  },
+                                  "help": "A device, or one VLAN on a device when the ISP hands out the uplink tagged. Every PPPoE, DHCP, or static WAN using it, directly or through one of its VLANs, becomes part of the pool."
+                                },
+                                {
+                                  "key": "sticky",
+                                  "label": "Keep a device on the same WAN",
+                                  "input": "checkbox",
+                                  "initial": true,
+                                  "help": "Remember the WAN by client MAC and prefer it after a lease IP change or a reconnect, when that WAN is free and healthy."
+                                },
+                                {
+                                  "key": "remap",
+                                  "label": "Remap after a WAN failure",
+                                  "input": "checkbox",
+                                  "initial": true,
+                                  "help": "When a WAN stays in error longer than the configured grace period, move its client to another free WAN."
+                                },
+                                {
+                                  "key": "raiseDhcpLimits",
+                                  "label": "Raise dnsmasq lease limits when needed",
+                                  "input": "checkbox",
+                                  "initial": false,
+                                  "help": "Allow apply to raise this LAN's DHCP limit and the global dnsmasq lease cap to the size the check reports. That restarts dnsmasq, which briefly interrupts DHCP and DNS for the whole router; leave it off and the check still reports the numbers to set by hand."
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "section",
+                          "title": "What applying started",
+                          "blocks": [
+                            {
+                              "type": "note",
+                              "lines": [
+                                "Apply hands the work to a job and returns straight away, so the form going quiet is not the work being finished. The cards below are the jobs this router is running now; the Jobs tab keeps every step, every warning and the finished history."
+                              ]
+                            },
+                            {
+                              "type": "statusCards",
+                              "source": { "kind": "stream", "event": "jobs", "path": "running" },
+                              "rowKey": "id",
+                              "titleKey": "label",
+                              "statusKey": "health",
+                              "subtitleKey": "progressLabel",
+                              "note": { "key": "note", "label": "Now", "startOpen": true },
+                              "items": {
+                                "key": "chips",
+                                "labelKey": "label",
+                                "statusKey": "status",
+                                "pinnedKey": "pinned",
+                                "visibleRows": 2,
+                                "pinnedFilterLabel": "Only what is not ok",
+                                "emptyText": "no steps yet"
+                              },
+                              "columns": { "default": 2, "min": 1, "max": 3 },
+                              "emptyText": "Nothing is running - an apply from this tab appears here",
+                              "rowActions": [
+                                {
+                                  "label": "Cancel",
+                                  "method": "jobCancel",
+                                  "argsFromRow": ["id"],
+                                  "kind": "danger",
+                                  "confirm": "Stop this job after the router command that is running finishes?"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "list",
+                              "source": { "kind": "stream", "event": "jobs", "path": "finished" },
+                              "columns": [
+                                { "key": "label", "label": "Finished" },
+                                { "key": "stateBadges", "label": "Outcome", "format": "badges" },
+                                { "key": "failed", "label": "Failed", "format": "number", "align": "right" },
+                                { "key": "tookLabel", "label": "Took", "align": "right" },
+                                { "key": "startedAt", "label": "Started", "format": "time", "align": "right" }
+                              ],
+                              "limit": 5,
+                              "emptyText": "No job has finished on this router yet"
+                            }
+                          ]
                         }
                       ]
                     }

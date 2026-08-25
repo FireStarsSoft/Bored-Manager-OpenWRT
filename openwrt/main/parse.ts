@@ -7,10 +7,7 @@ import type {
   ProcNetDevSnapshot,
   RouterSystemState
 } from './types'
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
+import { finite, isRecord } from './util'
 
 function json(text: string): unknown {
   try {
@@ -24,10 +21,11 @@ function string(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
-function number(value: unknown, fallback = 0): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
-}
-
+/**
+ * Tolerant on purpose: ubus and BusyBox hand back numbers as text often enough
+ * that rejecting a string here would drop real readings. `store.ts` validates
+ * JSON this module wrote itself and takes the strict view instead.
+ */
 function integer(value: unknown, fallback = 0): number {
   const parsed =
     typeof value === 'number'
@@ -92,7 +90,7 @@ export function parseDump(text: string): IfaceState[] {
       pending: value.pending === true,
       autostart: value.autostart !== false,
       ipv4,
-      uptimeSec: Math.max(0, number(value.uptime)),
+      uptimeSec: Math.max(0, finite(value.uptime)),
       errorCode: firstError(value),
       ip4Table: table > 0 ? table : undefined
     })
@@ -106,13 +104,13 @@ export function parseSystemInfo(text: string): RouterSystemState {
   if (!isRecord(root)) {
     return { uptimeSec: 0, load1: 0, memTotal: 0, memFree: 0 }
   }
-  const load = Array.isArray(root.load) ? number(root.load[0]) : number(root.load)
+  const load = Array.isArray(root.load) ? finite(root.load[0]) : finite(root.load)
   const memory = isRecord(root.memory) ? root.memory : {}
-  const free = number(memory.available, number(memory.free))
+  const free = finite(memory.available, finite(memory.free))
   return {
-    uptimeSec: Math.max(0, number(root.uptime)),
+    uptimeSec: Math.max(0, finite(root.uptime)),
     load1: Math.max(0, Number.isInteger(load) ? load / 65_536 : load),
-    memTotal: Math.max(0, number(memory.total)),
+    memTotal: Math.max(0, finite(memory.total)),
     memFree: Math.max(0, free)
   }
 }
@@ -282,26 +280,6 @@ export function uciQuote(value: string): string {
   return `'${String(value).replace(/'/g, `'\\''`)}'`
 }
 
-function ereQuote(value: string): string {
-  return value.replace(/[\\.^$|?*+()[\]{}]/g, '\\$&')
-}
-
-/**
- * Build a BusyBox-awk ERE matching pooled PPPoE netdevs. An empty string means
- * no prefixes; FastSweep explicitly checks for it before applying the regex.
- */
-export function buildPoolDevRegex(prefixes: readonly string[]): string {
-  const unique: string[] = []
-  const seen = new Set<string>()
-  for (const raw of prefixes) {
-    const prefix = String(raw).trim()
-    if (!prefix || /[\0\r\n]/.test(prefix) || seen.has(prefix)) continue
-    seen.add(prefix)
-    unique.push(ereQuote(prefix))
-  }
-  return unique.length ? `pppoe-(${unique.join('|')})` : ''
-}
-
 /** Parse `uci -q show network | grep ip4table` into section -> table. */
 export function parseUciIp4Tables(text: string): Record<string, number> {
   const out = Object.create(null) as Record<string, number>
@@ -331,6 +309,101 @@ export function parseUciPppoeUsers(text: string): Record<string, string> {
     out[match[1]] = value
   }
   return out
+}
+
+function unquoteUci(valueRaw: string): string {
+  const value = valueRaw.trim()
+  if (value.length >= 2 && value.startsWith("'") && value.endsWith("'")) {
+    return value.slice(1, -1).replace(/'\\''/g, "'")
+  }
+  return value
+}
+
+/** Split `uci show` list values such as `'lan' 'guest'`. */
+export function tokenizeUciValues(valueRaw: string): string[] {
+  const tokens: string[] = []
+  const matches = valueRaw.matchAll(/'(?:[^']|\\'')*'|[^\s]+/g)
+  for (const match of matches) {
+    const token = unquoteUci(match[0])
+    if (token) tokens.push(token)
+  }
+  return tokens
+}
+
+export interface FirewallZone {
+  /** UCI section id; `@zone[0]` for the anonymous sections most routers use. */
+  section: string
+  /** `option name`, falling back to the section id. */
+  name: string
+  /** Every `list network` value on the zone. */
+  networks: string[]
+}
+
+/**
+ * Parse the `===FWZONES===` slow-probe section: `uci -q show firewall` filtered
+ * to zone declarations, names and network membership.
+ *
+ * The filter is a grep, so it also lets through the `.name=` of a rule and any
+ * other section that happens to carry one. Only sections the output actually
+ * declared as `=zone` are returned, so those lines are collected and dropped.
+ */
+export function parseFirewallZones(text: string): FirewallZone[] {
+  const declared: string[] = []
+  const isZone = new Set<string>()
+  const names = new Map<string, string>()
+  const networks = new Map<string, string[]>()
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim()
+    const equals = line.indexOf('=')
+    if (equals <= 0) continue
+    const key = line.slice(0, equals)
+    if (!key.startsWith('firewall.')) continue
+    const rest = key.slice('firewall.'.length)
+    const value = line.slice(equals + 1)
+    const dot = rest.indexOf('.')
+    if (dot < 0) {
+      if (value.trim() !== 'zone' || isZone.has(rest)) continue
+      isZone.add(rest)
+      declared.push(rest)
+      continue
+    }
+    const section = rest.slice(0, dot)
+    const option = rest.slice(dot + 1)
+    if (option === 'name') {
+      const token = tokenizeUciValues(value)[0]
+      if (token) names.set(section, token)
+    } else if (option === 'network') {
+      const list = networks.get(section) ?? []
+      // Both spellings of a UCI list reach us: one line per value on some
+      // releases, `'lan' 'guest'` on one line on others.
+      list.push(...tokenizeUciValues(value))
+      networks.set(section, list)
+    }
+  }
+  return declared.map((section) => ({
+    section,
+    name: names.get(section) || section,
+    networks: networks.get(section) ?? []
+  }))
+}
+
+/** A firewall zone name as it may appear in a value; `-` is legal here. */
+const ZONE_NAME = /^[A-Za-z0-9_-]{1,32}$/
+
+/**
+ * Which zone LAN clients sit in, for the forwarding that lets them reach the
+ * managed WAN pool.
+ *
+ * A zone that actually lists network `lan` wins over one merely called `lan`:
+ * the name is a label, the membership is the routing fact. An empty string
+ * means "no answer" - every caller keeps its own fallback rather than guessing
+ * a different zone.
+ */
+export function pickLanZone(zones: readonly FirewallZone[]): string {
+  const usable = zones.filter((zone) => ZONE_NAME.test(zone.name))
+  const byNetwork = usable.find((zone) => zone.networks.includes('lan'))
+  if (byNetwork) return byNetwork.name
+  return usable.find((zone) => zone.name === 'lan')?.name ?? ''
 }
 
 function logErrorCode(line: string): PppoeErrorCode | null {

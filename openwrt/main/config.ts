@@ -6,6 +6,7 @@ import {
 } from '@shared/check'
 import type { ModuleContext } from '@shared/modules'
 import type { OkResult } from '@shared/types'
+import { isRecord, textField } from './util'
 
 export type ZoneMode = 'wildcard' | 'networks'
 
@@ -28,6 +29,8 @@ export interface OwrtRules {
   stickyByMac: boolean
   releaseGraceSec: number
   autoRedialAfterMin: number
+  /** Rewrite a WAN's missing `option ip4table` during the slow-tick audit. */
+  autoRepairTables: boolean
   leaseFile: string
   maxEvents: number
   stickyCap: number
@@ -59,6 +62,7 @@ export const DEFAULT_RULES: OwrtRules = {
   stickyByMac: true,
   releaseGraceSec: 300,
   autoRedialAfterMin: 0,
+  autoRepairTables: true,
   leaseFile: '/tmp/dhcp.leases',
   maxEvents: 200,
   stickyCap: 6_000
@@ -89,15 +93,12 @@ export const RULE_BOUNDS: Record<NumericRule, { min: number; max: number; label:
 const NUMERIC_KEYS = Object.keys(RULE_BOUNDS) as NumericRule[]
 const BOOLEAN_KEYS = [
   'remapOnWanError',
-  'stickyByMac'
+  'stickyByMac',
+  'autoRepairTables'
 ] as const satisfies ReadonlyArray<keyof OwrtRules>
 
 const IFACE_PREFIX = /^[a-z][a-z0-9]{0,3}$/
 const UCI_NAME = /^[a-z][a-z0-9_]{0,31}$/
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 function validLeaseFile(value: string): boolean {
   return (
@@ -173,6 +174,14 @@ function normalize(raw: unknown): OwrtConfig {
     delete rules.rulePrefBase
     delete rules.catchAllPrefBase
   }
+  const spanned = { ...DEFAULT_RULES, ...rules }
+  // The same span test the tables get, for the preferences. One client rule per
+  // WAN, so a range narrower than a batch runs into the catch-all preferences.
+  if (spanned.rulePrefBase + spanned.maxBatchRows >= spanned.catchAllPrefBase) {
+    delete rules.rulePrefBase
+    delete rules.catchAllPrefBase
+    delete rules.maxBatchRows
+  }
   const checked = { ...DEFAULT_RULES, ...rules }
   if (checked.tableBase + checked.maxBatchRows >= checked.catchAllTable) {
     delete rules.tableBase
@@ -234,9 +243,15 @@ export class ConfigStore {
     })
   }
 
-  toggleHints(): boolean {
+  /**
+   * Set the flag outright. A checkbox already knows which state it wants, and
+   * the toggle this replaced turned that into "whatever the opposite of the
+   * server's copy is" - the wrong answer whenever the page was opened before
+   * another surface changed it.
+   */
+  setHints(on: boolean): boolean {
     return this.update((config) => {
-      config.ui.showHints = !config.ui.showHints
+      config.ui.showHints = on
       return config.ui.showHints
     })
   }
@@ -253,22 +268,43 @@ export class ConfigStore {
   }
 }
 
-function text(values: Record<string, unknown>, key: string): string {
-  const value = values[key]
-  return typeof value === 'string' ? value.trim() : value == null ? '' : String(value)
-}
-
 /**
  * Check/apply adapter for the declarative settings form. Keeping it beside the
  * store makes the "persist only diffs" invariant impossible for callers to skip.
  */
+/**
+ * Whether this router already has records whose layout the locked rules
+ * describe.
+ *
+ * `unknown` is the case that used to be missing. The records are per-machine
+ * while the rules are global, so "no records" read off a disconnected context -
+ * or off a different machine in the pool - is not the same statement as "this
+ * router has none". Answering `none` there unlocked the numbering of a router
+ * that was sitting on a hundred live PPPoE sessions, and the next create wrote
+ * them into a different table range than the one already in use.
+ */
+export type RulesTopology = 'none' | 'present' | 'unknown'
+
+const UNKNOWN_TOPOLOGY =
+  'Numbering and firewall-layout rules cannot change while no router is connected'
+
+/** The six values that describe where this module's objects live on a router. */
+const LOCKED_KEYS: ReadonlyArray<keyof OwrtRules> = [
+  'tableBase',
+  'rulePrefBase',
+  'catchAllPrefBase',
+  'catchAllTable',
+  'zoneName',
+  'zoneMode'
+]
+
 export class RulesEditor {
   private session = createCheckSession<Partial<OwrtRules>>()
 
   constructor(
     private ctx: ModuleContext,
     private store: ConfigStore,
-    private hasTopology: () => boolean
+    private topology: () => RulesTopology
   ) {}
 
   effective(): Record<string, string | number | boolean> {
@@ -280,13 +316,25 @@ export class RulesEditor {
     return out
   }
 
+  /**
+   * Validate one group of rules against everything already in force.
+   *
+   * The form is split into four groups, and each submission carries only its
+   * own fields. Merging over `DEFAULT_RULES` therefore meant saving a group
+   * silently reset every override belonging to the other three - the check
+   * reported "3 rule override(s) will be saved" and quietly dropped four.
+   * Merging over the current values instead makes a blank field mean "leave
+   * this as it is"; the placeholders still name the defaults, and Reset every
+   * rule is how a user goes back to them.
+   */
   check(raw: unknown): ModuleCheckReport {
     const values = isRecord(raw) ? raw : {}
     const findings: ModuleCheckFinding[] = []
     const entered: Partial<OwrtRules> = {}
+    const current = this.store.effectiveRules()
 
     for (const key of NUMERIC_KEYS) {
-      const rawValue = text(values, key)
+      const rawValue = textField(values, key)
       if (!rawValue) continue
       const value = Number(rawValue)
       const bounds = RULE_BOUNDS[key]
@@ -307,7 +355,7 @@ export class RulesEditor {
       }
     }
 
-    const prefix = text(values, 'ifacePrefix')
+    const prefix = textField(values, 'ifacePrefix')
     if (prefix) {
       if (!IFACE_PREFIX.test(prefix)) {
         findings.push({
@@ -318,7 +366,7 @@ export class RulesEditor {
         entered.ifacePrefix = prefix
       }
     }
-    const zoneName = text(values, 'zoneName')
+    const zoneName = textField(values, 'zoneName')
     if (zoneName) {
       if (!UCI_NAME.test(zoneName)) {
         findings.push({
@@ -329,7 +377,7 @@ export class RulesEditor {
         entered.zoneName = zoneName
       }
     }
-    const zoneMode = text(values, 'zoneMode')
+    const zoneMode = textField(values, 'zoneMode')
     if (zoneMode) {
       if (zoneMode !== 'wildcard' && zoneMode !== 'networks') {
         findings.push({ level: 'error', label: 'Firewall zone mode must be wildcard or networks' })
@@ -337,7 +385,7 @@ export class RulesEditor {
         entered.zoneMode = zoneMode
       }
     }
-    const leaseFile = text(values, 'leaseFile')
+    const leaseFile = textField(values, 'leaseFile')
     if (leaseFile) {
       if (!validLeaseFile(leaseFile)) {
         findings.push({ level: 'error', label: 'Lease file must be a short absolute path without line breaks' })
@@ -351,40 +399,8 @@ export class RulesEditor {
       }
     }
 
-    const candidate: OwrtRules = { ...DEFAULT_RULES, ...entered }
-    if (candidate.rulePrefBase >= candidate.catchAllPrefBase) {
-      findings.push({
-        level: 'error',
-        label: 'Assignment rule priorities must end before the catch-all priority range'
-      })
-    }
-    if (candidate.tableBase + candidate.maxBatchRows >= candidate.catchAllTable) {
-      findings.push({
-        level: 'error',
-        label: 'The PPPoE routing-table range overlaps the catch-all routing table',
-        detail: 'Raise the catch-all table or lower the table base / maximum batch size.'
-      })
-    }
-
-    const current = this.store.effectiveRules()
-    if (this.hasTopology()) {
-      const locked: Array<keyof OwrtRules> = [
-        'tableBase',
-        'rulePrefBase',
-        'catchAllPrefBase',
-        'catchAllTable',
-        'zoneName',
-        'zoneMode'
-      ]
-      const changed = locked.filter((key) => candidate[key] !== current[key])
-      if (changed.length) {
-        findings.push({
-          level: 'error',
-          label: 'Numbering and firewall-layout rules cannot change while batches or binding instances exist',
-          detail: `Delete those router-managed records first before changing ${changed.join(', ')}.`
-        })
-      }
-    }
+    const candidate: OwrtRules = { ...current, ...entered }
+    findings.push(...this.blockers(candidate, current))
     if (candidate.zoneMode === 'networks') {
       findings.push({
         level: 'info',
@@ -399,16 +415,28 @@ export class RulesEditor {
         ;(kept as Record<string, unknown>)[key] = candidate[key]
       }
     }
+    const changed = (Object.keys(DEFAULT_RULES) as Array<keyof OwrtRules>).filter(
+      (key) => candidate[key] !== current[key]
+    )
     findings.push({
       level: 'pass',
-      label: Object.keys(kept).length
-        ? `${Object.keys(kept).length} rule override(s) will be saved`
-        : 'Every OpenWRT rule will use its default'
+      label: changed.length
+        ? `${changed.length} rule(s) will change: ${changed.slice(0, 6).join(', ')}${changed.length > 6 ? ', ...' : ''}`
+        : 'Nothing changes - every value entered is already in force',
+      detail: Object.keys(kept).length
+        ? `${Object.keys(kept).length} rule override(s) will be saved; everything else keeps its default.`
+        : 'Every OpenWRT rule will use its default.'
     })
 
     const ok = !hasBlockingFinding(findings)
     return ok
-      ? { ok: true, token: this.session.issue(values, kept), findings }
+      ? // The token freezes what the user typed for *this* group, not the whole
+        // merged document. Freezing the merge meant a save carried a snapshot
+        // of every other group as it looked during the check, so applying it
+        // reverted any override saved in between - and, because the snapshot
+        // was written verbatim, it wrote locked values straight past the lock
+        // that had just approved them.
+        { ok: true, token: this.session.issue(values, entered), findings }
       : { ok: false, findings }
   }
 
@@ -419,33 +447,114 @@ export class RulesEditor {
     if (!taken) {
       return { ok: false, error: 'that check expired or the form changed - check again' }
     }
-    this.store.setRules(taken.payload)
-    this.ctx.log(
-      `openwrt: rule overrides saved: ${Object.keys(taken.payload).join(', ') || 'none'}`
-    )
+    // Re-derive against what is in force now rather than trusting the check.
+    // Ten minutes can pass between the two, and in that time another group can
+    // be saved, a batch can be created, or the connection can drop.
+    const current = this.store.effectiveRules()
+    const candidate: OwrtRules = { ...current, ...taken.payload }
+    const blocker = this.blockers(candidate, current)[0]
+    if (blocker) {
+      return { ok: false, error: `${blocker.label.toLowerCase()} - check again` }
+    }
+
+    const kept: Partial<OwrtRules> = {}
+    for (const key of Object.keys(DEFAULT_RULES) as Array<keyof OwrtRules>) {
+      if (candidate[key] !== DEFAULT_RULES[key]) {
+        ;(kept as Record<string, unknown>)[key] = candidate[key]
+      }
+    }
+    this.store.setRules(kept)
+    this.ctx.log(`openwrt: rule overrides saved: ${Object.keys(kept).join(', ') || 'none'}`)
     return { ok: true }
   }
 
+  /**
+   * Put every rule back to its default except the ones that are locked, and say
+   * which ones were kept.
+   *
+   * It used to refuse wholesale: one batch on the router and "Reset every rule"
+   * did nothing at all, so the chunk size, the grace periods and the lease file
+   * - none of which describe where anything lives - could no longer be reset
+   * without deleting the pool first. The locked six are the only values a
+   * running router's records depend on, and they are the only ones held back.
+   */
   reset(): OkResult {
     const current = this.store.effectiveRules()
-    if (
-      this.hasTopology() &&
-      (current.tableBase !== DEFAULT_RULES.tableBase ||
-        current.rulePrefBase !== DEFAULT_RULES.rulePrefBase ||
-        current.catchAllPrefBase !== DEFAULT_RULES.catchAllPrefBase ||
-        current.catchAllTable !== DEFAULT_RULES.catchAllTable ||
-        current.zoneName !== DEFAULT_RULES.zoneName ||
-        current.zoneMode !== DEFAULT_RULES.zoneMode)
-    ) {
-      return {
-        ok: false,
-        error: 'numbering and firewall-layout rules cannot be reset while batches or binding instances exist'
-      }
+    const topology = this.topology()
+    const held = topology === 'none'
+      ? []
+      : LOCKED_KEYS.filter((key) => current[key] !== DEFAULT_RULES[key])
+    const kept: Partial<OwrtRules> = {}
+    for (const key of held) {
+      ;(kept as Record<string, unknown>)[key] = current[key]
     }
-    this.store.setRules({})
+    this.store.setRules(kept)
     this.session.clear()
-    this.ctx.log('openwrt: rule overrides cleared')
-    return { ok: true }
+    this.ctx.log(
+      `openwrt: rule overrides cleared${held.length ? `, keeping ${held.join(', ')}` : ''}`
+    )
+    if (!held.length) return { ok: true }
+    return {
+      ok: true,
+      data:
+        `Every rule is back to its default except ${held.join(', ')}, kept because ` +
+        (topology === 'unknown'
+          ? 'no router is connected to say whether records exist that depend on them. Connect the router these rules apply to, then reset again.'
+          : 'batches or binding instances describe where their objects live on the router. Delete those records first, then reset again.')
+    }
+  }
+
+  /**
+   * Every reason a candidate must not be saved, in one place so `check` and
+   * `apply` cannot drift apart. `check` shows them; `apply` runs them again
+   * against the values in force at that moment and refuses on the first.
+   */
+  private blockers(candidate: OwrtRules, current: OwrtRules): ModuleCheckFinding[] {
+    const findings: ModuleCheckFinding[] = []
+    if (candidate.rulePrefBase >= candidate.catchAllPrefBase) {
+      findings.push({
+        level: 'error',
+        label: 'Assignment rule priorities must end before the catch-all priority range'
+      })
+    }
+    // The bases alone are checked above; this is the range each of them spans.
+    // One client ip rule per WAN and one routing table per WAN, so a batch of
+    // `maxBatchRows` sessions needs that many of both before the catch-all
+    // numbering starts. Only the tables were ever checked, so a priority base
+    // set close under the catch-all range saved cleanly and then silently ran
+    // out of preferences: every device past the gap stayed queued behind a
+    // fail-closed catch-all with no internet and no setting saying why.
+    if (candidate.rulePrefBase + candidate.maxBatchRows >= candidate.catchAllPrefBase) {
+      findings.push({
+        level: 'error',
+        label: 'The client rule priority range overlaps the catch-all priority range',
+        detail: `Each bound device takes one ip rule priority from ${candidate.rulePrefBase} upwards and a batch can hold ${candidate.maxBatchRows}, so the catch-all base has to sit at least that far above it. Raise the catch-all priority base or lower the rule priority base / maximum batch size.`
+      })
+    }
+    if (candidate.tableBase + candidate.maxBatchRows >= candidate.catchAllTable) {
+      findings.push({
+        level: 'error',
+        label: 'The PPPoE routing-table range overlaps the catch-all routing table',
+        detail: 'Raise the catch-all table or lower the table base / maximum batch size.'
+      })
+    }
+    const changed = LOCKED_KEYS.filter((key) => candidate[key] !== current[key])
+    if (!changed.length) return findings
+    const topology = this.topology()
+    if (topology === 'unknown') {
+      findings.push({
+        level: 'error',
+        label: UNKNOWN_TOPOLOGY,
+        detail: `Connect the router that these rules will apply to, then change ${changed.join(', ')}.`
+      })
+    } else if (topology === 'present') {
+      findings.push({
+        level: 'error',
+        label: 'Numbering and firewall-layout rules cannot change while batches or binding instances exist',
+        detail: `Delete those router-managed records first before changing ${changed.join(', ')}.`
+      })
+    }
+    return findings
   }
 
   clear(): void {

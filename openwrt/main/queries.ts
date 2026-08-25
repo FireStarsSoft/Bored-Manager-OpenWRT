@@ -1,27 +1,9 @@
+import { statusBadges } from './badges'
 import type { ConfigStore } from './config'
-import type { HostStore, PppoeBatchRecord } from './store'
+import { recordLayout, type ManagedLayout, type PppoeBatchRecord } from './records'
+import type { HostStore } from './store'
 import type { IfaceState, IpRule, Lease, RouterModel } from './types'
-
-function ipv4ToInt(ip: string): number | null {
-  const parts = ip.split('.')
-  if (parts.length !== 4) return null
-  let value = 0
-  for (const part of parts) {
-    if (!/^\d{1,3}$/.test(part)) return null
-    const octet = Number(part)
-    if (octet < 0 || octet > 255) return null
-    value = (value * 256 + octet) >>> 0
-  }
-  return value
-}
-
-function subnetContains(address: string, mask: number, candidate: string): boolean {
-  const left = ipv4ToInt(address)
-  const right = ipv4ToInt(candidate)
-  if (left == null || right == null || mask < 0 || mask > 32) return false
-  const bits = mask === 0 ? 0 : (0xffffffff << (32 - mask)) >>> 0
-  return (left & bits) === (right & bits)
-}
+import { ifaceIndex, ipv4ToInt, sameSubnet } from './util'
 
 function ifaceStatus(iface: IfaceState): string {
   if (iface.up && iface.ipv4) return 'up'
@@ -36,11 +18,23 @@ function fromAddress(rule: IpRule): string | null {
   return ipv4ToInt(address) == null ? null : address
 }
 
-function conventionalWan(table: number, tableBase: number, batches: PppoeBatchRecord[]): string {
-  const seq = table - tableBase
-  if (!Number.isInteger(seq) || seq < 1) return ''
-  const batch = batches.find((entry) => seq >= entry.seqFrom && seq <= entry.seqTo)
-  return batch ? `${batch.prefix}${String(seq).padStart(5, '0')}` : ''
+/**
+ * The section name a routing table implies, by the naming convention each
+ * batch was created under. Each batch carries its own base, so a table base
+ * edited after the fact does not stop naming the sessions already dialed.
+ */
+function conventionalWan(
+  table: number,
+  batches: readonly PppoeBatchRecord[],
+  live: ManagedLayout
+): string {
+  for (const batch of batches) {
+    const seq = table - recordLayout(batch, live).tableBase
+    if (!Number.isInteger(seq) || seq < 1) continue
+    if (seq < batch.seqFrom || seq > batch.seqTo) continue
+    return `${batch.prefix}${String(seq).padStart(5, '0')}`
+  }
+  return ''
 }
 
 function expiryLabel(lease: Lease, nowSec: number): string {
@@ -53,6 +47,17 @@ function expiryLabel(lease: Lease, nowSec: number): string {
   if (remaining < 60) return `${remaining}s`
   if (remaining < 3_600) return `${Math.ceil(remaining / 60)}m`
   return `${Math.ceil(remaining / 3_600)}h`
+}
+
+/**
+ * The same expiry as an absolute time the renderer can print in the viewer's
+ * own locale - 0 whenever there is no such moment to print. That covers both a
+ * static lease, which never expires, and one whose expiry could not be rebased
+ * onto our clock; `expires` still carries the word for those two cases.
+ */
+function expiresAt(lease: Lease): number {
+  if (lease.expires === 0 || lease.expiresUnknown) return 0
+  return lease.expires * 1_000
 }
 
 /** Builders for potentially-thousands-row invoke tables; every source is RAM. */
@@ -90,7 +95,7 @@ export class Queries {
       if (!ip) continue
       const wan =
         tableToWan.get(rule.table) ||
-        conventionalWan(rule.table, rules.tableBase, data.batches)
+        conventionalWan(rule.table, data.batches, rules)
       if (!wan) continue
       const current = assignmentByIp.get(ip)
       if (!current || rule.pref < current.pref) {
@@ -98,7 +103,7 @@ export class Queries {
       }
     }
 
-    const byName = new Map(model.ifaces.map((iface) => [iface.name, iface]))
+    const byName = ifaceIndex(model)
     const configuredLans = new Set(data.instances.map((instance) => instance.lan))
     const lanIfaces = model.ifaces
       .filter(
@@ -118,7 +123,7 @@ export class Queries {
         lanIfaces.find(
           (iface) =>
             iface.ipv4 != null &&
-            subnetContains(iface.ipv4.addr, iface.ipv4.mask, lease.ip)
+            sameSubnet(iface.ipv4.addr, lease.ip, iface.ipv4.mask)
         )?.name ?? ''
       const instance = data.instances.find((entry) => entry.lan === lan)
       const assignment = assignmentByIp.get(lease.ip)
@@ -137,8 +142,14 @@ export class Queries {
         ip: lease.ip,
         lan,
         expires: expiryLabel(lease, nowSec),
+        expiresAt: expiresAt(lease),
         wan,
-        bindingStatus: status
+        bindingStatus: status,
+        bindingBadges: statusBadges(status),
+        // Carried so the table can offer Reassign/Unassign on the row itself:
+        // both take the instance the device belongs to, and until now the only
+        // way to reach them was to find that instance on the Automation page.
+        instanceId: instance?.id ?? ''
       }
     })
   }

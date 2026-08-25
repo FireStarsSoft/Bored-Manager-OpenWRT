@@ -21,11 +21,13 @@ You do not need this repository to use the module. In Bored Manager, open
 | GitHub repo | `FireStarsSoft/Bored-Manager-OpenWRT` |
 | Zip URL / file | the `openwrt-<version>.zip` attached to a [release](../../releases) |
 
-It needs Bored Manager **0.3.3** or newer and installs **switched off** —
-enable it in the same place. Bored Manager **0.4.1** is the first app release
-that does not bundle it; an older app already carrying version 1.0.7 keeps it
-across the update and can update to 1.0.8 from here without losing its rules,
-per-router state or history.
+It installs **switched off** — enable it in the same place. Version 2.0.0 needs
+Bored Manager **0.4.1** or newer, which is also the first app release that does
+not bundle the module, **and OpenWrt 25.12 or newer** on the router — 25.12.0
+replaced opkg with apk, and 2.0.0 speaks only apk, so it refuses a 24.10 router
+outright rather than half-managing it. The 1.0.x line still runs on **0.3.3**.
+An app already carrying 1.0.7 keeps it across the update, and updating to 1.0.8
+or 2.0.0 from here keeps its rules, per-router state and history.
 
 ## Layout
 
@@ -33,6 +35,13 @@ per-router state or history.
 openwrt/            the module, and nothing else — this folder is what ships
   module.json         manifest: pages, widgets, streams, methods
   main/               the main half, compiled by the app at install time
+    index.ts            the six lifecycle hooks, and nothing else
+    runtime/            wiring: the object graph, the readiness latch, the method names
+    probe/ setup/       what the router can do, and installing what it lacks
+    service/            fast and slow collection, the dashboard payload
+    pppoe/ binding/     the two automations
+    uci/ store/         everything written to the router, and the per-router document
+    *.ts                what more than one of those folders shares
   ui/pages/*.json     page specs the app renders
   ui/widgets/*.json   Overview widget specs
   README.md           what the module does
@@ -41,8 +50,16 @@ shared/             vendored copy of the app's shared/ — what `@shared/*` mean
 vendor/             vendored copy of the app's module compiler, plus two shims
 tests/              unit tests for main/, on the app's own module harness
 scripts/            packaging and the checks CI runs
+.github/workflows/  the same checks on push, the tagged release, the SDK drift watch
 sdk.lock.json       which app ref the two vendored folders came from
 ```
+
+Each folder under `main/` has an `index.ts` that is its only entrance: a file
+imports `../binding`, never `../binding/reconcile`. That is what let the main
+half be split into folders without touching a single call site — including
+every import in `tests/` — and `npm run size` is what keeps it that way. The
+three rules behind that split, and which file to open for what, are the **Code
+map** in [`openwrt/README.md`](openwrt/README.md).
 
 `openwrt/` is hashed byte for byte by the app that installs it, so the checkout
 has to match the release zip exactly: `.gitattributes` pins the whole repository
@@ -52,7 +69,7 @@ to LF, and nothing that is not part of the module goes into that folder.
 
 ```bash
 npm install
-npm run check      # sdk:check + typecheck + test + specs + compile
+npm run check      # sdk:check + typecheck + test + specs + size + compile
 ```
 
 | Script | What it does |
@@ -60,6 +77,7 @@ npm run check      # sdk:check + typecheck + test + specs + compile
 | `npm run typecheck` | `tsc` over the module, the vendored SDK and the tests |
 | `npm test` | Vitest over `tests/`, using the app's `moduleHarness` |
 | `npm run specs` | every `ui/*.json` through the app's own spec validator |
+| `npm run size` | the structural rules for `openwrt/main/`: no file over 600 lines, no import that reaches past a folder's barrel, no CRLF |
 | `npm run compile` | esbuild through the app's real scope guard — catches an import a module is not allowed to make |
 | `npm run pack` | writes `dist/openwrt-<version>.zip` and its `.sha256` |
 | `npm run sdk:check` | have the vendored copies been edited? (offline) |

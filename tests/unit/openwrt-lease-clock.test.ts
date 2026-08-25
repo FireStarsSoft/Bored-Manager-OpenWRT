@@ -129,8 +129,6 @@ describe('what the binding planner does with a lease it cannot date', () => {
     wanErrorGraceSec: 30,
     wanWarnUptimeSec: 0,
     releaseGraceSec: 300,
-    remapOnWanError: true,
-    stickyByMac: true,
     maxEvents: 200
   }
 

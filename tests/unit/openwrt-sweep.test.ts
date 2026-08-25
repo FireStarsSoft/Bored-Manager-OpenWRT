@@ -18,6 +18,7 @@ describe('OpenWRT sweepNow', () => {
       const probeStdout = [
         '===REL===',
         'DISTRIB_ID=OpenWrt',
+        'DISTRIB_RELEASE=25.12.5',
         '===BOARD===',
         '{}',
         '===TOOLS===',
@@ -26,7 +27,10 @@ describe('OpenWRT sweepNow', () => {
         'ip',
         'netifd',
         '===PPP===',
-        ''
+        '',
+        '===PKG===',
+        'apkdb',
+        '===DONE==='
       ].join('\n')
       const harness = moduleHarness('openwrt', () => ({ stdout: probeStdout, stderr: '', code: 0 }))
       activateOpenwrt(harness.ctx)

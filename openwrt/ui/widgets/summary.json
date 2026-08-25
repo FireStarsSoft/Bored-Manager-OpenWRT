@@ -3,40 +3,126 @@
     {
       "type": "conditional",
       "when": {
-        "source": { "kind": "stream", "event": "capabilities", "path": "problem" },
-        "op": "exists"
+        "source": { "kind": "stream", "event": "capabilities", "path": "state" },
+        "op": "eq",
+        "value": "blocked"
       },
       "blocks": [
         {
           "type": "note",
-          "title": "OpenWRT unavailable",
-          "lines": ["Open the OpenWRT Module settings page to see the compatibility problem."],
-          "tone": "warning"
+          "title": "OpenWRT is not ready",
+          "tone": "warning",
+          "lines": [
+            "Nothing is being collected from this router. The OpenWRT Module settings page names what is missing; it can install packages once the router is otherwise usable."
+          ]
         }
       ],
       "else": [
         {
-          "type": "section",
-          "title": "OpenWRT WAN pool",
+          "type": "conditional",
+          "when": {
+            "source": { "kind": "stream", "event": "capabilities", "path": "state" },
+            "op": "eq",
+            "value": "connecting"
+          },
           "blocks": [
             {
-              "type": "pie",
-              "source": { "kind": "stream", "event": "overview", "path": "poolAgg" },
-              "center": { "key": "total", "label": "WANs" },
-              "slices": [
-                { "key": "up", "label": "Up", "status": "ok" },
-                { "key": "dialing", "label": "Dialing", "status": "unknown" },
-                { "key": "error", "label": "Error", "status": "bad" },
-                { "key": "stopped", "label": "Stopped", "status": "unknown" }
-              ],
-              "emptyText": "No managed WANs yet"
-            },
+              "type": "note",
+              "title": "Waiting for the router",
+              "lines": ["This card fills in as soon as the router answers over SSH."]
+            }
+          ],
+          "else": [
             {
-              "type": "keyValue",
-              "source": { "kind": "stream", "event": "overview", "path": "counts" },
-              "rows": [
-                { "key": "bound", "label": "Devices bound", "format": "number" },
-                { "key": "waiting", "label": "Devices waiting", "format": "number" }
+              "type": "conditional",
+              "when": {
+                "source": { "kind": "stream", "event": "capabilities", "path": "state" },
+                "op": "eq",
+                "value": "checking"
+              },
+              "blocks": [
+                {
+                  "type": "note",
+                  "title": "Checking the router",
+                  "lines": [
+                    "The machine is connected and the readiness probe is running. Nothing has been read off the router yet, so every figure this card shows would be a zero it invented.",
+                    "It fills in on its own within about half a minute. Open OpenWRT Module settings and use Check again to ask now."
+                  ]
+                }
+              ],
+              "else": [
+                {
+                  "type": "conditional",
+                  "when": {
+                    "source": { "kind": "stream", "event": "capabilities", "path": "state" },
+                    "op": "eq",
+                    "value": "attention"
+                  },
+                  "blocks": [
+                    {
+                      "type": "note",
+                      "tone": "warning",
+                      "lines": [
+                        "These figures are real, but something optional is missing and part of the automation is unavailable. See OpenWRT Module settings."
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "title": "WAN pool",
+                  "blocks": [
+                    {
+                      "type": "pie",
+                      "source": { "kind": "stream", "event": "overview", "path": "poolAgg" },
+                      "center": { "key": "total", "label": "WANs" },
+                      "slices": [
+                        { "key": "up", "label": "Up", "status": "ok" },
+                        { "key": "dialing", "label": "Dialing", "status": "warn" },
+                        { "key": "error", "label": "Error", "status": "bad" },
+                        { "key": "stopped", "label": "Stopped", "status": "unknown" }
+                      ],
+                      "emptyText": "No managed WANs yet"
+                    },
+                    {
+                      "type": "conditional",
+                      "when": {
+                        "source": { "kind": "stream", "event": "overview", "path": "counts.wanErr" },
+                        "op": "gt",
+                        "value": 0
+                      },
+                      "blocks": [
+                        {
+                          "type": "keyValue",
+                          "source": { "kind": "stream", "event": "overview", "path": "counts" },
+                          "rows": [{ "key": "wanErr", "label": "WANs failing", "format": "number" }]
+                        },
+                        {
+                          "type": "note",
+                          "tone": "warning",
+                          "lines": [
+                            "A few failures out of many are easy to miss in the ring above. The OpenWRT Automation page, PPPoE Dialer tab, names them under Sessions needing attention."
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "title": "Devices",
+                  "blocks": [
+                    {
+                      "type": "keyValue",
+                      "source": { "kind": "stream", "event": "overview", "path": "counts" },
+                      "rows": [
+                        { "key": "devices", "label": "On DHCP", "format": "number" },
+                        { "key": "bound", "label": "Bound to a WAN", "format": "number" },
+                        { "key": "waiting", "label": "Waiting for a WAN", "format": "number" }
+                      ]
+                    }
+                  ]
+                }
               ]
             }
           ]

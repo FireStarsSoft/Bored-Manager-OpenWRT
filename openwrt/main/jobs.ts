@@ -6,18 +6,33 @@
  * fifty live items instead of 5,000.
  */
 import type { ModuleContext } from '@shared/modules'
+import type { ValueBadge } from '@shared/module-ui'
 import type { OkResult } from '@shared/types'
+import { BADGE, badge, chip, statusBadges, type StatusChip, type StatusTone } from './badges'
+import {
+  MAX_FINISHED_JOBS,
+  trimFinishedJob,
+  type FinishedJob,
+  type StoredJobItem,
+  type StoredJobItemState,
+  type StoredJobState
+} from './records'
 
-export type JobItemStatus = 'pending' | 'running' | 'ok' | 'error' | 'skipped' | 'cancelled'
-export type JobState = 'running' | 'done' | 'failed' | 'partial' | 'cancelled'
-export type FinishedJobState = Exclude<JobState, 'running'>
+export type { FinishedJob }
+/** Re-exported so call sites keep reaching it through the runner they use. */
+export { trimFinishedJob }
 
-export interface JobItem {
-  idx: number
-  name: string
+/**
+ * The live states are the persisted ones plus the two that only exist while the
+ * runner is holding the job. Derived in this direction so that a state the
+ * store cannot write is impossible to introduce here by accident.
+ */
+export type JobItemStatus = StoredJobItemState | 'pending' | 'running'
+export type JobState = StoredJobState | 'running'
+export type FinishedJobState = StoredJobState
+
+export interface JobItem extends Omit<StoredJobItem, 'status'> {
   status: JobItemStatus
-  message?: string
-  ms?: number
 }
 
 export interface OpenWrtJob {
@@ -36,21 +51,45 @@ export interface OpenWrtJob {
   items: JobItem[]
 }
 
-export type FinishedJobItem = Omit<JobItem, 'status'> & {
-  status: Exclude<JobItemStatus, 'pending' | 'running'>
+export type FinishedJobItem = StoredJobItem
+
+export interface JobItemView extends JobItem {
+  statusBadges: ValueBadge[]
 }
 
-export interface FinishedJob extends Omit<OpenWrtJob, 'state' | 'finishedAt' | 'items'> {
-  state: FinishedJobState
-  finishedAt: number
-  items: FinishedJobItem[]
+/**
+ * A job as the pages read it. The extra fields exist because the alternative
+ * was a table of raw words and a percentage: a `statusCards` card needs a tone
+ * to tint itself with, a short subtitle and a bounded set of chips, and none of
+ * that can be computed inside a JSON spec.
+ */
+export interface JobView extends Omit<OpenWrtJob, 'items'> {
+  health: StatusTone
+  /** `4/12`, for the card's title row. */
+  progressLabel: string
+  /** The step running now, or the first thing that went wrong. */
+  note: string
+  chips: StatusChip[]
+  stateBadges: ValueBadge[]
+  /** Wall time from start to finish; empty while the job is still running. */
+  tookLabel: string
+  items: JobItemView[]
 }
 
 export interface JobsSnapshot {
   t: number
-  jobs: OpenWrtJob[]
-  running: OpenWrtJob[]
-  finished: OpenWrtJob[]
+  jobs: JobView[]
+  running: JobView[]
+  finished: JobView[]
+}
+
+/**
+ * A step that finished but not cleanly - the router took the change and then
+ * did not show it. Returning this instead of a plain note is what keeps a
+ * firewall reload that produced no rule from being reported as a green step.
+ */
+export interface JobItemWarning {
+  warning: string
 }
 
 export interface JobItemSpec {
@@ -60,7 +99,7 @@ export interface JobItemSpec {
    * Work already in flight is not killed. Check `cancelled` within long waits,
    * and never put credentials in a returned message or thrown error.
    */
-  run: (cancelled: () => boolean) => Promise<void | string>
+  run: (cancelled: () => boolean) => Promise<void | string | JobItemWarning>
 }
 
 export interface JobSpec {
@@ -83,42 +122,97 @@ export interface JobStore<TData extends JobHistoryData = JobHistoryData> {
   update<TResult>(mutate: (data: TData) => TResult): TResult
 }
 
-export const MAX_FINISHED_JOBS = 10
-export const MAX_HISTORY_ITEMS = 30
 const EMIT_THROTTLE_MS = 500
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function cloneItem(item: FinishedJobItem): FinishedJobItem {
-  return {
-    idx: item.idx,
-    name: item.name,
-    status: item.status,
-    ...(item.message ? { message: item.message } : {}),
-    ...(typeof item.ms === 'number' ? { ms: item.ms } : {})
-  }
+/**
+ * How long a finished job took, in words.
+ *
+ * The renderer's `duration` format needs an absolute start to count from and
+ * this is an elapsed amount, so it is formatted here. (`service.ts`, `pppoe.ts`
+ * and `binding.ts` each grew their own copy of this arithmetic; consolidating
+ * the four is a separate change from decorating the payload.)
+ */
+function tookLabel(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return ''
+  const seconds = Math.round(ms / 1_000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+}
+
+const JOB_STATE_COLOR: Readonly<Record<JobState, string | undefined>> = {
+  running: BADGE.busy,
+  done: BADGE.good,
+  partial: BADGE.warn,
+  failed: BADGE.bad,
+  cancelled: undefined
+}
+
+/** A running job is only `ok` once it is done; until then nothing has proven out. */
+function jobHealth(job: OpenWrtJob, failed: number, warned: number): StatusTone {
+  if (failed > 0 || job.state === 'failed') return 'bad'
+  if (warned > 0 || job.state === 'partial' || job.state === 'cancelled') return 'warn'
+  return job.state === 'done' ? 'ok' : 'unknown'
 }
 
 /**
- * Keep failures/cancellations first when trimming, then restore display order.
- * This also makes histories written by an older, less tightly capped build
- * safe to expose through the latest stream.
+ * Chips for one card, bounded regardless of how many steps the job has. A
+ * 5,000-account import runs about fifty chunks and a chip per chunk would be a
+ * wall; what a user needs is the step running now and how the rest divided up.
  */
-export function trimFinishedJob(job: FinishedJob): FinishedJob {
-  const items = Array.isArray(job.items) ? job.items : []
-  const selected =
-    items.length <= MAX_HISTORY_ITEMS
-      ? items
-      : [
-          ...items.filter((item) => item.status === 'error' || item.status === 'cancelled'),
-          ...items.filter((item) => item.status !== 'error' && item.status !== 'cancelled')
-        ].slice(0, MAX_HISTORY_ITEMS)
+function jobChips(job: OpenWrtJob, failed: number, warned: number): StatusChip[] {
+  const chips: StatusChip[] = []
+  const current = job.items.find((item) => item.status === 'running')
+  if (current) chips.push(chip(current.name, 'unknown'))
+  if (failed) chips.push(chip(`${failed} failed`, 'bad'))
+  if (warned) chips.push(chip(`${warned} warning`, 'warn'))
+  const counted = { ok: 0, pending: 0, skipped: 0, cancelled: 0 }
+  for (const item of job.items) {
+    if (item.status === 'ok') counted.ok += 1
+    else if (item.status === 'pending') counted.pending += 1
+    else if (item.status === 'skipped') counted.skipped += 1
+    else if (item.status === 'cancelled') counted.cancelled += 1
+  }
+  if (counted.ok) chips.push(chip(`${counted.ok} ok`, 'ok'))
+  if (counted.pending) chips.push(chip(`${counted.pending} pending`, 'unknown'))
+  if (counted.skipped) chips.push(chip(`${counted.skipped} skipped`, 'unknown'))
+  if (counted.cancelled) chips.push(chip(`${counted.cancelled} cancelled`, 'unknown'))
+  // History keeps at most MAX_FINISHED_JOB_ITEMS steps, failures first. Counting
+  // only what survived would quietly report a 60-chunk job as "30 ok"; the
+  // chips have to add up to `total` or the card is lying about the job.
+  const dropped = Math.max(0, job.total - job.items.length)
+  if (dropped) chips.push(chip(`${dropped} not kept in history`, 'unknown'))
+  return chips
+}
+
+/**
+ * The read-only view of a job. Copies rather than annotates: the live job
+ * objects are still being mutated by the runner, and a decorated one that
+ * reached `persist` would put chips into the saved history for good.
+ */
+export function jobView(job: OpenWrtJob): JobView {
+  const failed = job.items.filter((item) => item.status === 'error').length
+  const warned = job.items.filter((item) => item.status === 'warning').length
+  const current = job.items.find((item) => item.status === 'running')
+  const firstBad = job.items.find(
+    (item) => item.status === 'error' || item.status === 'warning'
+  )
   return {
     ...job,
-    cancelRequested: undefined,
-    items: selected.map(cloneItem).sort((a, b) => a.idx - b.idx)
+    items: job.items.map((item) => ({ ...item, statusBadges: statusBadges(item.status) })),
+    health: jobHealth(job, failed, warned),
+    progressLabel: `${job.done}/${job.total}`,
+    note: current?.name ?? (firstBad ? firstBad.message ?? firstBad.name : ''),
+    chips: jobChips(job, failed, warned),
+    stateBadges: [
+      badge(job.cancelRequested ? 'cancelling' : job.state, JOB_STATE_COLOR[job.state])
+    ],
+    tookLabel: job.finishedAt ? tookLabel(job.finishedAt - job.startedAt) : ''
   }
 }
 
@@ -160,7 +254,7 @@ export class Jobs<TData extends JobHistoryData = JobHistoryData> {
   }
 
   snapshot(): JobsSnapshot {
-    const jobs = this.list()
+    const jobs = this.list().map((job) => jobView(job))
     const payload = {
       t: Date.now(),
       jobs,
@@ -253,6 +347,12 @@ export class Jobs<TData extends JobHistoryData = JobHistoryData> {
     this.emitTimer = null
     this.lastPayload = null
     this.disposed = dispose
+    // Say that the list is empty. A reset in the middle of a job used to clear
+    // the live list without ever emitting again, so the last progress frame -
+    // "Apply PPPoE chunk 3/10, 30%" - stayed on screen for the rest of the
+    // session, describing a job that had been abandoned. Deactivation is the
+    // one case with nobody left to tell.
+    if (!dispose) this.emit(true)
   }
 
   private current(generation: number): boolean {
@@ -277,13 +377,19 @@ export class Jobs<TData extends JobHistoryData = JobHistoryData> {
 
         item.status = 'running'
         const startedAt = Date.now()
+        item.startedAt = startedAt
         this.updateProgress(job)
         this.emit()
         try {
           const note = await source.run(cancelled)
           if (!this.current(generation)) return
-          item.status = 'ok'
-          if (typeof note === 'string' && note.trim()) item.message = note.trim()
+          const warning =
+            note && typeof note === 'object' && typeof note.warning === 'string'
+              ? note.warning.trim()
+              : ''
+          item.status = warning ? 'warning' : 'ok'
+          if (warning) item.message = warning
+          else if (typeof note === 'string' && note.trim()) item.message = note.trim()
         } catch (error) {
           if (!this.current(generation)) return
           if (error instanceof CancelledError || cancelled()) {

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { splitSections } from '@shared/shell'
 import {
-  buildPoolDevRegex,
   parseDump,
   parseIpRules,
   parseLeases,
@@ -206,6 +205,7 @@ describe('OpenWRT parsers', () => {
         extraTables: [],
         stickyMap: [],
         events: [],
+        moduleEvents: [],
         jobs: []
       }).map((option) => option.value)
     ).toEqual(['eth1'])
@@ -320,7 +320,6 @@ describe('OpenWRT parsers', () => {
       devices: { eth0: { rx: 1000, tx: 2000 } },
       poolDev: { count: 1000, rx: 5_000_000, tx: 7_000_000 }
     })
-    expect(buildPoolDevRegex(['pd', 'isp+'])).toBe('pppoe-(pd|isp\\+)')
   })
 })
 
@@ -331,6 +330,9 @@ const INSTANCE = {
   sticky: true,
   remap: true
 }
+// No `stickyByMac` / `remapOnWanError`: they are the defaults the create form
+// offers for an instance's own `sticky` / `remap`, and the planner reads the
+// instance record rather than the module setting.
 const POLICY: BindingPlannerPolicy = {
   rulePrefBase: 20_000,
   catchAllPrefBase: 29_900,
@@ -338,8 +340,6 @@ const POLICY: BindingPlannerPolicy = {
   wanErrorGraceSec: 30,
   wanWarnUptimeSec: 0,
   releaseGraceSec: 300,
-  remapOnWanError: true,
-  stickyByMac: true,
   maxEvents: 200
 }
 
@@ -455,7 +455,8 @@ describe('OpenWRT one-to-one binding planner', () => {
           wan: 'pd00002',
           lastSeenAt: NOW - 1000
         }],
-        policy: { ...POLICY, stickyByMac: false },
+        // The instance says `sticky: true`; the module-wide default no longer
+        // reaches the planner at all, which is what "authoritative" means here.
         randomSeed: 7
       })
     )
@@ -511,8 +512,9 @@ describe('OpenWRT one-to-one binding planner', () => {
           [10_002, 'pd00002']
         ],
         sticky: [{ mac: '00:11:22:33:44:55', wan: 'pd00001', lastSeenAt: NOW - 1000 }],
-        memory,
-        policy: { ...POLICY, remapOnWanError: false }
+        // `INSTANCE.remap` is what decides this; the module-wide default is
+        // only the value the create form starts that checkbox at.
+        memory
       })
     )
 

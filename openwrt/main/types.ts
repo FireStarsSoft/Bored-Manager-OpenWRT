@@ -1,4 +1,5 @@
 /** Live state parsed from one OpenWRT collection command. */
+import type { ValueBadge } from '@shared/module-ui'
 
 export interface RouterSystemState {
   uptimeSec: number
@@ -114,6 +115,13 @@ export interface OpenWrtSlowSample {
   pppoeUsers: Record<string, string>
   /** UCI network section -> numeric routing table. */
   uciTables: Record<string, number>
+  /**
+   * Whether `uci show network` actually answered on this tick. False means the
+   * map above is the last good one rather than what the router says now, so
+   * nothing may reconcile against it: an empty map is otherwise read as "every
+   * WAN has lost its routing table".
+   */
+  uciTablesOk: boolean
   model: RouterModel | null
 }
 
@@ -124,10 +132,29 @@ export interface OpenWrtSeriesPoint {
   wanUp: number
   wanErr: number
   devices: number
+  /**
+   * What WAN Binding is actually achieving. Both numbers were computed and
+   * published on every tick and then thrown away: with no point and no history
+   * behind them, a pool that ran dry overnight left the two counters sitting at
+   * their current values and no way to see when the waiting queue started.
+   */
+  bound: number
+  waiting: number
+  /** Router health, so a throughput dip can be read against the load that caused it. */
+  load1: number
+  memPct: number
 }
 
 export interface OpenWrtOverviewCounts {
+  /** Every interface in the sample, pool sessions included. */
   ifTotal: number
+  /**
+   * How many of those `ifaces` does not carry. Managed pool sessions are never
+   * listed - they are what `poolAgg` counts - and the remainder is capped, so
+   * without this the dashboard's interface table simply stopped at 64 rows and
+   * said nothing about the other five thousand.
+   */
+  ifOmitted: number
   wanUp: number
   wanErr: number
   devices: number
@@ -153,21 +180,58 @@ export interface OverviewIface {
   proto: string
   device: string
   status: string
+  statusBadges: ValueBadge[]
   ipv4: string
+  /**
+   * App-clock time this interface came up, or 0 when it is not up. The renderer
+   * turns it into "4h 12m" and keeps counting; `uptimeLabel` is the same fact
+   * frozen at the moment of the sample and is kept only for compatibility.
+   */
+  upSince: number
   uptimeLabel: string
   rxRate: number
   txRate: number
+}
+
+/** `RouterSystemState` with what the dashboard would otherwise recompute. */
+export interface OverviewSystem extends RouterSystemState {
+  uptimeLabel: string
+  /** App-clock time the router booted; `duration` reads it as "6d 2h". */
+  bootAt: number
+  memUsed: number
+  memPct: number
+}
+
+/**
+ * Whether the collector itself is still working, pushed alongside the numbers
+ * it produced. Without it a router that stopped answering left the dashboard
+ * showing the last good sample indefinitely, with the reason for the freeze
+ * only ever reaching `data/app.log`.
+ */
+export interface CollectorHealth {
+  fastOk: boolean
+  slowOk: boolean
+  /** False while the interface dump keeps coming back unparseable. */
+  dumpOk: boolean
+  /** False when the automation reconcile threw on the last sample. */
+  hookOk: boolean
+  /** App-clock time of the last fast sample that produced a model. */
+  lastFastT: number
+  lastSlowT: number
+  /** Latest collector failure, already trimmed; never command output. */
+  lastError: string
 }
 
 export interface OpenWrtOverview {
   t: number
   /** When the slow probe (UCI tables, PPPoE log) last completed - 0 before the first one. */
   slowAt: number
-  sys: RouterSystemState & { uptimeLabel: string }
+  sys: OverviewSystem
   counts: OpenWrtOverviewCounts
   /** Pool members are omitted and this list is capped before it is pushed. */
   ifaces: OverviewIface[]
   poolAgg: PoolAggregate
+  health: CollectorHealth
 }
 
 export interface BindingOverviewTotals {
