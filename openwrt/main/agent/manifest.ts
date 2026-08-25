@@ -40,16 +40,47 @@ export interface PinnedPackage {
 }
 
 /** The package release these hashes came from. Empty when nothing is pinned. */
-export const PINNED_RELEASE = ''
+export const PINNED_RELEASE = '1.4.0'
 
 /** Where the files below live. One directory, one release, no redirects. */
-export const PINNED_BASE = ''
+export const PINNED_BASE = 'https://github.com/FireStarsSoft/Bored-Manager-OpenWRT/releases/download/pkg-v1.4.0/'
 
 /**
  * Written by `npm run pin:packages`. Order is install order, which matters:
  * `bm-agent` first, because everything else declares itself to it.
  */
-export const PINNED_PACKAGES: readonly PinnedPackage[] = []
+export const PINNED_PACKAGES: readonly PinnedPackage[] = [
+  {
+    name: 'bm-agent',
+    file: 'bm-agent-1.4.0-r1.apk',
+    sha256: 'ad5b17fdf9e8e58d4247c4bf256632e5ecef0960cb80e9aad40ffa107b1db55f',
+    size: 37137
+  },
+  {
+    name: 'bm-pppoe-pool',
+    file: 'bm-pppoe-pool-1.4.0-r1.apk',
+    sha256: '632434e029d046ec6979db0088e4d10afa13cb8c23be72413bc98a8f171ece2b',
+    size: 25894
+  },
+  {
+    name: 'bm-wanbind',
+    file: 'bm-wanbind-1.4.0-r1.apk',
+    sha256: '428cb53002076868408bbe4eae52af3316f6eda9125b0abee28a1c1722f1a0ca',
+    size: 35300
+  },
+  {
+    name: 'luci-app-bm',
+    file: 'luci-app-bm-1.4.0-r1.apk',
+    sha256: '687a580cf94d64721eb805ab478dcbba0148d634002c0a191a2dfcc39bc1f574',
+    size: 20336
+  },
+  {
+    name: 'luci-i18n-bm-vi',
+    file: 'luci-i18n-bm-vi-1.4.0.apk',
+    sha256: 'b0aaa03c7ec3587bc31d3a37f2bceacf5b487975f3960a9c4244ed4f51865bf9',
+    size: 11325
+  }
+]
 
 /** The sentence every surface uses when there is nothing to install from here. */
 export const NOTHING_PINNED =

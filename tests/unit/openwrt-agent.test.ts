@@ -4,6 +4,12 @@ import type { ModuleExecResult } from '@shared/modules'
 import activate from '../../openwrt/main/index'
 import { moduleHarness, sharedModuleConfig, type ModuleHarness } from '../helpers/module-harness'
 import { AGENT_INFO, isProbeCommand, routerProbeOutput } from '../helpers/router'
+import {
+  PINNED_BASE,
+  PINNED_PACKAGES,
+  PINNED_RELEASE,
+  hasPinnedRelease
+} from '../../openwrt/main/agent/manifest'
 
 /**
  * The router-side packages, from this side of the connection.
@@ -175,16 +181,37 @@ describe('the Router packages table', () => {
 })
 
 describe('where the packages are allowed to come from', () => {
-  it('says so when this module build has nothing pinned', async () => {
+  // Whether this checkout is pinned is a fact about the build, not about the
+  // code: `npm run pin:packages` fills the constants in before a release is
+  // tagged and they are empty until then. So this asserts the pin as it stands
+  // - and openwrt-agent-unpinned.test.ts mocks it away to hold the other
+  // branch, which no checkout can exercise once a release has been cut.
+  it('offers the release this module build is pinned to', async () => {
     const owrt = await router({ agent: null })
 
     const result = await owrt.call('agentInstallCheck', { source: 'pinned' })
 
-    // An invented hash would be worse in both directions: it cannot install and
-    // it cannot explain itself.
-    expect(report(result).ok).toBe(false)
-    expect(text(result)).toContain('no pinned package release')
-    expect(text(result)).toContain('bundle file or a path on the router')
+    if (!hasPinnedRelease()) {
+      // An invented hash would be worse in both directions: it cannot install
+      // and it cannot explain itself.
+      expect(report(result).ok).toBe(false)
+      expect(text(result)).toContain('no pinned package release')
+      expect(text(result)).toContain('bundle file or a path on the router')
+      owrt.dispose()
+      return
+    }
+
+    expect(report(result).ok).toBe(true)
+    expect(text(result)).toContain(`Release ${PINNED_RELEASE}`)
+    expect(text(result)).toContain('checked against a sha256 compiled into the module')
+    // Every package the release ships, and bm-agent first: everything else
+    // declares itself to it.
+    expect(PINNED_PACKAGES.map((entry) => entry.name)[0]).toBe('bm-agent')
+    for (const entry of PINNED_PACKAGES) {
+      expect(entry.sha256).toMatch(/^[0-9a-f]{64}$/)
+      expect(entry.size).toBeGreaterThan(0)
+    }
+    expect(PINNED_BASE).toContain(`pkg-v${PINNED_RELEASE}`)
     owrt.dispose()
   })
 
