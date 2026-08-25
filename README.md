@@ -17,6 +17,7 @@ You do not need this repository to use the module. In Bored Manager, open
 
 | Source | What to enter |
 |---|---|
+| Official list | pick **OpenWRT** from the list the app ships |
 | Catalog | pick **OpenWRT** from the reviewed list |
 | GitHub repo | `FireStarsSoft/Bored-Manager-OpenWRT` |
 | Zip URL / file | the `openwrt-<version>.zip` attached to a [release](../../releases) |
@@ -28,6 +29,16 @@ replaced opkg with apk, and 2.0.0 speaks only apk, so it refuses a 24.10 router
 outright rather than half-managing it. The 1.0.x line still runs on **0.3.3**.
 An app already carrying 1.0.7 keeps it across the update, and updating to 1.0.8
 or 2.0.0 from here keeps its rules, per-router state and history.
+
+Once it is installed, updating it is a button rather than a repository name
+typed again. **Settings → Modules** puts an **Update** button on its row, next
+to Uninstall: press **Check for updates** on the same page and it lights up
+carrying the version when this repository has published something newer.
+Pressing it opens a progress bar and a collapsed console under that row showing
+what the installer is doing — resolved, downloaded, unpacked, graded, compiled
+— and the checks still come first, so nothing is written before you have seen
+them. That button arrived in Bored Manager **0.4.2**; on an older app, install
+the new release the same way you installed the first one.
 
 ## Layout
 
@@ -134,6 +145,10 @@ The rules a module has to follow — lifecycle, what `ctx` may be used for after
 a stop, what a spec may name — are the app's:
 [docs/MODULE-RULESET.md](https://github.com/FireStarsSoft/Bored-Manager/blob/main/docs/MODULE-RULESET.md)
 and [docs/MODULES.md](https://github.com/FireStarsSoft/Bored-Manager/blob/main/docs/MODULES.md).
+What this repository is - the vendored SDK, LF, packaging, `release.yml`, and
+why a published release is not optional - is
+[docs/MODULE-REPO.md](https://github.com/FireStarsSoft/Bored-Manager/blob/main/docs/MODULE-REPO.md),
+which is also the document to follow to stand up a module repository of your own.
 `npm run check` is what CI runs; a pull request that passes it locally passes
 there.
 
