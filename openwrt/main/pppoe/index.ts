@@ -1,34 +1,31 @@
 /**
- * PPPoE automation orchestration.
+ * PPPoE pools, driven entirely through `bm-pppoe-pool` on the router.
  *
- * Passwords exist only in a one-use check-session payload and in the closures
- * of the running create job. Batch records, job labels/messages, streams and
- * renderer rows never contain them.
+ * The daemon owns the record and everything derived from it - interfaces,
+ * tagged devices, MACs, routing tables, the firewall zone - and this folder
+ * is the client: it parses forms into specs, shows the daemon's findings,
+ * caches its answers for the tables, and wraps the mutations in jobs so they
+ * leave history. Passwords exist in a frozen spec and in a 0600 file on the
+ * router, never in a record, a job label, a stream or an event.
  *
- * `plan.ts` is the gate a create has to pass and `create.ts` is the job that
- * follows it; around them sit the files each remaining behaviour lives in - the
- * range allocator, the action waves and their watchdog, the delete, the three
- * router inspections, and the rows every surface renders. `manager.ts` is the
- * object the module holds and `runtime.ts` is the state it carries. Import this
- * barrel, never a file inside it.
+ * `plan.ts` is the gate, `create.ts`/`edit.ts`/`lifecycle.ts` are the
+ * mutations, `actions.ts` the per-member ones, `view.ts` everything a surface
+ * renders, `manager.ts` the object the module holds and `runtime.ts` the
+ * state it carries. Import this barrel, never a file inside it.
  *
  * Nothing here knows the binding half exists: it is reached only through the
  * optional `bindingCarriers` member of `PppoeService`, which `index.ts` fills
  * in. The two domains meet there, not in each other.
  */
 export type {
-  PppoeBatchSummary,
   PppoeConfigStore,
   PppoeDisplayRow,
-  PppoeHostStore,
   PppoeJobs,
-  PppoeRow,
-  PppoeRules,
+  PppoeLegacyRow,
+  PppoePoolRow,
   PppoeService,
-  PppoeSnapshot,
-  PppoeStatus,
-  PppoeStoreData,
-  RouterInventory
+  PppoeSnapshot
 } from './types'
-export { findSequenceRange } from './range'
+export { compressVlans } from './view'
+export { parseMemberLines, parseVlanList } from './plan'
 export { PppoeManager } from './manager'

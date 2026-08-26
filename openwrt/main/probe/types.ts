@@ -88,6 +88,13 @@ export interface AgentFacts {
   dataSchema: number | null
   /** Capability names the installed feature packages claim. */
   provides: string[]
+  /**
+   * The feature descriptors themselves, one per installed package, because a
+   * capability name alone cannot say which generation of the package claims
+   * it: `pppoe` from bm-pppoe-pool 1.x speaks a contract this module no
+   * longer drives, and the difference is the descriptor's own `apiVersion`.
+   */
+  features: AgentFeatureInfo[]
   guard: AgentGuard | null
 }
 
@@ -317,6 +324,47 @@ export interface ProbeFacts {
   transportError: string
 }
 
+/** One entry of `/usr/share/bm/features/`, as the agent relays it. */
+export interface AgentFeatureInfo {
+  name: string
+  version: string
+  apiVersion: number
+  provides: string[]
+}
+
+/**
+ * The contract generation of the package answering `capability`, 0 when no
+ * installed package claims it. The highest wins on the theoretical router
+ * with two packages claiming one capability - the newer contract is the one
+ * the module would drive.
+ */
+export function featureApi(facts: AgentFacts, capability: string): number {
+  let best = 0
+  for (const entry of facts.features) {
+    if (entry.provides.includes(capability) && entry.apiVersion > best) {
+      best = entry.apiVersion
+    }
+  }
+  return best
+}
+
+/**
+ * The pool contract this module drives: pools of VLAN members, validated and
+ * reconciled on the router. bm-pppoe-pool 1.x spoke a different shape -
+ * numbered session runs, no firewall, no member edits - and this module no
+ * longer carries the SSH code that drove it, so 1.x reads as "update needed"
+ * rather than as a pool daemon.
+ */
+export const PPPOE_POOL_API = 2
+
+export function hasPoolDaemon(agent: AgentCapability): boolean {
+  return (
+    agent.usable &&
+    agent.provides.includes('pppoe') &&
+    featureApi(agent, 'pppoe') >= PPPOE_POOL_API
+  )
+}
+
 /** No agent, said in the shape a reader expects rather than as a null. */
 export function emptyAgentFacts(): AgentFacts {
   return {
@@ -327,6 +375,7 @@ export function emptyAgentFacts(): AgentFacts {
     schema: 0,
     dataSchema: null,
     provides: [],
+    features: [],
     guard: null
   }
 }

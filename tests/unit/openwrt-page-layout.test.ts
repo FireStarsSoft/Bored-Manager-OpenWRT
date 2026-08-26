@@ -101,10 +101,10 @@ describe('each automation owns its own configuration', () => {
     expect(railIds(automation())).not.toContain('create')
   })
 
-  it('creates a PPPoE batch from the PPPoE tab', () => {
+  it('creates a PPPoE pool from the PPPoE tab', () => {
     const methods = methodsIn(automation(), 'pppoe')
-    expect(methods.has('pppoeBatchCheck')).toBe(true)
-    expect(methods.has('pppoeBatchApply')).toBe(true)
+    expect(methods.has('poolCreateCheck')).toBe(true)
+    expect(methods.has('poolCreateApply')).toBe(true)
     // ...and only that automation's create form.
     expect(methods.has('bindingCheck')).toBe(false)
   })
@@ -113,15 +113,14 @@ describe('each automation owns its own configuration', () => {
     const methods = methodsIn(automation(), 'binding')
     expect(methods.has('bindingCheck')).toBe(true)
     expect(methods.has('bindingApply')).toBe(true)
-    expect(methods.has('pppoeBatchCheck')).toBe(false)
+    expect(methods.has('poolCreateCheck')).toBe(false)
   })
 
   it('tunes each automation from its own tab', () => {
-    // Batch pacing is a PPPoE setting and binding behaviour is a binding one;
-    // both used to live three pages away, under one "Rules" heading.
-    for (const id of ['pppoe', 'binding']) {
-      expect(methodsIn(automation(), id).has('rulesCheck')).toBe(true)
-    }
+    // The pool daemon's watchdog is a router setting reached from the PPPoE
+    // tab; binding behaviour still edits the module's own rules from its tab.
+    expect(methodsIn(automation(), 'pppoe').has('pppoeSettingsCheck')).toBe(true)
+    expect(methodsIn(automation(), 'binding').has('rulesCheck')).toBe(true)
   })
 
   it('keeps only what both automations share on the settings page', () => {
@@ -152,12 +151,12 @@ describe('each automation tab is grouped by its own rail', () => {
   const itemIds = (nested: Node | null): unknown[] =>
     ((nested?.['items'] as Node[]) ?? []).map((item) => item['id'])
 
-  it('groups the PPPoE tab into sessions, create and tuning', () => {
+  it('groups the PPPoE tab into pools, create and daemon settings', () => {
     // Operate, create and tune are three different errands. On one scroll the
     // second and third lived below a table that can be a thousand rows tall.
     const nested = nestedRail(specNamed('pages/automation.json'), 'pppoe')
-    expect(itemIds(nested)).toEqual(['sessions', 'create', 'tuning'])
-    expect(nested?.['initial']).toBe('sessions')
+    expect(itemIds(nested)).toEqual(['pools', 'create', 'daemon'])
+    expect(nested?.['initial']).toBe('pools')
   })
 
   it('groups the WAN Binding tab into instances, create and behaviour', () => {

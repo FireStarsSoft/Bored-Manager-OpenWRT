@@ -54,17 +54,6 @@ export function ifaceScopeKeys(iface: IfaceState | undefined): string[] {
   return [iface.name, iface.device, iface.l3Device].filter(Boolean)
 }
 
-export function isManagedPppoeSection(
-  name: string,
-  batches: ReadonlyArray<{ prefix: string }>
-): boolean {
-  return batches.some((batch) => {
-    if (!name.startsWith(batch.prefix)) return false
-    const seq = name.slice(batch.prefix.length)
-    return /^\d{5}$/.test(seq)
-  })
-}
-
 export function plannerWans(
   model: RouterModel,
   instance: BindingInstanceRecord,

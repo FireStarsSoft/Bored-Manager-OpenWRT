@@ -1,9 +1,142 @@
 # Changelog
 
-Module versions are independent of the app's. OpenWRT 2.x needs Bored Manager
-**0.4.1**, for the `statusCards` and `meter` blocks, badge columns and forms
-that open pre-filled, and OpenWrt **25.12** on the router. The 1.0.x line needs
-**0.3.3**, for the `subnav` and `note` blocks and the `file` form input.
+Module versions are independent of the app's. OpenWRT 2.x and 3.x need Bored
+Manager **0.4.1**, for the `statusCards` and `meter` blocks, badge columns and
+forms that open pre-filled, and OpenWrt **25.12** on the router. The 1.0.x line
+needs **0.3.3**, for the `subnav` and `note` blocks and the `file` form input.
+From 3.0.0, PPPoE pools also need the router packages at **2.0.0** - the rest
+of the module does not.
+
+## 3.0.0
+
+Needs the same Bored Manager **0.4.1** and OpenWrt **25.12 or newer**. The
+router packages move to **2.0.0** alongside it, and for the first time one of
+them is load-bearing: **PPPoE pools exist only through `bm-pppoe-pool` 2.x**.
+The SSH path that wrote batches of numbered interfaces is gone, and so is the
+batch model itself. Everything else - the dashboard, WAN binding, events, jobs,
+the installer - works exactly as it did on a router with nothing installed.
+
+### Breaking: PPPoE is the router's own, or it is not at all
+
+Since 2.3.0 a pool could be written by either half, and that was the wrong
+generosity. Three writers - this module over SSH, the daemon, a LuCI page -
+shared one prefix arithmetic, one zone, one idea of what a pool was, and every
+release had to keep the three from drifting. The daemon owns all of it now: the
+record, the network sections, the tagged devices, the firewall zone, the MACs.
+This module carries a spec to the router (a `0600` file over the connection it
+already has - a password still never becomes an argument to anything) and asks
+`bm.pppoe` to check, create, edit or delete; it writes no PPPoE section of its
+own any more, over any transport.
+
+A router without the package keeps everything else. The PPPoE tab says what is
+missing and where to install it - Router packages, in Module settings, same as
+ever - and the create form refuses with the same sentence. A router whose
+`bm-pppoe-pool` is still 1.x is named too: the readiness row says the package
+speaks version 1 of a contract this module drives at 2, and that updating the
+packages is the fix. Its pools keep dialling throughout - netifd needs no
+opinion from anyone here.
+
+**Batches created by earlier releases appear as legacy pools**: listed with
+their prefix, range and carrier, counted on the tab, and delete-only. There is
+nothing to migrate them into - the old model recorded a sequence range, the new
+one records members - and deleting one still takes everything it wrote off the
+router, five-digit sections, shared VLAN devices and zone memberships included.
+The 2.4.0 SSH fallback for start/stop/redial on old batches is gone with the
+model: a legacy pool is a pool being wound down, not operated.
+
+### A pool is VLANs now, not sequence numbers
+
+The old form asked for five thousand account lines because it was written for
+an ISP that hands out five thousand accounts. The ISPs these routers actually
+sit behind hand out a few VLANs on one uplink, one PPPoE session each - often
+all on one shared account the BRAS tells apart by MAC. That is what a pool is
+now:
+
+- **One member per VLAN**, at most 500, on one carrier. VLAN 0 means untagged.
+  Member lines are `vlan`, or `vlan,user,pass` - comma, tab, semicolon, pipe or
+  spaces, same as before, with blank and `#` lines ignored.
+- **Two modes, chosen at creation.** *One shared account* (`multi`) carries the
+  account on the pool; *one account per VLAN* (`single`) carries it per line.
+- **MACs are derived, not stored**: locally administered, hashed from the
+  carrier's own MAC and the pool id, VLAN in the last two octets. Two pools on
+  one carrier differ; the same pool re-created lands on the same MACs, so the
+  BRAS never meets a stranger. This is what makes a shared account workable.
+- **Everything else is arithmetic the router owns.** Prefix `fpt` and VLAN 101
+  are section `fpt101` on device `pppoe-fpt101`, routing table `table base +
+  101`, member of the pool's own zone. There is no module-side numbering left
+  to collide with anything.
+
+Editing exists for the first time: members, label, credentials, DNS, MTU, the
+whole advanced set - everything but the prefix and the mode, which name what a
+pool *is*. The check runs on the router while you type, comes back with the
+same findings an apply would refuse on, and says which changes redial sessions
+before you make them.
+
+### The tab is three errands again
+
+**Pools** carries the tables: the state counts across every pool, one row per
+pool with its member rows in a drawer, per-row and per-pool actions - up, down,
+redial, and now **enable and disable**, which persist on the router so a
+disabled member stays down across reboots. A member the record names but the
+router does not yet have reads `unwritten`, on its own badge - the state a
+create that died half way leaves, and the state nothing had a word for. The
+legacy table sits below with its one action. A pool is at most 500 members, so
+the two-tab split the 5,000-row batch drawers needed is not carried over: the
+drawer is one filterable table.
+
+**Create a pool** is the form above, with the carrier list served by the
+router's own daemon - it refuses bridges, tunnels and already-tagged devices
+with the same sentences the daemon would.
+
+**Daemon settings** is new: the counter interval and the redial watchdog's
+patience and batch size live in `/etc/config/bm_pppoe` on the router, and this
+is the first surface that can edit them. The module-side imitations of those
+knobs are gone from the rules (below).
+
+### Delete needs the daemon now, and that is a rule changing
+
+"Stop and Delete never refuse" has been the standing promise since 2.1.0, and
+for binding instances it still holds. For pools it cannot: only the daemon
+knows everything a pool derived, so a router that lost the package cannot
+delete a pool until the package is back, and the refusal says to reinstall it -
+which is also the only path that ever removes the pool. What this module still
+adds is the gate the daemon cannot see: a delete is refused by instance name
+while a **running** binding instance is distributing clients across the pool's
+carrier, because the pool would go while the fail-closed catch-all stayed, and
+`eth1` and `eth1.835` still count as the same uplink in both directions.
+
+### Six rules are gone, because their subject is
+
+*Interface prefix*, *firewall membership mode*, *UCI chunk size*, *chunk
+delay*, *max batch rows* and *auto-redial after* have no module-side meaning
+left: pools carry their own prefix and zone on the router, nothing is chunked
+over SSH any more, and the watchdog is the daemon's, tuned on the Daemon
+settings tab. The rules form keeps what binding still uses, and only the three
+rules that place binding's own objects - the two priority bases and the
+catch-all table - stay locked while instances exist. Saved overrides for the
+removed rules are dropped on read.
+
+The per-router document moves to version 2 the same way: the batch records and
+their sequence counter are gone, and a version-1 document loads cleanly - its
+`batches` and `nextSeq` are deliberately not read, because the daemon's answer
+has replaced them as the truth. Job history, events, binding instances and
+sticky maps all carry over untouched.
+
+### Inside
+
+`main/agent/pppoe.ts` is the entire client for the daemon - every call, the
+`0600` spec push, the reply shapes - and `main/pppoe/` was rewritten from a
+planner into a view: a short-TTL cache of the daemon's `info`, `sessions` and
+`stats`, the check/apply session plumbing, and the actions. `main/uci/` shrank
+to the primitive binding still needs (`uci batch` over SSH) plus the name
+sieves; the PPPoE plan builder, the firewall builder and the sequence
+arithmetic are deleted, not moved. The methods the pages call are renamed to
+match what they do - `poolCreateCheck`/`poolCreateApply`,
+`poolSetCheck`/`poolSetApply`, `poolDelete`, `pppoePoolAction`,
+`pppoeConnAction`, `pppoeSettingsGet`/`Check`/`Apply`, `pppoePools`,
+`pppoeRows`, `pppoeLegacyRows`, `pppoeCarriers` - and every one of the
+forty-five goes through the same requirements gate as before, with one new
+requirement key behind it: the pool daemon itself.
 
 ## 2.5.0
 

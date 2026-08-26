@@ -19,7 +19,6 @@ import type {
 } from '../../openwrt/main/binding'
 import type { Lease, OpenWrtOverview, OpenWrtSeriesPoint } from '../../openwrt/main/types'
 import { moduleHarness, sharedModuleConfig } from '../helpers/module-harness'
-import { isProbeCommand, routerProbeOutput } from '../helpers/router'
 
 /**
  * Everything a page reads instead of computing for itself.
@@ -305,167 +304,9 @@ describe('the dashboard payload', () => {
   })
 })
 
-describe('the PPPoE payload', () => {
-  const batchHost = {
-    version: 1,
-    nextSeq: 3,
-    batches: [
-      {
-        id: 'b1',
-        name: 'Home',
-        prefix: 'pd',
-        carrier: 'eth1',
-        createdAt: 1,
-        count: 2,
-        seqFrom: 1,
-        seqTo: 2
-      }
-    ]
-  }
-
-  const withRouter = (dump: unknown): ReturnType<typeof moduleHarness> =>
-    moduleHarness(
-      'openwrt',
-      (command) => {
-        // The probe as well as the sweep: a router the module has never asked
-        // about is refused by the requirements gate before any action runs.
-        if (isProbeCommand(command)) return ok(routerProbeOutput())
-        return command.includes('===SYS===')
-          ? ok(sweepOutput({ dump: JSON.stringify(dump) }))
-          : ok('')
-      },
-      { hostData: batchHost, config: sharedModuleConfig(null) }
-    )
-
-  it('collapses a batch with nothing wrong to a single chip', async () => {
-    const harness = withRouter({
-      interface: [1, 2].map((seq) => ({
-        interface: `pd0000${seq}`,
-        up: true,
-        proto: 'pppoe',
-        uptime: 60,
-        'ipv4-address': [{ address: `198.51.100.${seq}`, mask: 32 }]
-      }))
-    })
-    const runtime = activate(harness.ctx)
-
-    await harness.ticks[0]()
-
-    const [batch] = harness.handlers.get('pppoeBatches')?.() as Array<{
-      stateBadges: ValueBadge[]
-    }>
-    // Twenty batches each spelling out five counts is a wall of numbers; the
-    // counts only earn their space when they are not zero.
-    expect(batch.stateBadges).toEqual([{ label: 'All up', color: BADGE.good }])
-    runtime.dispose?.()
-    harness.revoke()
-    expect(harness.afterStopCalls).toEqual([])
-  })
-
-  it('names what is wrong, worst first, and counts it as needing attention', async () => {
-    const harness = withRouter({
-      interface: [
-        {
-          interface: 'pd00001',
-          up: false,
-          proto: 'pppoe',
-          errors: [{ code: 'AUTH_FAILED' }]
-        }
-      ]
-    })
-    const runtime = activate(harness.ctx)
-
-    await harness.ticks[0]()
-
-    const [batch] = harness.handlers.get('pppoeBatches')?.() as Array<{
-      stateBadges: ValueBadge[]
-    }>
-    expect(labels(batch.stateBadges)).toEqual(['1 error', '1 missing'])
-    expect(batch.stateBadges[0].color).toBe(BADGE.bad)
-    expect(batch.stateBadges[1].color).toBe(BADGE.missing)
-
-    const attention = harness.handlers.get('pppoeAttentionRows')?.() as Array<{
-      name: string
-      status: string
-      statusBadges: ValueBadge[]
-    }>
-    // pd00002 was never written to UCI. The old "errors" list only knew about
-    // the first of these two, and a half-created batch stayed invisible.
-    expect(attention.map((row) => `${row.name}:${row.status}`)).toEqual([
-      'pd00001:error',
-      'pd00002:missing'
-    ])
-    expect(attention[0].statusBadges[0].color).toBe(BADGE.bad)
-
-    const snapshot = harness.emit.mock.calls
-      .filter((call) => call[0] === 'pppoe')
-      .map((call) => call[1] as { attention: number })
-      .at(-1)
-    expect(snapshot?.attention).toBe(2)
-    runtime.dispose?.()
-    harness.revoke()
-    expect(harness.afterStopCalls).toEqual([])
-  })
-
-  it('gives a live session a start time and not a frozen label', async () => {
-    const harness = withRouter({
-      interface: [
-        {
-          interface: 'pd00001',
-          up: true,
-          proto: 'pppoe',
-          uptime: 120,
-          'ipv4-address': [{ address: '198.51.100.1', mask: 32 }]
-        }
-      ]
-    })
-    const runtime = activate(harness.ctx)
-
-    await harness.ticks[0]()
-
-    const rows = harness.handlers.get('pppoeRows')?.('b1') as Array<{
-      status: string
-      upSince: number
-    }>
-    expect(rows[0].status).toBe('up')
-    expect(rows[0].upSince).toBeGreaterThan(0)
-    expect(Date.now() - rows[0].upSince).toBeGreaterThanOrEqual(120_000)
-    // The session the router does not have is not counted as up for two minutes.
-    expect(rows[1]).toMatchObject({ status: 'missing', upSince: 0 })
-    runtime.dispose?.()
-    harness.revoke()
-    expect(harness.afterStopCalls).toEqual([])
-  })
-
-  it('accepts one connection name as well as a selection', async () => {
-    const harness = withRouter({
-      interface: [{ interface: 'pd00001', up: true, proto: 'pppoe' }]
-    })
-    const runtime = activate(harness.ctx)
-
-    // Dialing needs ppp, so the action is gated on the probe having landed.
-    runtime.applyPollers?.()
-    await settle()
-    await harness.ticks[0]()
-
-    const single = harness.handlers.get('pppoeConnAction')?.('pd00001', 'stop') as {
-      ok: boolean
-    }
-    expect(single.ok).toBe(true)
-    await settle()
-
-    // A name that belongs to no managed batch is still refused, however it arrives.
-    const foreign = harness.handlers.get('pppoeConnAction')?.('wan', 'stop') as {
-      ok: boolean
-      error?: string
-    }
-    expect(foreign.ok).toBe(false)
-    expect(foreign.error).toContain('managed batch')
-    runtime.dispose?.()
-    harness.revoke()
-    expect(harness.afterStopCalls).toEqual([])
-  })
-})
+// The PPPoE payload surface is exercised in openwrt-hot-path.test.ts and
+// openwrt-pppoe-guards.test.ts against the daemon contract; the SSH-era
+// describe that lived here tested rows the module no longer builds.
 
 describe('the binding payload', () => {
   const NOW = 1_700_000_000_000
@@ -786,32 +627,32 @@ describe('the settings rules form', () => {
   it('keeps one group of overrides when another group is saved', () => {
     const { rules, config } = editor()
 
-    apply(rules, { chunkDelayMs: '2000' })
+    apply(rules, { stickyCap: '2000' })
     // A different group of the same form, carrying only its own fields. Merging
     // over the defaults instead of over what is in force made this a silent
     // reset of everything the user had set elsewhere.
     apply(rules, { releaseGraceSec: '600' })
 
-    expect(config.effectiveRules()).toMatchObject({ chunkDelayMs: 2_000, releaseGraceSec: 600 })
+    expect(config.effectiveRules()).toMatchObject({ stickyCap: 2_000, releaseGraceSec: 600 })
   })
 
   it('treats a blank field as leave this alone', () => {
     const { rules, config } = editor()
 
-    apply(rules, { chunkDelayMs: '2000' })
-    apply(rules, { chunkDelayMs: '' })
+    apply(rules, { stickyCap: '2000' })
+    apply(rules, { stickyCap: '' })
 
-    expect(config.effectiveRules().chunkDelayMs).toBe(2_000)
+    expect(config.effectiveRules().stickyCap).toBe(2_000)
     // And Reset every rule is still how a user goes back to the defaults.
     expect(rules.reset()).toEqual({ ok: true })
-    expect(config.effectiveRules().chunkDelayMs).toBe(DEFAULT_RULES.chunkDelayMs)
+    expect(config.effectiveRules().stickyCap).toBe(DEFAULT_RULES.stickyCap)
   })
 
   it('says what changes, and says so when nothing does', () => {
     const { rules } = editor()
 
-    apply(rules, { chunkDelayMs: '2000' })
-    const report = rules.check({ chunkDelayMs: '2000' })
+    apply(rules, { stickyCap: '2000' })
+    const report = rules.check({ stickyCap: '2000' })
 
     expect(report.ok).toBe(true)
     expect(report.findings.some((finding) => finding.label.includes('Nothing changes'))).toBe(true)
@@ -837,8 +678,8 @@ describe('the settings rules form', () => {
     const { rules } = editor('present')
 
     // Same value as the current one: nothing changes, so nothing is locked.
-    expect(rules.check({ tableBase: String(DEFAULT_RULES.tableBase) }).ok).toBe(true)
-    const moved = rules.check({ tableBase: '11000' })
+    expect(rules.check({ catchAllTable: String(DEFAULT_RULES.catchAllTable) }).ok).toBe(true)
+    const moved = rules.check({ catchAllTable: '31000' })
     expect(moved.ok).toBe(false)
     expect(moved.findings.some((finding) => finding.level === 'error')).toBe(true)
   })
@@ -846,12 +687,12 @@ describe('the settings rules form', () => {
   it('locks the layout when it cannot tell whether this router has records', () => {
     // The records are per-machine, the rules are global: no connected host
     // means no evidence either way, and the old boolean read that as "none".
-    // On a router carrying a hundred sessions, that unlocked the table range
-    // the next create would have written into.
+    // On a router carrying live binding rules, that unlocked the preference
+    // range the next reconcile would have written into.
     const { rules } = editor('unknown')
 
-    expect(rules.check({ chunkDelayMs: '2000' }).ok).toBe(true)
-    const moved = rules.check({ tableBase: '11000' })
+    expect(rules.check({ stickyCap: '2000' }).ok).toBe(true)
+    const moved = rules.check({ catchAllTable: '31000' })
     expect(moved.ok).toBe(false)
     expect(moved.findings.some((finding) => finding.label.includes('no router is connected'))).toBe(
       true
@@ -861,12 +702,12 @@ describe('the settings rules form', () => {
 
   it('keeps a locked rule on reset instead of refusing the whole thing', () => {
     const known = editor('none')
-    apply(known.rules, { tableBase: '11000', chunkDelayMs: '2000' })
-    expect(known.config.effectiveRules().tableBase).toBe(11_000)
+    apply(known.rules, { catchAllTable: '31000', stickyCap: '2000' })
+    expect(known.config.effectiveRules().catchAllTable).toBe(31_000)
 
     // Same ConfigStore contents, but now nothing can vouch for the router.
     // Reset used to refuse outright here, so one locked override made every
-    // unlocked rule - chunk sizes, grace periods, the lease file - permanently
+    // unlocked rule - grace periods, the lease file - permanently
     // unresettable without deleting the router's records first.
     const blind = new RulesEditor(
       moduleHarness('openwrt', () => ok(''), { config: sharedModuleConfig(null) }).ctx,
@@ -876,10 +717,10 @@ describe('the settings rules form', () => {
     const result = blind.reset()
 
     expect(result.ok).toBe(true)
-    expect(known.config.effectiveRules().chunkDelayMs).toBe(DEFAULT_RULES.chunkDelayMs)
-    expect(known.config.effectiveRules().tableBase).toBe(11_000)
+    expect(known.config.effectiveRules().stickyCap).toBe(DEFAULT_RULES.stickyCap)
+    expect(known.config.effectiveRules().catchAllTable).toBe(31_000)
     // And it says which one it kept, and what to do about it.
-    expect(result.data).toContain('tableBase')
+    expect(result.data).toContain('catchAllTable')
     expect(result.data).toContain('no router is connected')
   })
 
@@ -907,16 +748,16 @@ describe('the settings rules form', () => {
     // frozen locked values straight past the lock that had approved them.
     const { rules, config } = editor('none')
 
-    const report = rules.check({ chunkDelayMs: '2000' })
+    const report = rules.check({ stickyCap: '2000' })
     expect(report.ok).toBe(true)
     if (!report.ok) return
     // Another group is saved while the first check's token is still valid.
     apply(rules, { releaseGraceSec: '600' })
-    expect(rules.apply({ token: report.token, values: { chunkDelayMs: '2000' } })).toEqual({
+    expect(rules.apply({ token: report.token, values: { stickyCap: '2000' } })).toEqual({
       ok: true
     })
 
-    expect(config.effectiveRules()).toMatchObject({ chunkDelayMs: 2_000, releaseGraceSec: 600 })
+    expect(config.effectiveRules()).toMatchObject({ stickyCap: 2_000, releaseGraceSec: 600 })
   })
 
   it('refuses at apply time when the lock closed after the check', () => {
@@ -925,14 +766,14 @@ describe('the settings rules form', () => {
     const config = new ConfigStore(harness.ctx)
     const rules = new RulesEditor(harness.ctx, config, () => topology)
 
-    const report = rules.check({ tableBase: '11000' })
+    const report = rules.check({ catchAllTable: '31000' })
     expect(report.ok).toBe(true)
     if (!report.ok) return
-    // A batch is created - or the router disconnects - before Save is pressed.
+    // An instance is created - or the router disconnects - before Save lands.
     topology = 'present'
 
-    expect(rules.apply({ token: report.token, values: { tableBase: '11000' } }).ok).toBe(false)
-    expect(config.effectiveRules().tableBase).toBe(DEFAULT_RULES.tableBase)
+    expect(rules.apply({ token: report.token, values: { catchAllTable: '31000' } }).ok).toBe(false)
+    expect(config.effectiveRules().catchAllTable).toBe(DEFAULT_RULES.catchAllTable)
   })
 })
 

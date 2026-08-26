@@ -28,7 +28,14 @@
  */
 import { failedCheck, type ModuleCheckFinding, type ModuleCheckReport } from '@shared/check'
 import type { OkResult } from '@shared/types'
-import { FW4_MISSING, installHint, type OpenWrtCapabilities } from './probe'
+import {
+  FW4_MISSING,
+  featureApi,
+  hasPoolDaemon,
+  installHint,
+  PPPOE_POOL_API,
+  type OpenWrtCapabilities
+} from './probe'
 
 // Written in `probe/text.ts` so the readiness card can say the same thing;
 // re-exported here because this is where every create-form gate looks for it.
@@ -51,6 +58,7 @@ export function unprobed(caps: OpenWrtCapabilities): ModuleCheckReport | null {
 /** Everything a feature may demand of a router, by name. */
 export type RequirementKey =
   | 'pppoe'
+  | 'pppoePool'
   | 'fw4'
   | 'fw4Loaded'
   | 'ipRule'
@@ -83,6 +91,27 @@ const REQUIREMENTS: Record<RequirementKey, RequirementSpec> = {
     title: 'PPPoE support is missing on this router',
     met: (caps) => caps.hasPppoe,
     detail: (caps) => installHint(caps, 'ppp, ppp-mod-pppoe and kmod-pppoe')
+  },
+  pppoePool: {
+    title: 'The pool daemon this module drives is not on this router',
+    met: (caps) => hasPoolDaemon(caps.agent),
+    detail: (caps) => {
+      if (!caps.agent.usable) {
+        return (
+          'PPPoE pools are owned end to end by bm-pppoe-pool 2.x on the router, and there is no ' +
+          'Bored Manager agent to reach it through. Install the router packages from Router ' +
+          'packages, in Module settings.'
+        )
+      }
+      if (!caps.agent.provides.includes('pppoe')) {
+        return 'This router has the agent but not bm-pppoe-pool. Install it from Router packages, in Module settings.'
+      }
+      return (
+        `The installed bm-pppoe-pool speaks version ${featureApi(caps.agent, 'pppoe')} of its contract and this ` +
+        `module drives ${PPPOE_POOL_API}. Update the router packages from Router packages, in Module settings; ` +
+        'the pools it holds keep dialling meanwhile.'
+      )
+    }
   },
   fw4: {
     title: 'Firewall4 is required, and this router does not have it',
@@ -200,8 +229,18 @@ export interface FeatureSpec {
   guard?: boolean
 }
 
-/** Everything the two create forms and their applies demand of a router. */
-const PPPOE_CREATE: readonly RequirementKey[] = ['pppoe', 'fw4', 'fw4Loaded', 'netifdRunning']
+/**
+ * Everything the pool forms and their applies demand of a router, most
+ * fundamental first: the dialing stack and the firewall are firmware-level,
+ * the pool daemon is an installable package.
+ */
+const PPPOE_CREATE: readonly RequirementKey[] = [
+  'pppoe',
+  'fw4',
+  'fw4Loaded',
+  'pppoePool',
+  'netifdRunning'
+]
 const BINDING_CREATE: readonly RequirementKey[] = [
   'fw4',
   'fw4Loaded',
@@ -231,9 +270,13 @@ export const FEATURES: Record<string, FeatureSpec | null> = {
   // rendering on a router in any state whatsoever.
   selectOptions: null,
   deviceRows: null,
-  pppoeBatches: null,
+  pppoePools: null,
   pppoeRows: null,
-  pppoeAttentionRows: null,
+  pppoeLegacyRows: null,
+  // The carrier list a create form offers. A read of the router, and one that
+  // answers `[]` with the reason in the row rather than refusing the form.
+  pppoeCarriers: null,
+  pppoeSettingsGet: null,
   bindingRows: null,
   bindingWaitingRows: null,
   bindingEventRows: null,
@@ -255,17 +298,26 @@ export const FEATURES: Record<string, FeatureSpec | null> = {
   setupCheck: { kind: 'check', requires: [] },
   setupApply: { kind: 'action', requires: [] },
 
-  pppoeBatchCheck: { kind: 'check', requires: PPPOE_CREATE, conflicts: ['mwan3'] },
+  poolCreateCheck: { kind: 'check', requires: PPPOE_CREATE, conflicts: ['mwan3'] },
   // The gap this table was written for: the check refused, and then the apply
   // ran anyway on a token issued before the router lost something.
-  pppoeBatchApply: { kind: 'action', requires: PPPOE_CREATE },
-  // Start/stop/redial. Dialing needs ppp; masquerading was arranged when the
-  // pool was created and is not re-arranged here.
-  pppoeBatchAction: { kind: 'action', requires: ['pppoe'] },
-  pppoeConnAction: { kind: 'action', requires: ['pppoe'] },
-  // Cleanup, deliberately ungated: a pool on a router that has since lost ppp
-  // is exactly the pool a user most wants to be able to delete.
-  pppoeBatchDelete: { kind: 'action', requires: [] },
+  poolCreateApply: { kind: 'action', requires: PPPOE_CREATE },
+  // Editing an existing pool is the same writes as creating one.
+  poolSetCheck: { kind: 'check', requires: PPPOE_CREATE, conflicts: ['mwan3'] },
+  poolSetApply: { kind: 'action', requires: PPPOE_CREATE },
+  // Start/stop/redial/enable/disable, per row or per pool. All of them are
+  // daemon calls - enable and disable write `option auto` on the router - so
+  // they need the daemon, not the dialing stack.
+  pppoePoolAction: { kind: 'action', requires: ['pppoePool'] },
+  pppoeConnAction: { kind: 'action', requires: ['pppoePool'] },
+  // Deleting goes through the daemon too: it is the only thing that knows
+  // everything a pool derived. A router that lost the package cannot delete
+  // until it is back, and the refusal says to reinstall it - which is also
+  // the only path that ever removes the pool.
+  poolDelete: { kind: 'action', requires: ['pppoePool'] },
+  // The daemon's own watchdog and counter settings.
+  pppoeSettingsCheck: { kind: 'check', requires: ['pppoePool'] },
+  pppoeSettingsApply: { kind: 'action', requires: ['pppoePool'] },
 
   bindingCheck: { kind: 'check', requires: BINDING_CREATE, conflicts: ['mwan3', 'foreignRules'] },
   bindingApply: { kind: 'action', requires: BINDING_CREATE },

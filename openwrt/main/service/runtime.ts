@@ -22,6 +22,7 @@ import type {
   ProcNetDevSnapshot,
   RouterModel
 } from '../types'
+import type { ManagedPppoeRange } from './command'
 
 export interface FastSweepHooks {
   onSample?(model: RouterModel): void | Promise<void>
@@ -32,6 +33,12 @@ export interface FastSweepHooks {
     PoolAggregate,
     'total' | 'up' | 'dialing' | 'error' | 'stopped'
   >
+  /**
+   * The name ranges the router-side awk counts as the managed pool. Read from
+   * the pool cache on every tick, because the pools live on the router now
+   * and this side only mirrors them.
+   */
+  pppoeRanges?(): ManagedPppoeRange[]
 }
 
 export interface SweepRuntime {

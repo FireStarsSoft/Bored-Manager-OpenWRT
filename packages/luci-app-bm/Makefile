@@ -18,7 +18,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-bm
-PKG_VERSION:=1.4.1
+PKG_VERSION:=2.0.0
 PKG_RELEASE:=1
 
 # luci.mk would otherwise derive this from the last commit that touched po/,

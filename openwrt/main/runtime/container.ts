@@ -38,7 +38,7 @@ export interface OpenWrtRuntime {
   events: EventLog<OwrtHostData>
   jobs: Jobs<OwrtHostData>
   service: FastSweep
-  pppoe: PppoeManager<OwrtHostData>
+  pppoe: PppoeManager
   binding: BindingEngine
   queries: Queries
   rules: RulesEditor
@@ -52,7 +52,7 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
   const events = new EventLog<OwrtHostData>(ctx, store)
   const jobs = new Jobs<OwrtHostData>(ctx, store)
 
-  let pppoe!: PppoeManager<OwrtHostData>
+  let pppoe!: PppoeManager
   let binding!: BindingEngine
   let latch!: CapabilityLatch
 
@@ -68,12 +68,12 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
   // exist.
   const guarded = guardedJobs(jobs, { ctx, capability: () => latch.capabilities.agent })
   const service = new FastSweep(ctx, config, store, {
-    async onSample(model) {
-      pppoe.onSample(model)
-      await binding.onSample(model)
+    async onSample() {
+      pppoe.onSample()
+      const model = service.latest
+      if (model) await binding.onSample(model)
     },
     async onSlowSample(sample) {
-      pppoe.slowTick(sample.t)
       // Only against a map the router answered for on this tick. The audit
       // repairs and refuses on the strength of what is missing from it, and a
       // probe that came back without its UCI section would have every managed
@@ -97,36 +97,29 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
       )
     },
     pppoeTotals() {
-      return pppoe.batches().reduce(
-        (total, batch) => ({
-          total: total.total + batch.count,
-          up: total.up + batch.up,
-          dialing: total.dialing + batch.dialing,
-          error: total.error + batch.error,
-          // The dashboard pie has no slice for a connection the router has no
-          // interface for, nor for one nothing has been read about yet;
-          // counting both as stopped keeps the slices adding up to the pool
-          // total. The PPPoE page reports `missing` and `unknown` separately,
-          // and it is the page where the difference is worth acting on.
-          stopped: total.stopped + batch.stopped + batch.missing + batch.unknown
-        }),
-        { total: 0, up: 0, dialing: 0, error: 0, stopped: 0 }
-      )
+      const latest = pppoe.latest
+      return {
+        total: latest.interfaces,
+        up: latest.up,
+        // The dashboard pie has no slice for `down`; a session netifd is not
+        // actively dialling still belongs with the busy slice rather than
+        // with the deliberate stops.
+        dialing: latest.dialing + latest.down,
+        error: latest.error,
+        // Nor for `unwritten`: a member recorded and not written counts with
+        // stopped so the slices keep adding up to the pool total. The PPPoE
+        // page reports it separately, where it is worth acting on.
+        stopped: latest.stopped + latest.unwritten
+      }
+    },
+    pppoeRanges() {
+      return pppoe.managedRanges()
     }
   })
 
   const sharedService = {
-    model: () => service.latest,
     forceDump: () => service.forceDumpNextTick(),
     refreshNow: () => service.run(),
-    pppoeErrors: () => service.pppoeErrorSnapshot(),
-    pppoeUsers: () => service.pppoeUserSnapshot(),
-    // Read from the router's own firewall configuration by the slow probe. It
-    // used to be the literal 'lan': on a router whose LAN zone is named
-    // anything else, the forwarding was installed from a zone that does not
-    // exist and every session in the pool dialed successfully and carried no
-    // client traffic at all.
-    lanFirewallZone: () => service.lanZone(),
     event: (kind: string, text: string) => events.record('pppoe', kind, text),
     // The one place the two automations meet. A binding instance running on the
     // same carrier is distributing LAN clients across this pool behind a
@@ -136,11 +129,10 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
     bindingCarriers: () => binding.carriers()
   }
   // The same verdict the binding engine reads, and read the same way: per
-  // operation, never captured. Here it decides how a pool's sections are
-  // written rather than which half owns them - netifd owns them either way -
-  // so a router that loses the package mid-create fails that create and does
-  // the next one the slow way.
-  pppoe = new PppoeManager(ctx, config, store, guarded, sharedService, () => latch.capabilities.agent)
+  // operation, never captured. It is not a preference any more: the daemon is
+  // the only way pools are read or written, and a router without it gets a
+  // readiness row saying to install it.
+  pppoe = new PppoeManager(ctx, config, guarded, sharedService, () => latch.capabilities.agent)
 
   binding = new BindingEngine(ctx, store, {
     rules: () => config.effectiveRules(),
@@ -170,8 +162,7 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
     // "no records" is not evidence that the router has none, so the lock has to
     // stay closed rather than open on a guess.
     if (!ctx.connected || ctx.hostKey == null) return 'unknown'
-    const data = store.read()
-    return data.batches.length > 0 || data.instances.length > 0 ? 'present' : 'none'
+    return store.read().instances.length > 0 ? 'present' : 'none'
   })
 
   // Whether the fast sweep is worth its full rate on this router. Anything
@@ -184,8 +175,7 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
   // applyPollers(), which the host already runs on each tab switch, connect and
   // settings change.
   latch = createCapabilityLatch(ctx, service, () => {
-    const data = store.read()
-    if (data.batches.length > 0 || data.instances.length > 0) return true
+    if (store.read().instances.length > 0 || pppoe.poolCount() > 0) return true
     return ctx.streamActive('overview') || ctx.tabActive
   })
   const agent = new AgentManager({
@@ -203,17 +193,17 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
     // started between reading an uninstall report and pressing the button, and
     // the refusal exists precisely so that nothing is removed from underneath
     // one.
-    // From the stored records, not from the engines' views. A snapshot is what
-    // the last sweep computed and is empty until one has landed, so asking it
-    // reported "nothing is running" on a router that had not been swept yet -
-    // which is the router most likely to be mid-something.
+    // Instances from the stored records; pools from the daemon cache, which
+    // is the only record of them this side holds. A router that has not been
+    // fetched yet reports no pools, and the uninstall's own check re-reads
+    // the router before anything is removed.
     blockers: () => {
       const data = store.read()
       return {
         instances: data.instances
           .filter((instance) => instance.running)
           .map((instance) => instance.name),
-        batches: data.batches.map((batch) => batch.name)
+        batches: pppoe.poolNames()
       }
     }
   })

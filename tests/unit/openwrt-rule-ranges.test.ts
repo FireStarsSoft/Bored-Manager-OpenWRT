@@ -6,11 +6,12 @@ import { moduleHarness, sharedModuleConfig } from '../helpers/module-harness'
 /**
  * Two ranges are numbered from a configurable base, and each has to end before
  * the catch-all numbering starts: one routing table per WAN, and one ip rule
- * priority per bound device. Only the tables were ever cross-checked. A
- * priority base set close under the catch-all range therefore saved cleanly,
- * and then the pool quietly ran out of preferences: every device past the gap
- * stayed queued behind a fail-closed catch-all - no internet, and no setting
- * anywhere admitting that the numbering was the reason.
+ * priority per bound device. The floor is the router half's own: `bm-wanbind`
+ * refuses an instance whose priority span is narrower than its minimum, and it
+ * refuses it silently - so the form has to say it here, where a person can
+ * still act on it. The 5,000-row batch arithmetic that used to live in these
+ * checks left with the batches themselves: pools carry their own numbering on
+ * the router now.
  */
 
 const ok = (): { code: number; stdout: string; stderr: string } => ({
@@ -35,42 +36,32 @@ const labels = (report: ModuleCheckReport): string[] =>
     .filter((finding) => finding.level === 'error')
     .map((finding) => finding.label)
 
-const OVERLAP = 'The client rule priority range overlaps the catch-all priority range'
+const NARROW = 'The client rule priority range is too narrow'
 
 describe('the client rule priority range', () => {
-  it('is refused when a whole batch would not fit below the catch-all range', () => {
-    // 28,000 is a legal base and 29,900 is the default catch-all base, so the
-    // two do not collide - but a batch holds 5,000 sessions and every bound
-    // device takes one priority from 28,000 upwards.
-    const report = editor().check({ rulePrefBase: 28_000 })
+  it('is refused when it is narrower than the router half will run', () => {
+    // Both bases are legal on their own and the two do not collide - but
+    // forty priorities between them is below the floor bm-wanbind holds, and
+    // it refuses such an instance by leaving it out of its own list, silently.
+    const report = editor().check({ rulePrefBase: '28960', catchAllPrefBase: '29000' })
 
     expect(report.ok).toBe(false)
-    expect(labels(report)).toContain(OVERLAP)
-    expect(
-      report.findings.find((finding) => finding.label === OVERLAP)?.detail
-    ).toContain('5000')
+    expect(labels(report)).toContain(NARROW)
+    expect(report.findings.find((finding) => finding.label === NARROW)?.detail).toContain(
+      'refuses it silently'
+    )
   })
 
-  it('is accepted when the batch size leaves room for it', () => {
-    const report = editor().check({ rulePrefBase: 28_000, maxBatchRows: 1_000 })
+  it('is accepted when the span leaves room', () => {
+    const report = editor().check({ rulePrefBase: '28000' })
 
     expect(labels(report)).toEqual([])
     expect(report.ok).toBe(true)
   })
 
-  it('is refused when the batch size alone grows into it', () => {
-    // A saved layout that fits: 28,000 upwards, with 1,000 sessions per batch.
-    // Raising only the batch size is what runs it into the catch-all range, and
-    // the form group that does it does not contain the priority base at all.
-    const report = editor(stored({ rulePrefBase: 28_000, maxBatchRows: 1_000 }))
-      .check({ maxBatchRows: 5_000 })
-
-    expect(labels(report)).toContain(OVERLAP)
-  })
-
   it('is still refused when the base alone is above the catch-all base', () => {
     // The check that was already there. Both are reported; neither replaced.
-    const report = editor().check({ catchAllPrefBase: 2_000 })
+    const report = editor().check({ catchAllPrefBase: '2000' })
 
     expect(labels(report)).toContain(
       'Assignment rule priorities must end before the catch-all priority range'
@@ -78,10 +69,10 @@ describe('the client rule priority range', () => {
   })
 
   it('gets the same treatment the routing tables already got', () => {
-    const report = editor().check({ tableBase: 25_000 })
+    const report = editor().check({ catchAllTable: '10050' })
 
     expect(labels(report)).toContain(
-      'The PPPoE routing-table range overlaps the catch-all routing table'
+      'The WAN routing-table range overlaps the catch-all routing table'
     )
   })
 })
@@ -91,16 +82,16 @@ describe('saving an overlapping range', () => {
     const rules = editor()
     // A token from a check that passed, against values that no longer do:
     // `apply` re-derives the blockers rather than trusting the report.
-    const good = rules.check({ rulePrefBase: 24_000 })
+    const good = rules.check({ rulePrefBase: '24000' })
     expect(good.ok).toBe(true)
 
-    const bad = rules.check({ rulePrefBase: 28_000 })
+    const bad = rules.check({ rulePrefBase: '29850' })
     expect(bad.ok).toBe(false)
     expect(bad.token).toBeUndefined()
 
     const applied = rules.apply({
       token: good.token,
-      values: { rulePrefBase: 24_000 }
+      values: { rulePrefBase: '24000' }
     })
     expect(applied.ok).toBe(true)
   })
@@ -109,7 +100,7 @@ describe('saving an overlapping range', () => {
 describe('a stored config that already overlaps', () => {
   it('is not honoured on read', () => {
     const harness = moduleHarness('openwrt', ok, {
-      config: sharedModuleConfig(stored({ rulePrefBase: 28_000 }))
+      config: sharedModuleConfig(stored({ rulePrefBase: 29_850 }))
     })
 
     const config = new ConfigStore(harness.ctx)

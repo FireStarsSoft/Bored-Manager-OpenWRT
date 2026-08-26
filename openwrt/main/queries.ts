@@ -1,6 +1,5 @@
 import { statusBadges } from './badges'
 import type { ConfigStore } from './config'
-import { recordLayout, type ManagedLayout, type PppoeBatchRecord } from './records'
 import type { HostStore } from './store'
 import type { IfaceState, IpRule, Lease, RouterModel } from './types'
 import { ifaceIndex, ipv4ToInt, sameSubnet } from './util'
@@ -16,25 +15,6 @@ function fromAddress(rule: IpRule): string | null {
   if (rule.from === 'all') return null
   const address = rule.from.replace(/\/32$/, '')
   return ipv4ToInt(address) == null ? null : address
-}
-
-/**
- * The section name a routing table implies, by the naming convention each
- * batch was created under. Each batch carries its own base, so a table base
- * edited after the fact does not stop naming the sessions already dialed.
- */
-function conventionalWan(
-  table: number,
-  batches: readonly PppoeBatchRecord[],
-  live: ManagedLayout
-): string {
-  for (const batch of batches) {
-    const seq = table - recordLayout(batch, live).tableBase
-    if (!Number.isInteger(seq) || seq < 1) continue
-    if (seq < batch.seqFrom || seq > batch.seqTo) continue
-    return `${batch.prefix}${String(seq).padStart(5, '0')}`
-  }
-  return ''
 }
 
 function expiryLabel(lease: Lease, nowSec: number): string {
@@ -93,9 +73,10 @@ export class Queries {
       if (rule.pref < rules.rulePrefBase || rule.pref >= rules.catchAllPrefBase) continue
       const ip = fromAddress(rule)
       if (!ip) continue
-      const wan =
-        tableToWan.get(rule.table) ||
-        conventionalWan(rule.table, data.batches, rules)
+      // Pool members carry their table in the dump (`ip4Table`), so the
+      // table-to-WAN map above already names them; the old naming-convention
+      // fallback went with the batch records.
+      const wan = tableToWan.get(rule.table)
       if (!wan) continue
       const current = assignmentByIp.get(ip)
       if (!current || rule.pref < current.pref) {

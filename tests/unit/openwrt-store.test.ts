@@ -128,11 +128,11 @@ describe('openwrt host data', () => {
     const store = new HostStore(ctx, () => DEFAULT_RULES)
 
     store.update((data) => {
-      data.nextSeq = 42
+      data.extraTables.push(['wan1', 10_042])
     })
     store.flush()
 
     expect(logs.some((line) => line.includes('could not be saved'))).toBe(true)
-    expect(store.read().nextSeq).toBe(42)
+    expect(store.read().extraTables).toEqual([['wan1', 10_042]])
   })
 })

@@ -842,8 +842,8 @@
                   "lines": [
                     "Every field opens filled in with the value this router is using right now, so each form doubles as the list of rules in force. Saving one group leaves the others exactly as they are.",
                     "A field left empty means keep the current value. The placeholder still names the documented default; to put one rule back, type that default, and to put all of them back use Reset every rule.",
-                    "Changing the routing-table or rule-priority bases while batches or binding instances exist is refused: the old and new ownership ranges cannot safely overlap.",
-                    "What belongs to one automation lives with that automation. Batch pacing is on Automation, PPPoE Dialer; binding behaviour is on Automation, WAN Binding. Only the values both of them share are here."
+                    "Changing the rule-priority bases while binding instances exist is refused: the old and new ownership ranges cannot safely overlap.",
+                    "PPPoE pools carry their own numbering and firewall on the router - each pool records its table base and zone when it is created - so nothing here describes them. The pool daemon's own settings are on Automation, PPPoE Dialer."
                   ]
                 }
               ]
@@ -860,17 +860,6 @@
                   "checkLabel": "Check this group",
                   "applyLabel": "Save this group",
                   "fields": [
-                    {
-                      "key": "ifacePrefix",
-                      "label": "Default PPPoE prefix",
-                      "input": "text",
-                      "placeholder": "pd",
-                      "initialFrom": {
-                        "kind": "invoke",
-                        "method": "rulesEffective",
-                        "path": "ifacePrefix"
-                      }
-                    },
                     {
                       "key": "tableBase",
                       "label": "Routing-table base",
@@ -917,33 +906,13 @@
                     },
                     {
                       "key": "zoneName",
-                      "label": "Firewall zone name",
+                      "label": "Binding firewall zone",
                       "input": "text",
                       "placeholder": "bmwanpool",
                       "initialFrom": {
                         "kind": "invoke",
                         "method": "rulesEffective",
                         "path": "zoneName"
-                      }
-                    },
-                    {
-                      "key": "zoneMode",
-                      "label": "Firewall membership mode",
-                      "input": "select",
-                      "options": [
-                        {
-                          "value": "wildcard",
-                          "label": "Wildcard PPPoE devices (default)"
-                        },
-                        {
-                          "value": "networks",
-                          "label": "Explicit UCI network list"
-                        }
-                      ],
-                      "initialFrom": {
-                        "kind": "invoke",
-                        "method": "rulesEffective",
-                        "path": "zoneMode"
                       }
                     }
                   ]
@@ -964,13 +933,11 @@
                       "type": "note",
                       "title": "What each field means",
                       "lines": [
-                        "Default PPPoE prefix - one to four lowercase letters or digits, beginning with a letter. Default pd. A batch may override it.",
-                        "Routing-table base - default 10000. A managed PPPoE session uses this value plus its sequence. Cannot change while managed batches or binding instances exist.",
+                        "Routing-table base - default 10000. WAN Binding numbers the extra tables it assigns to DHCP and static WANs from here; it is also the default table base a new pool's create form offers. A pool records its own base on the router when it is created.",
                         "Client-rule priority base - default 20000. Client source rules occupy the range from here up to, but not including, the safety-rule base.",
-                        "Safety-rule priority base - default 29900. Each binding instance gets one subnet catch-all priority from this base; it must be above every client rule.",
-                        "Unreachable routing table - default 29999. This table contains an unreachable default and prevents waiting clients from leaking through another WAN.",
-                        "Firewall zone name - default bmwanpool. The module owns this UCI zone and its LAN forwarding; use only letters, digits or underscore.",
-                        "Firewall membership mode - wildcard keeps a large firewall config small. Switch to the explicit list only when a PPPoE create job warns that the firewall reload produced no nft rule, which means this router's fw4 build did not materialize the wildcard."
+                        "Safety-rule priority base - default 29900. Each binding instance gets one subnet catch-all priority from this base; it must be above every client rule. Cannot change while binding instances exist.",
+                        "Unreachable routing table - default 29999. This table contains an unreachable default and prevents waiting clients from leaking through another WAN. Cannot change while binding instances exist.",
+                        "Binding firewall zone - default bmwanpool. The zone WAN Binding keeps its masqueraded WANs in. Pools name their own zone per pool - the same name by default, shared and reconciled by the router's pool daemon."
                       ]
                     }
                   ]

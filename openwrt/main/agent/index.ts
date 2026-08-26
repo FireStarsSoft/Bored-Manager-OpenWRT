@@ -35,18 +35,31 @@ export {
 } from './client'
 export {
   poolAction,
+  poolCarriers,
+  poolCheck,
   poolCreate,
   poolDelete,
   poolInfo,
   poolReconcile,
   poolSessions,
+  poolSet,
+  poolSettingsGet,
+  poolSettingsSet,
   poolStats,
-  routerPoolId,
-  type PoolAccount,
+  type PoolActionName,
+  type PoolCarrier,
+  type PoolCheckReply,
+  type PoolFinding,
   type PoolInfo,
-  type PoolPlan,
-  type PoolSession,
-  type PoolSummary
+  type PoolInfoEntry,
+  type PoolLegacyEntry,
+  type PoolMemberInfo,
+  type PoolRow,
+  type PoolRowStatus,
+  type PoolSetChange,
+  type PoolSettings,
+  type PoolSpec,
+  type PoolSpecMember
 } from './pppoe'
 export {
   safeUciWord,

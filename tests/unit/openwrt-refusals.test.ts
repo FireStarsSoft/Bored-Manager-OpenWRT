@@ -6,7 +6,6 @@ import { BindingEngine } from '../../openwrt/main/binding'
 import { DEFAULT_RULES } from '../../openwrt/main/config'
 import { HostStore } from '../../openwrt/main/store'
 import type { IfaceState, RouterModel } from '../../openwrt/main/types'
-import { applyFirewallPlan, buildFirewallPlan } from '../../openwrt/main/uci'
 import { moduleHarness, sharedModuleConfig } from '../helpers/module-harness'
 
 /**
@@ -43,6 +42,8 @@ interface RouterShape {
   uid?: string
   /** The package database the probe finds, if any. */
   pkg?: string
+  /** Whether the Bored Manager agent and the 2.x pool daemon are installed. */
+  agent?: boolean
 }
 
 /**
@@ -75,6 +76,23 @@ function probeOutput(without: string[] = [], shape: RouterShape = {}): string {
     '/dev/loop0                8192      2048      6144  25% /overlay',
     '===IPRULE===',
     ...ipRule,
+    '===AGENT===',
+    ...(shape.agent
+      ? [
+          JSON.stringify({
+            name: 'bm-agent',
+            release: '2.0.0',
+            apiVersion: 3,
+            schema: 2,
+            dataSchema: 2,
+            provides: ['pppoe'],
+            features: [
+              { name: 'bm-pppoe-pool', version: '2.0.0', apiVersion: 2, provides: ['pppoe'] }
+            ],
+            guard: { armed: false }
+          })
+        ]
+      : []),
     // The sentinel that tells a router which answered from one which never
     // did. Without it every capability reads unknown, and both create gates
     // answer "The router has not been checked yet" whatever the router said.
@@ -119,7 +137,8 @@ function moduleUnprobed(
       await settle()
     },
     bindingCheck: () => call('bindingCheck', CREATE),
-    pppoeCheck: () => call('pppoeBatchCheck', { name: 'Home', carrier: 'eth1' }),
+    pppoeCheck: () =>
+      call('poolCreateCheck', { mode: 'multi', id: 'home', carrier: 'eth1', vlans: '101' }),
     dispose: () => runtime.dispose?.()
   }
 }
@@ -249,8 +268,10 @@ describe('refusals name a control that exists', () => {
 
   it('tells a disconnected user what to do, on every page that can say it', async () => {
     const harness = moduleHarness('openwrt', () => ok(), { config: sharedModuleConfig(null) })
+    // The pool daemon is on this router, so the pool gate lets the check
+    // through to the one refusal this test is about: the connection.
     harness.exec.mockImplementation(async (command) =>
-      command.includes("echo '===REL==='") ? ok(probeOutput()) : ok()
+      command.includes("echo '===REL==='") ? ok(probeOutput([], { agent: true })) : ok()
     )
     // Probe a healthy router first, then pull the link. Capabilities keep the
     // last good answer, so these two gates are reachable - which is the only
@@ -263,9 +284,11 @@ describe('refusals name a control that exists', () => {
     connected = false
 
     const binding = (await harness.handlers.get('bindingCheck')?.(CREATE)) as ModuleCheckReport
-    const pppoe = (await harness.handlers.get('pppoeBatchCheck')?.({
-      name: 'Home',
-      carrier: 'eth1'
+    const pppoe = (await harness.handlers.get('poolCreateCheck')?.({
+      mode: 'multi',
+      id: 'home',
+      carrier: 'eth1',
+      vlans: '101'
     })) as ModuleCheckReport
 
     // The same condition used to be phrased three different ways, and only the
@@ -279,30 +302,19 @@ describe('refusals name a control that exists', () => {
   })
 })
 
-describe('a warning names the control the user would change', () => {
-  it('points the wildcard failure at the form, not at the rule key behind it', async () => {
-    const harness = moduleHarness('openwrt', () => ok())
-    // Everything the plan writes succeeds and only the nft count comes back
-    // empty, which is the single condition that produces this warning.
-    harness.exec.mockImplementation(async (command) =>
-      // grep exits 1 on a legitimate zero count.
-      command.includes('nft list ruleset') ? ok('0', '', 1) : ok()
-    )
-    const plan = buildFirewallPlan({
-      zoneName: 'bmwanpool',
-      prefix: 'pd',
-      mode: 'wildcard',
-      networkSections: [],
-      chunkSize: 100
-    })
+describe('a missing pool daemon points at Router packages', () => {
+  it('names the install page rather than a package manager command alone', async () => {
+    // A healthy router with no Bored Manager agent: the dialing stack and the
+    // firewall are all there, so what stops the pool form is the daemon that
+    // owns pools - and the way forward is the page that installs it.
+    const module = await moduleWith()
 
-    const result = await applyFirewallPlan(harness.ctx, plan, { timeoutMs: 60_000 })
+    const report = await module.pppoeCheck()
 
-    expect(result.ok).toBe(false)
-    // The text reaches the user as a job item message and an event row, nowhere
-    // near anything that would translate a stored rule key into a form field.
-    expect(result.warning).toContain('Firewall membership mode')
-    expect(result.warning).not.toContain('zoneMode')
+    expect(report.ok).toBe(false)
+    expect(text(report)).toContain('The pool daemon this module drives is not on this router')
+    expect(text(report)).toContain('Router packages')
+    module.dispose()
   })
 })
 

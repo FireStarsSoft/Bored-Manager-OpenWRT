@@ -23,7 +23,6 @@ import { planCapacity } from './capacity'
 import {
   carrierMatches,
   ifaceScopeKeys,
-  isManagedPppoeSection,
   lanCidr,
   poolIfaces
 } from './pool'
@@ -315,7 +314,7 @@ export async function checkBinding(
         label: 'No free numeric routing table remains between the PPPoE and catch-all ranges',
         // `usedTables` is router-wide, so splitting the pool into smaller
         // instances frees nothing: widening the range is the only remedy.
-        detail: `Tables ${rules.tableBase + 1}-${rules.catchAllTable - 1} are all spoken for and every WAN needs its own. Widen the range with "Routing-table base" or "Unreachable routing table" under Module settings, Rules - both are locked while any batch or binding instance exists.`
+        detail: `Tables ${rules.tableBase + 1}-${rules.catchAllTable - 1} are all spoken for and every WAN needs its own. Widen the range with "Routing-table base" or "Unreachable routing table" under Module settings, Rules - the second is locked while any binding instance exists.`
       })
       break
     }
@@ -367,18 +366,15 @@ export async function checkBinding(
             label: `WAN "${iface.name}" uses firewall zone "${zone}" with an unsupported name`
           })
         }
-      } else if (
-        iface.proto === 'pppoe' &&
-        isManagedPppoeSection(iface.name, runtime.store.read().batches)
-      ) {
-        // Managed PPPoE netdevs are commonly attached to the module zone by
-        // its `pppoe-<prefix>+` device wildcard rather than `list network`.
-        destinationZones.add(rules.zoneName)
       } else {
+        // A managed pool member is always in its pool's zone by explicit
+        // `list network` - bm-pppoe-pool writes the membership in the same
+        // breath as the interface - so a PPPoE WAN with no zone here is a
+        // real gap, not the old wildcard-device arrangement.
         findings.push({
           level: 'error',
           label: `WAN "${iface.name}" is not assigned to a firewall zone`,
-          detail: 'Assign the DHCP/static WAN to a masquerading firewall zone before putting it in a one-to-one pool.'
+          detail: 'Assign the WAN to a masquerading firewall zone before putting it in a one-to-one pool.'
         })
       }
     }

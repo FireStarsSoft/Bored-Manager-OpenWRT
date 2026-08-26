@@ -31,7 +31,9 @@ function logicalInRanges(logical: string, ranges: readonly ManagedPppoeRange[]):
   return ranges.some((range) => {
     if (!logical.startsWith(range.prefix)) return false
     const suffix = logical.slice(range.prefix.length)
-    if (!/^\d{5}$/.test(suffix)) return false
+    // 1-4 digits is a v2 pool member (its VLAN); exactly 5 is a legacy
+    // sequence. Both parse as the number the bounds are in.
+    if (!/^[0-9]{1,5}$/.test(suffix)) return false
     const seq = Number(suffix)
     return seq >= range.seqFrom && seq <= range.seqTo
   })

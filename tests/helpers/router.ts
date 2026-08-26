@@ -63,7 +63,20 @@ export const AGENT_INFO: Record<string, unknown> = {
   schema: 1,
   dataSchema: 1,
   provides: [],
+  features: [],
   guard: { armed: false }
+}
+
+/** The same agent with the 2.x pool daemon beside it, features and all. */
+export const POOL_AGENT_INFO: Record<string, unknown> = {
+  ...AGENT_INFO,
+  release: '2.0.0',
+  schema: 2,
+  dataSchema: 2,
+  provides: ['pppoe'],
+  features: [
+    { name: 'bm-pppoe-pool', version: '2.0.0', apiVersion: 2, provides: ['pppoe'] }
+  ]
 }
 
 export function routerProbeOutput(options: RouterProbeOptions = {}): string {

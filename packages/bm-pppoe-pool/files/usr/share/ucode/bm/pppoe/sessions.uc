@@ -1,62 +1,62 @@
-// What every session is doing, and which of them have been down too long.
+// What every member is doing, and which of them have been down too long.
 //
-// Two sources, the same arrangement as the lease table in bm-wanbind:
+// The row list is driven by the record, not by what netifd mentions. A pool
+// of forty VLANs is forty rows whatever the router is doing: a member whose
+// section is missing from /etc/config/network is a row saying `unwritten`,
+// not a row that vanished - which is the difference between a table somebody
+// can act on and a table that hides exactly the members that need acting on.
 //
-//   events   `ubus listen network.interface` fires the moment netifd brings a
-//            session up or drops it, which on a pool of five thousand is the
-//            difference between knowing and polling
-//   the dump `network.interface dump` on the counter pass, which is the whole
-//            truth and is what corrects anything the events missed
+// The status machine, in order, first answer wins:
 //
-// The watchdog queue is the reason the down list is kept as a queue rather than
-// scanned. A session goes down, it is pushed with the time it went down; times
-// only ever increase, so the queue is already in "down longest first" order and
-// the front of it is the next candidate to redial. Entries are validated when
-// they are reached rather than removed when a session comes back, so a session
-// recovering costs nothing at all - which matters when a provider drops four
-// thousand of them at once and brings them back a minute later.
+//   unwritten   the record names it, /etc/config/network does not
+//   stopped     `option auto '0'` - somebody pressed Disable, and it stays
+//               pressed across reboots and reconciles
+//   up          netifd says up with an IPv4 address
+//   error       netifd reports an error code (NO_PADO, PEER_AUTH_FAILED...)
+//   dialing     netifd says pending
+//   down        everything else
 //
-// Redialling is the last resort, not the first. netifd retries a PPPoE session
-// by itself and is better at it than anything here; `redial_after` is for the
-// sessions it has given up on, which is why the default is two minutes rather
-// than five seconds.
+// Live state arrives two ways, same as bm-wanbind's lease table: netifd
+// events the moment they happen, and the dump on the counter pass as the
+// correction. The watchdog queue is longest-down-first and validates entries
+// as they are reached, so a provider dropping a thousand sessions and
+// bringing them back costs nothing at all.
 
-import { debug, notice } from 'bm.log';
+import { debug, err, notice } from 'bm.log';
 
-import { sectionName } from 'bm.pppoe.config';
+import { deviceFor, macFor, netdevFor, sectionFor, tableFor, vlanOfSection } from 'bm.pppoe.config';
 
-/** Everything known about one pool's sessions. */
+/** Everything known about one pool's members. */
 export function create(one) {
 	return {
 		pool: one,
+		// section name -> live state as netifd last told it
 		sessions: {},
-		// section -> the time it was last seen down, and the queue of the same
-		// in the order they went down.
+		// section name -> { auto } for sections present in /etc/config/network
+		written: {},
+		ghosts: [],
+		carrierMac: '',
 		downQueue: [],
 		downHead: 0,
 		events: 0,
 		redials: 0,
-		lastPassMs: 0,
-		lastPassAt: 0
+		lastPassAt: 0,
+		lastPassMs: 0
 	};
 };
 
-/** Whether this interface name belongs to this pool. */
+/** Whether this interface name is one of this pool's members. */
 export function owns(st, name) {
-	let one = st.pool;
-
-	if (length(name) != length(one.prefix) + 5)
+	let vlan = vlanOfSection(st.pool.prefix, name);
+	if (vlan === null)
 		return false;
 
-	if (substr(name, 0, length(one.prefix)) != one.prefix)
-		return false;
+	for (let member in st.pool.members) {
+		if (member.vlan == vlan)
+			return true;
+	}
 
-	let tail = substr(name, length(one.prefix));
-	if (!match(tail, /^[0-9]{5}$/))
-		return false;
-
-	let seq = int(tail);
-	return seq >= one.seqFrom && seq <= one.seqTo;
+	return false;
 };
 
 function markDown(st, section, now) {
@@ -71,14 +71,14 @@ function markDown(st, section, now) {
 	push(st.downQueue, { section: section, since: now });
 };
 
-/** Fold one interface's state into the table. */
+/** Fold one dumped interface's state into the table. */
 export function observe(st, entry, now) {
 	if (!owns(st, entry.name))
 		return false;
 
 	let session = st.sessions[entry.name];
 	if (!session) {
-		session = { section: entry.name, up: false, pending: false, since: 0, downSince: 0 };
+		session = { section: entry.name, up: false, pending: false, since: 0, downSince: 0, redials: 0 };
 		st.sessions[entry.name] = session;
 	}
 
@@ -86,6 +86,7 @@ export function observe(st, entry, now) {
 	session.errorCode = entry.errorCode;
 	session.ipv4 = entry.ipv4;
 	session.table = entry.table;
+	session.autostart = entry.autostart !== false;
 
 	if (entry.up === true) {
 		if (!session.up)
@@ -96,22 +97,20 @@ export function observe(st, entry, now) {
 	}
 
 	session.up = false;
-	// A session that is dialling is not a session that is down. Every pool has
-	// some of them at any moment, and a watchdog that redialled them would be
-	// interrupting exactly the thing it is trying to cause.
-	if (!session.pending)
+
+	// A session that is dialling is not down, and one somebody disabled is
+	// not either - the watchdog redialling a stopped session would be undoing
+	// the one per-member state a person can set.
+	if (!session.pending && session.autostart)
 		markDown(st, entry.name, now);
 
 	return true;
 };
 
 /**
- * One netifd event.
- *
- * Only the fact and the name are taken from it; everything else is left to the
- * next dump. `ifup` carries no address yet in some protocols and `ifdown`
- * carries nothing at all, and a table built from half-filled events would
- * disagree with the router in ways nobody could explain.
+ * One netifd event. Only the fact and the name are taken from it; everything
+ * else is left to the next dump - `ifup` carries no address yet in some
+ * protocols and `ifdown` carries nothing at all.
  */
 export function event(st, action, name, now) {
 	if (!owns(st, name))
@@ -121,7 +120,7 @@ export function event(st, action, name, now) {
 
 	let session = st.sessions[name];
 	if (!session) {
-		session = { section: name, up: false, pending: false, since: 0, downSince: 0 };
+		session = { section: name, up: false, pending: false, since: 0, downSince: 0, redials: 0 };
 		st.sessions[name] = session;
 	}
 
@@ -136,7 +135,8 @@ export function event(st, action, name, now) {
 	if (action == 'ifdown') {
 		session.up = false;
 		session.pending = false;
-		markDown(st, name, now);
+		if (session.autostart !== false)
+			markDown(st, name, now);
 		return true;
 	}
 
@@ -145,11 +145,52 @@ export function event(st, action, name, now) {
 };
 
 /**
- * The sessions to redial now, at most `limit` of them.
+ * Take the freshly read `{ written, ghosts }` from sections.stateOf().
  *
- * Front of the queue first, which is longest-down first. An entry whose session
- * has come back, or which has been superseded by a later one for the same
- * section, is dropped as it is reached - which is what makes recovery free.
+ * Ghosts are reported once per appearance rather than every pass: a warning
+ * that repeats every five seconds is a warning nobody reads.
+ */
+export function observeWritten(st, state) {
+	for (let name in state.ghosts) {
+		if (!(name in st.ghosts)) {
+			err(sprintf('section %s looks like pool %s but is in no record; leaving it alone',
+				name, st.pool.id));
+		}
+	}
+
+	st.written = state.written;
+	st.ghosts = state.ghosts;
+};
+
+/** The status machine. One spelling, quoted by rows and by the summary. */
+export function statusOf(st, section) {
+	let written = st.written[section];
+	if (!written)
+		return 'unwritten';
+
+	if (!written.auto)
+		return 'stopped';
+
+	let session = st.sessions[section];
+	if (!session)
+		return 'down';
+
+	if (session.up && session.ipv4)
+		return 'up';
+
+	if (length(session.errorCode || ''))
+		return 'error';
+
+	if (session.pending)
+		return 'dialing';
+
+	return 'down';
+};
+
+/**
+ * The members to redial now, at most `limit` of them, longest down first.
+ * An entry whose session has come back, been disabled, or been superseded by
+ * a later entry for the same section is dropped as it is reached.
  */
 export function dueForRedial(st, after, limit, now) {
 	if (after <= 0)
@@ -161,9 +202,15 @@ export function dueForRedial(st, after, limit, now) {
 		let entry = st.downQueue[st.downHead];
 		let session = st.sessions[entry.section];
 
-		// Stale: it came back up, or it went down again later and was queued
-		// again with the newer time.
-		if (!session || !session.downSince || session.downSince != entry.since) {
+		// Stale: it came back up, went down again later, or is stopped now.
+		if (!session || !session.downSince || session.downSince != entry.since ||
+		    session.autostart === false) {
+			st.downHead = st.downHead + 1;
+			continue;
+		}
+
+		// A section no longer written is not netifd's to redial.
+		if (!exists(st.written, entry.section)) {
 			st.downHead = st.downHead + 1;
 			continue;
 		}
@@ -187,12 +234,8 @@ export function dueForRedial(st, after, limit, now) {
 };
 
 /**
- * Put a redialled session back at the end of the queue.
- *
- * Called after the redial is asked for, with the current time, so a session
- * that does not come back is tried again one `redial_after` later rather than
- * on every pass. Without this a permanently dead account would be redialled as
- * fast as the watchdog runs, for ever.
+ * Put a redialled session back at the end of the queue, so one that does not
+ * come back is tried again one `redial_after` later rather than every pass.
  */
 export function redialled(st, section, now) {
 	let session = st.sessions[section];
@@ -200,93 +243,70 @@ export function redialled(st, section, now) {
 		return;
 
 	st.redials = st.redials + 1;
+	session.redials = (session.redials ? session.redials : 0) + 1;
 	session.downSince = now;
 	push(st.downQueue, { section: section, since: now });
 };
 
-/** How the pool looks, for a table or a summary. */
-export function summary(st) {
-	let up = 0;
-	let dialing = 0;
-	let down = 0;
-	let error = 0;
+/** Status counts for one pool, every member counted exactly once. */
+export function tally(st) {
+	let out = { members: length(st.pool.members), up: 0, dialing: 0, down: 0, error: 0, stopped: 0, unwritten: 0 };
 
-	for (let name in st.sessions) {
-		let session = st.sessions[name];
-		if (session.up)
-			up++;
-		else if (session.pending)
-			dialing++;
-		else if (session.errorCode && length(session.errorCode))
-			error++;
-		else
-			down++;
+	for (let member in st.pool.members) {
+		let status = statusOf(st, sectionFor(st.pool.prefix, member.vlan));
+		out[status] = out[status] + 1;
 	}
 
-	return {
-		id: st.pool.id,
-		prefix: st.pool.prefix,
-		carrier: st.pool.carrier,
-		count: st.pool.count,
-		// The range, so that anything offering to extend a pool can say where
-		// the next session would be numbered rather than making somebody work
-		// it out from the count.
-		seqFrom: st.pool.seqFrom,
-		seqTo: st.pool.seqTo,
-		tableBase: st.pool.tableBase,
-		known: length(st.sessions),
-		up: up,
-		dialing: dialing,
-		down: down,
-		error: error,
-		redials: st.redials,
-		events: st.events,
-		lastPassAt: st.lastPassAt,
-		lastPassMs: st.lastPassMs
-	};
+	return out;
 };
 
 /**
- * One row per session, optionally only the ones worth looking at.
+ * One row per member, from the record, so the table never loses a row.
  *
- * `scope` defaults to attention, and that is deliberate rather than lazy: five
- * thousand rows of "up" is not something anybody reads, and the question being
- * asked of this table is almost always "what is wrong".
+ * `scope`: all, up, down (anything not up), attention (error and unwritten).
+ * `rates` is the per-device bytes-per-second map from counters.rate().
  */
-export function rows(st, scope, limit) {
+export function rows(st, scope, limit, rates, now) {
 	let out = [];
-	let wanted = length(scope) ? scope : 'attention';
+	let wanted = length(scope) ? scope : 'all';
+	let one = st.pool;
 
-	for (let seq = st.pool.seqFrom; seq <= st.pool.seqTo; seq++) {
+	for (let member in one.members) {
 		if (length(out) >= limit)
 			break;
 
-		let name = sectionName(st.pool.prefix, seq);
-		let session = st.sessions[name];
+		let section = sectionFor(one.prefix, member.vlan);
+		let status = statusOf(st, section);
 
-		let state = 'unknown';
-		if (session)
-			state = session.up ? 'up' : (session.pending ? 'dialing' : (length(session.errorCode || '') ? 'error' : 'down'));
+		if (wanted == 'attention' && !(status in [ 'error', 'unwritten' ]))
+			continue;
+		if (wanted == 'up' && status != 'up')
+			continue;
+		if (wanted == 'down' && status == 'up')
+			continue;
 
-		if (wanted == 'attention' && (state == 'up' || state == 'dialing'))
-			continue;
-		if (wanted == 'up' && state != 'up')
-			continue;
-		if (wanted == 'down' && state == 'up')
-			continue;
+		let session = st.sessions[section];
+		let written = st.written[section];
+		let rate = rates && exists(rates, section) ? rates[section] : null;
 
 		push(out, {
-			section: name,
-			seq: seq,
-			state: state,
-			// Deliberately no username and never a password. The module holds the
-			// account list; this side only ever knew the credentials for as long
-			// as it took to write them into uci.
-			ipv4: session && session.ipv4 ? session.ipv4.addr : '',
-			table: session ? session.table : null,
-			since: session ? session.since : 0,
-			downSince: session ? session.downSince : 0,
-			error: session ? (session.errorCode || '') : ''
+			pool: one.id,
+			section: section,
+			vlan: member.vlan,
+			device: deviceFor(one.carrier, member.vlan),
+			username: one.mode == 'single' ? member.username : one.username,
+			mac: (one.macMode == 'auto' && member.vlan >= 1 && length(st.carrierMac))
+				? macFor(st.carrierMac, one.id, member.vlan)
+				: '',
+			status: status,
+			autostart: written ? written.auto : true,
+			uptime: (session && session.up) ? (now - session.since) : 0,
+			ip: (session && session.ipv4) ? session.ipv4.addr : '',
+			table: tableFor(one.tableBase, member.vlan),
+			errorCode: session ? (session.errorCode || '') : '',
+			rxBps: rate ? rate.rxBps : 0,
+			txBps: rate ? rate.txBps : 0,
+			redials: (session && session.redials) ? session.redials : 0
 		});
 	}
 
@@ -295,16 +315,21 @@ export function rows(st, scope, limit) {
 
 /** Log one line per pass, at debug, so a busy router can be watched. */
 export function trace(st) {
-	let one = summary(st);
-	debug(sprintf('pool %s: %d up, %d dialing, %d down, %d error',
-		one.id, one.up, one.dialing, one.down, one.error));
+	let counts = tally(st);
+	debug(sprintf('pool %s: %d up, %d dialing, %d down, %d error, %d stopped, %d unwritten',
+		st.pool.id, counts.up, counts.dialing, counts.down, counts.error, counts.stopped, counts.unwritten));
 };
 
 /** And one line at notice when a redial actually happens. */
-export function announce(st, sections) {
-	if (!length(sections))
+export function announce(st, names) {
+	if (!length(names))
 		return;
 
 	notice(sprintf('pool %s: redialling %d session(s) that have been down too long, starting with %s',
-		st.pool.id, length(sections), sections[0]));
+		st.pool.id, length(names), names[0]));
+};
+
+/** The kernel device a member's counters appear under. */
+export function counterDevice(one, vlan) {
+	return netdevFor(one.prefix, vlan);
 };

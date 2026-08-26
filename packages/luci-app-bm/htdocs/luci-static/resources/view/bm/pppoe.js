@@ -6,161 +6,44 @@
 'require bm.api as api';
 
 /*
- * The PPPoE pools, and the sessions in them.
+ * The PPPoE pools: one card per pool, one row per VLAN, and nothing hidden.
  *
- * The session table opens on "Needs attention" and that is deliberate rather
- * than lazy: five thousand rows saying "up" is not something anybody reads,
- * and the question being asked of this table is almost always "what is wrong".
- * The daemon takes the same view - `scope` defaults to attention on its side
- * too - so the default costs one filter on the router rather than five
- * thousand rows over the wire.
+ * The table under each pool is driven by the pool's record, not by what
+ * netifd happens to mention: a member whose section is missing from
+ * /etc/config/network is a row saying "unwritten", not a row that vanished.
+ * That is the whole lesson of the old model, where configuration that could
+ * not be seen was configuration nobody could question.
  *
- * Pools are created here, credentials and all, and that needs a word about how.
- * A password must never become an argument to a process - /proc/<pid>/cmdline
- * is world-readable - which is why the module writes a 0600 file over SSH and
- * passes only its path. A ubus call from this page is not a command line: it
- * travels over a unix socket and arrives at the daemon as a parsed object. So
- * the credentials go inline, to `pool_add`, and the ACL grants that method and
- * not `pool_create` - which names a file for the daemon to read and unlink as
- * root, and would hand a web session an arbitrary delete in /tmp.
- *
- * The list is sent in chunks of CHUNK because a ubus message has a size ceiling
- * and one call writing five thousand sections would hold the daemon's event
- * loop for the whole of it. The pool exists from the first chunk onwards, so a
- * browser that goes away half way leaves a smaller pool rather than wreckage:
- * the record covers what was written, Delete removes it, and Add sessions
- * carries on from where it stopped.
+ * Everything here goes through bm.pppoe. Creating and editing both run the
+ * same two steps - pool_check first, findings shown, then pool_add or
+ * pool_set - so the refusal a person reads in this page is the same sentence
+ * the app and the CLI would have shown them. Credentials travel inline over
+ * the ubus socket, which never puts them in any command line; the ACL grants
+ * pool_add and pool_set and not pool_create, which names files for the daemon
+ * to read and unlink as root.
  */
 
-/** What the daemon will accept in one action call. */
-const BATCH_LIMIT = 500;
+const ACTION_LIMIT = 500;
 
-/** What it will accept in one pool_add or pool_append. INLINE_ACCOUNTS there. */
-const CHUNK = 200;
-
-/** The most parse errors worth printing before the point has been made. */
-const SHOWN_ERRORS = 5;
-
-const SCOPES = [
-	['attention', _('Needs attention')],
-	['down', _('Not up')],
-	['up', _('Up')],
-	['all', _('Everything')]
+const MODES = [
+	['multi', _('Shared account')],
+	['single', _('One account per VLAN')]
 ];
 
 const state = {
-	scope: 'attention',
-	pool: '',
-	chosen: {},
-	shown: []
+	info: null,
+	rows: [],
+	rowsError: null,
+	limitHit: false
 };
 
-function stateDot(name) {
-	if (name === 'up') return api.dot('ok', _('up'));
-	if (name === 'dialing') return api.dot('busy', _('dialing'));
-	if (name === 'error') return api.dot('bad', _('error'));
-	if (name === 'down') return api.dot('idle', _('down'));
-	return api.dot('idle', _('not seen yet'));
-}
-
-function chosenSections() {
-	return Object.keys(state.chosen).filter(name => state.chosen[name]);
-}
-
-/*
- * The account list, read exactly as the app reads it.
- *
- * Deliberately the same rules as parsePppoeList in the module - tab, comma,
- * semicolon, pipe or whitespace, an optional third VLAN field, # for a comment -
- * because the file somebody pastes here is the file they were given, and a list
- * that works in one place and not the other is a bug report nobody can act on.
- */
-function splitLine(line) {
-	if (line.indexOf('\t') >= 0) return line.split(/\t+/).map(part => part.trim());
-	if (line.indexOf(',') >= 0) return line.split(',').map(part => part.trim());
-	if (line.indexOf(';') >= 0) return line.split(';').map(part => part.trim());
-	if (line.indexOf('|') >= 0) return line.split('|').map(part => part.trim());
-	if (/\s/.test(line)) return line.trim().split(/\s+/);
-	return null;
-}
-
-function parseAccounts(text) {
-	const rows = [];
-	const errors = [];
-	const duplicates = [];
-	const seen = {};
-
-	String(text ?? '').split(/\r?\n/).forEach(function(raw, offset) {
-		const line = raw.trim();
-		if (!line.length || line.charAt(0) === '#')
-			return;
-
-		const fields = splitLine(line);
-		if (!fields || fields.length < 2 || fields.length > 3) {
-			errors.push(_('line %d: expected a username and a password, with an optional VLAN').format(offset + 1));
-			return;
-		}
-
-		const user = fields[0] ?? '';
-		const pass = fields[1] ?? '';
-		const vlanText = fields[2] ?? '';
-
-		if (!user.length || user.length > 64) {
-			errors.push(_('line %d: the username has to be 1 to 64 characters').format(offset + 1));
-			return;
-		}
-		if (!pass.length || pass.length > 64) {
-			errors.push(_('line %d: the password has to be 1 to 64 characters').format(offset + 1));
-			return;
-		}
-
-		const row = { user: user, pass: pass };
-
-		if (vlanText.length) {
-			const vlan = Number(vlanText);
-			if (!Number.isInteger(vlan) || vlan < 1 || vlan > 4094) {
-				errors.push(_('line %d: the VLAN has to be a whole number from 1 to 4094').format(offset + 1));
-				return;
-			}
-			row.vlan = vlan;
-		}
-
-		if (seen[user] && duplicates.indexOf(user) < 0)
-			duplicates.push(user);
-		seen[user] = true;
-
-		rows.push(row);
-	});
-
-	return { rows: rows, errors: errors, duplicates: duplicates };
-}
-
-/**
- * Send everything after the first chunk.
- *
- * The first chunk is the caller's call - a create, or the first append - and
- * every chunk after it has the same shape, so this is written once and used by
- * both. It reports as it goes rather than at the end: five thousand accounts is
- * twenty-five calls, and a page that says nothing for that long looks stuck.
- */
-function appendRest(id, rows, from, done, report) {
-	if (from >= rows.length)
-		return Promise.resolve({ ok: true, done: done });
-
-	return api.ask(api.calls.poolAppend, { id: id, accounts: rows.slice(from, from + CHUNK) })
-		.then(function(result) {
-			if (!result.ok)
-				return { ok: false, reason: result.error, done: done };
-
-			const data = result.data ?? {};
-			if (data.ok === false)
-				return { ok: false, reason: data.reason ?? _('The router would not say why.'), done: done };
-
-			const total = done + (data.created | 0);
-			report(total, rows.length);
-
-			return appendRest(id, rows, from + CHUNK, total, report);
-		});
+function stateDot(status) {
+	if (status === 'up') return api.dot('ok', _('up'));
+	if (status === 'dialing') return api.dot('busy', _('dialing'));
+	if (status === 'error') return api.dot('bad', _('error'));
+	if (status === 'unwritten') return api.dot('bad', _('unwritten'));
+	if (status === 'stopped') return api.dot('idle', _('stopped'));
+	return api.dot('idle', _('down'));
 }
 
 /** One labelled row of a modal form, in LuCI's own shape. */
@@ -174,24 +57,180 @@ function field(label, node, hint) {
 	]);
 }
 
-function textInput(value, placeholder, width) {
+function textInput(value, placeholder, width, disabled) {
 	return E('input', {
 		'type': 'text',
 		'class': 'cbi-input-text',
 		'value': value ?? '',
 		'placeholder': placeholder ?? '',
+		'disabled': disabled ? '' : null,
 		'style': 'width:%s'.format(width ?? '14em')
 	});
 }
 
+function passwordInput(placeholder) {
+	return E('input', {
+		'type': 'password',
+		'class': 'cbi-input-password',
+		'value': '',
+		'placeholder': placeholder ?? '',
+		'style': 'width:14em'
+	});
+}
+
+function checkInput(checked) {
+	return E('input', { 'type': 'checkbox', 'checked': checked ? '' : null });
+}
+
+function selectInput(options, value) {
+	return E('select', { 'class': 'cbi-input-select' }, options.map(entry =>
+		E('option', { 'value': entry[0], 'selected': entry[0] === value ? '' : null }, entry[1])));
+}
+
+function groupHeading(text) {
+	return E('h4', { 'style': 'margin:1.2em 0 .4em' }, text);
+}
+
+function riskNote(text) {
+	return E('div', { 'class': 'alert-message warning', 'style': 'margin:.5em 0' }, text);
+}
+
 /** A whole number from a field, or null when it is not one. */
 function whole(node, low, high) {
-	const raw = node.value.trim();
+	const raw = String(node.value ?? '').trim();
 	if (!/^[0-9]+$/.test(raw))
 		return null;
 
 	const value = Number(raw);
 	return (value >= low && value <= high) ? value : null;
+}
+
+/*
+ * `101-150,200,0` -> [0, 101..150, 200]. The multi-mode member list: ranges
+ * and single numbers, commas or whitespace between them, 0 meaning untagged.
+ */
+function parseVlans(text) {
+	const vlans = [];
+	const errors = [];
+	const seen = {};
+
+	String(text ?? '').split(/[\s,]+/).forEach(function(token) {
+		if (!token.length)
+			return;
+
+		const range = token.match(/^([0-9]{1,4})-([0-9]{1,4})$/);
+		const single = token.match(/^[0-9]{1,4}$/);
+
+		let from, to;
+		if (range) {
+			from = Number(range[1]);
+			to = Number(range[2]);
+		}
+		else if (single) {
+			from = to = Number(token);
+		}
+		else {
+			errors.push(_('"%s" is not a VLAN or a range like 101-150').format(token));
+			return;
+		}
+
+		if (to < from || from < 0 || to > 4094) {
+			errors.push(_('"%s" is outside 0-4094').format(token));
+			return;
+		}
+
+		for (let vlan = from; vlan <= to; vlan++) {
+			if (seen[vlan]) {
+				errors.push(_('VLAN %d appears twice').format(vlan));
+				return;
+			}
+			seen[vlan] = true;
+			vlans.push(vlan);
+		}
+	});
+
+	return { vlans: vlans, errors: errors };
+}
+
+/*
+ * One member per line: `vlan, username, password`, separated by a tab, a
+ * comma, a semicolon, a pipe or spaces; `#` starts a comment. The password
+ * may be left empty for a member the pool already has - it keeps its stored
+ * one - which is what lets an edit change the list without retyping secrets.
+ */
+function splitLine(line) {
+	if (line.indexOf('\t') >= 0) return line.split(/\t+/).map(part => part.trim());
+	if (line.indexOf(',') >= 0) return line.split(',').map(part => part.trim());
+	if (line.indexOf(';') >= 0) return line.split(';').map(part => part.trim());
+	if (line.indexOf('|') >= 0) return line.split('|').map(part => part.trim());
+	return line.trim().split(/\s+/);
+}
+
+function parseMembers(text) {
+	const members = [];
+	const errors = [];
+	const seen = {};
+
+	String(text ?? '').split(/\r?\n/).forEach(function(raw, offset) {
+		const line = raw.trim();
+		if (!line.length || line.charAt(0) === '#')
+			return;
+
+		const fields = splitLine(line);
+		if (fields.length < 2 || fields.length > 3) {
+			errors.push(_('line %d: expected VLAN, username and password').format(offset + 1));
+			return;
+		}
+
+		const vlan = Number(fields[0]);
+		if (!Number.isInteger(vlan) || vlan < 0 || vlan > 4094) {
+			errors.push(_('line %d: the VLAN has to be 0 to 4094').format(offset + 1));
+			return;
+		}
+		if (seen[vlan]) {
+			errors.push(_('line %d: VLAN %d appears twice').format(offset + 1, vlan));
+			return;
+		}
+		seen[vlan] = true;
+
+		const member = { vlan: vlan, user: fields[1] ?? '' };
+		if (fields.length > 2 && fields[2].length)
+			member.pass = fields[2];
+
+		members.push(member);
+	});
+
+	return { members: members, errors: errors };
+}
+
+/** [0, 101, 102, 103, 200] -> "0,101-103,200", for prefilled edit forms. */
+function compressVlans(vlans) {
+	const sorted = vlans.slice().sort((a, b) => a - b);
+	const parts = [];
+
+	for (let i = 0; i < sorted.length; i++) {
+		let end = i;
+		while (end + 1 < sorted.length && sorted[end + 1] === sorted[end] + 1)
+			end++;
+
+		parts.push(end > i ? '%d-%d'.format(sorted[i], sorted[end]) : '%d'.format(sorted[i]));
+		i = end;
+	}
+
+	return parts.join(',');
+}
+
+/** The findings list, exactly as the daemon worded it. */
+function findingsList(findings) {
+	const colours = { error: '#e04b4b', warning: '#ffb300', info: '#888', pass: '#37c837' };
+
+	return E('div', { 'style': 'max-height:18em;overflow:auto;margin:.5em 0' },
+		(findings ?? []).map(one => E('div', { 'style': 'margin:.35em 0' }, [
+			E('strong', { 'style': 'color:%s;margin-right:.5em'.format(colours[one.level] ?? '#888') },
+				(one.level ?? '').toUpperCase()),
+			one.label ?? '',
+			one.detail ? E('div', { 'style': 'opacity:.7;font-size:.92em;margin-left:.5em' }, one.detail) : ''
+		])));
 }
 
 return view.extend({
@@ -211,33 +250,35 @@ return view.extend({
 		if (!api.has(first.data, 'pppoe')) {
 			return E([], [banner, api.notice(
 				_('bm-pppoe-pool is not installed'),
-				_('Without it this router has no pools of its own. The Bored Manager app can still dial a pool here over SSH - it writes the sections a chunk at a time, so a pool of thousands takes proportionally longer to create, and sessions are noticed at the next poll rather than the moment netifd reports them.'),
-				E('p', {}, _('Install it from Router packages in the app, or with "apk add bm-pppoe-pool" on this router.')))]);
+				_('Without it this router dials no pools. Install it from Router packages in the Bored Manager app, or with "apk add bm-pppoe-pool" on this router.'))]);
 		}
 
-		const pools = E('div', {});
-		const sessions = E('div', {});
-		const controls = E('div', { 'style': 'margin:.5em 0' });
-
+		const content = E('div', {});
 		const self = this;
 
 		function refresh() {
 			return Promise.all([
 				api.ask(api.calls.poolInfo),
-				api.ask(api.calls.poolSessions, { id: state.pool, scope: state.scope })
+				api.ask(api.calls.poolSessions, { id: '', scope: 'all' })
 			]).then(answers => {
-				self.paintPools(pools, answers[0]);
-				// The router's own clock, taken from the same reply the pools
-				// came from, so an age is never worked out against a browser
-				// clock that disagrees with the router's.
-				self.paintSessions(sessions, answers[1],
-					answers[0].ok ? api.routerNow(answers[0].data) : 0);
+				if (answers[0].ok) {
+					state.info = answers[0].data;
+				}
+
+				if (answers[1].ok) {
+					state.rows = answers[1].data.sessions ?? [];
+					state.limitHit = state.rows.length >= (answers[1].data.limit | 0);
+					state.rowsError = null;
+				}
+				else {
+					state.rowsError = answers[1].error;
+				}
+
+				self.paint(content);
 			});
 		}
 
 		self.refresh = refresh;
-
-		dom.content(controls, self.controlRow(refresh));
 
 		poll.add(refresh, 5);
 		refresh();
@@ -246,81 +287,88 @@ return view.extend({
 			banner,
 			E('h2', {}, _('PPPoE Pools')),
 			E('div', { 'class': 'cbi-map-descr' },
-				_('Pools this router dials by itself. Sessions are watched through netifd events, so a line that drops is noticed when it drops.')),
-			pools,
-			controls,
-			sessions
+				_('A pool is one carrier and a list of VLANs, each dialling its own PPPoE session with its own routing table. Everything about it - interfaces, tagged devices, MAC addresses, the firewall zone - is derived from the pool by the router itself.')),
+			content
 		]);
 	},
 
-	controlRow(refresh) {
-		const self = this;
+	paint(node) {
+		const info = state.info;
 
-		const scope = E('select', {
-			'class': 'cbi-input-select',
-			'change': function(ev) {
-				state.scope = ev.target.value;
-				state.chosen = {};
-				refresh();
-			}
-		}, SCOPES.map(entry => E('option', {
-			'value': entry[0],
-			'selected': entry[0] === state.scope ? '' : null
-		}, entry[1])));
-
-		function batch(action, label, confirmText) {
-			return E('button', {
-				'class': 'btn cbi-button-action',
-				'click': ui.createHandlerFn(self, function() {
-					const names = chosenSections();
-
-					if (!names.length) {
-						ui.addNotification(null, E('p', {}, _('Tick the sessions to act on first.')), 'warning');
-						return Promise.resolve();
-					}
-					if (names.length > BATCH_LIMIT) {
-						ui.addNotification(null, E('p', {},
-							_('At most %d sessions in one call; %d are ticked.').format(BATCH_LIMIT, names.length)), 'warning');
-						return Promise.resolve();
-					}
-					if (confirmText && !confirm(confirmText.format(names.length)))
-						return Promise.resolve();
-
-					return api.run(api.calls.poolAction, { action: action, sections: names },
-						_('Asked the router to %s %d session(s).').format(label, names.length))
-						.then(() => { state.chosen = {}; return refresh(); });
-				})
-			}, label);
+		if (!info) {
+			dom.content(node, E('p', { 'class': 'spinning' }, _('Asking the router...')));
+			return;
 		}
 
-		this.counter = E('span', { 'style': 'opacity:.75;margin:0 1em' }, '');
+		if ((info.apiVersion | 0) < 2) {
+			dom.content(node, api.notice(
+				_('bm-pppoe-pool %s is too old for this page').format(info.release ?? '?'),
+				_('This page drives the pool-of-VLANs model, which arrived with 2.0.0 (API 2). Update the router packages from the Bored Manager app, or with "apk add bm-pppoe-pool" against a 2.x feed.')));
+			return;
+		}
 
-		return E('div', {}, [
-			E('label', { 'style': 'margin-right:.5em' }, _('Show:')),
-			scope,
-			' ',
+		const pools = info.pools ?? [];
+		const legacy = info.legacy ?? [];
+		const tally = { members: 0, up: 0, dialing: 0, down: 0, error: 0, stopped: 0, unwritten: 0 };
+
+		for (const one of pools) {
+			tally.members += one.members | 0;
+			tally.up += one.up | 0;
+			tally.dialing += one.dialing | 0;
+			tally.down += one.down | 0;
+			tally.error += one.error | 0;
+			tally.stopped += one.stopped | 0;
+			tally.unwritten += one.unwritten | 0;
+		}
+
+		const blocks = [
+			api.figures([
+				[_('Pools'), '%d'.format(pools.length)],
+				[_('Interfaces'), '%d'.format(tally.members)],
+				[_('Up'), '%d'.format(tally.up)],
+				[_('Dialing'), '%d'.format(tally.dialing)],
+				[_('Error'), '%d'.format(tally.error)],
+				[_('Stopped'), '%d'.format(tally.stopped)],
+				[_('Unwritten'), '%d'.format(tally.unwritten)]
+			]),
+			this.toolbar()
+		];
+
+		if (state.rowsError)
+			blocks.push(E('p', { 'class': 'alert-message warning' }, state.rowsError));
+
+		if (legacy.length)
+			blocks.push(this.legacyBlock(legacy));
+
+		if (!pools.length) {
+			blocks.push(api.notice(
+				_('This router has no pools yet'),
+				_('Create one with the button above, from the Bored Manager app, or with "bmpppoe create" at a console.')));
+		}
+
+		for (const pool of pools)
+			blocks.push(this.poolCard(pool));
+
+		if (state.limitHit) {
+			blocks.push(E('p', { 'class': 'alert-message warning' },
+				_('The router capped the row list at 500, so the largest pools are shown incomplete here. The Bored Manager app pages through them.')));
+		}
+
+		blocks.push(this.settingsBlock(info.settings ?? {}));
+
+		dom.content(node, blocks);
+	},
+
+	toolbar() {
+		const self = this;
+
+		return E('div', { 'style': 'margin:.5em 0' }, [
 			E('button', {
-				'class': 'btn cbi-button-neutral',
+				'class': 'btn cbi-button-add',
 				'click': ui.createHandlerFn(self, function() {
-					for (const name of state.shown)
-						state.chosen[name] = true;
-					return refresh();
+					return self.openEditor(null);
 				})
-			}, _('Tick all shown')),
-			' ',
-			E('button', {
-				'class': 'btn cbi-button-neutral',
-				'click': ui.createHandlerFn(self, function() {
-					state.chosen = {};
-					return refresh();
-				})
-			}, _('Clear')),
-			this.counter,
-			batch('up', _('Start'), null),
-			' ',
-			batch('down', _('Stop'), _('Stop %d session(s)? Anybody using them loses their connection.')),
-			' ',
-			batch('redial', _('Redial'), _('Redial %d session(s)? Each one drops and dials again.')),
+			}, _('Create a pool')),
 			' ',
 			E('button', {
 				'class': 'btn cbi-button-neutral',
@@ -328,357 +376,517 @@ return view.extend({
 					return api.run(api.calls.poolReconcile, {}, _('The router has re-read netifd and the counters.'))
 						.then(() => self.refresh());
 				})
-			}, _('Refresh from netifd')),
-			' ',
-			E('button', {
-				'class': 'btn cbi-button-add',
-				'click': ui.createHandlerFn(self, function() {
-					return self.askCreate(refresh);
-				})
-			}, _('Create a pool'))
+			}, _('Refresh from netifd'))
 		]);
 	},
 
-	/**
-	 * The account textarea, its counter, and the block that reports progress.
-	 *
-	 * Shared by create and append because they ask for the same thing in the
-	 * same way, and the counter under the box is the cheapest possible answer
-	 * to "did my paste actually arrive" - which is the question somebody has
-	 * after pasting four thousand lines into a text box.
-	 */
-	accountBox() {
-		const count = E('div', { 'class': 'cbi-value-description' }, _('Nothing pasted yet.'));
-
-		const box = E('textarea', {
-			'class': 'cbi-input-textarea',
-			'rows': '10',
-			'style': 'width:100%;font-family:monospace',
-			'placeholder': 'user@isp\tpassword\nuser2@isp\tpassword2',
-			'input': function() {
-				const parsed = parseAccounts(box.value);
-				dom.content(count, parsed.errors.length
-					? _('%d account(s), %d line(s) that cannot be read').format(parsed.rows.length, parsed.errors.length)
-					: _('%d account(s)').format(parsed.rows.length));
-			}
-		});
-
-		return { box: box, count: count };
-	},
-
-	/**
-	 * Run a chunked send behind a modal, and report either way.
-	 *
-	 * The buttons go away for the duration rather than being disabled: a create
-	 * that is half done cannot be cancelled from here in any meaningful sense -
-	 * the sessions already written are written - so offering a Cancel would be
-	 * offering something this page cannot do.
-	 */
-	sendAll(rows, buttons, status, firstCall, firstArgs, id, refresh) {
-		function report(done, total) {
-			dom.content(status, E('p', {}, _('Written %d of %d...').format(done, total)));
-		}
-
-		dom.content(buttons, '');
-		report(0, rows.length);
-
-		return api.ask(firstCall, firstArgs).then(function(result) {
-			if (!result.ok)
-				return { ok: false, reason: result.error, done: 0 };
-
-			const data = result.data ?? {};
-			if (data.ok === false)
-				return { ok: false, reason: data.reason ?? _('The router would not say why.'), done: 0 };
-
-			const done = data.created | 0;
-			report(done, rows.length);
-
-			return appendRest(id, rows, CHUNK, done, report);
-		}).then(function(outcome) {
-			ui.hideModal();
-
-			if (outcome.ok) {
-				ui.addNotification(null, E('p', {},
-					_('%d session(s) written to pool %s. They are dialling now.').format(outcome.done, id)), 'info');
-			}
-			else if (outcome.done) {
-				ui.addNotification(null, E('p', {},
-					_('%d session(s) were written and then the router stopped: %s').format(outcome.done, outcome.reason)), 'warning');
-			}
-			else {
-				ui.addNotification(null, E('p', {}, outcome.reason), 'warning');
-			}
-
-			return refresh();
-		});
-	},
-
-	/** New pool: everything about it, and the accounts that fill it. */
-	askCreate(refresh) {
-		const self = this;
-
-		const id = textInput('', 'ppp', '10em');
-		const prefix = textInput('', 'ppp', '6em');
-		const carrier = textInput('', 'eth1', '10em');
-		const vlan = textInput('0', '0', '6em');
-		const seqFrom = textInput('1', '1', '8em');
-		const tableBase = textInput('1000', '1000', '8em');
-
-		const accounts = self.accountBox();
-		const status = E('div', { 'style': 'margin:.5em 0' });
-		const buttons = E('div', { 'class': 'right' });
-
-		function submit() {
-			const parsed = parseAccounts(accounts.box.value);
-
-			if (!parsed.rows.length) {
-				dom.content(status, E('p', { 'class': 'alert-message warning' },
-					_('Paste at least one account. One line each: username, then password, separated by a tab, a comma, a semicolon, a pipe or a space.')));
-				return Promise.resolve();
-			}
-
-			if (parsed.errors.length) {
-				dom.content(status, E('div', { 'class': 'alert-message warning' }, [
-					E('p', {}, _('%d line(s) cannot be read, so nothing was created:').format(parsed.errors.length)),
-					E('ul', {}, parsed.errors.slice(0, SHOWN_ERRORS).map(text => E('li', {}, text))),
-					parsed.errors.length > SHOWN_ERRORS
-						? E('p', {}, _('...and %d more.').format(parsed.errors.length - SHOWN_ERRORS))
-						: ''
-				]));
-				return Promise.resolve();
-			}
-
-			const seq = whole(seqFrom, 1, 99999);
-			const table = whole(tableBase, 1, 65535);
-			const tag = whole(vlan, 0, 4094);
-
-			if (seq === null || table === null || tag === null) {
-				dom.content(status, E('p', { 'class': 'alert-message warning' },
-					_('The first session number has to be 1 or more, the table base 1 to 65535, and the VLAN 0 to 4094. The VLAN may be 0, meaning none.')));
-				return Promise.resolve();
-			}
-
-			// The two ranges the daemon checks when it reads the record back.
-			// Said here because a create that writes a record the next read
-			// throws away is worse than a refusal: the interfaces exist and
-			// nothing is left that knows they are a pool.
-			if (seq + parsed.rows.length - 1 > 99999) {
-				dom.content(status, E('p', { 'class': 'alert-message warning' },
-					_('Starting at %d, %d accounts would run past session number 99999, and a session is named with five digits.').format(seq, parsed.rows.length)));
-				return Promise.resolve();
-			}
-
-			if (table + seq + parsed.rows.length - 1 > 65535) {
-				dom.content(status, E('p', { 'class': 'alert-message warning' },
-					_('A table base of %d plus session %d is past 65535, which is the highest routing table there is.').format(table, seq + parsed.rows.length - 1)));
-				return Promise.resolve();
-			}
-
-			if (parsed.duplicates.length) {
-				dom.content(status, E('p', {},
-					_('Note: %d username(s) appear more than once. That is allowed and the pool is being created anyway.').format(parsed.duplicates.length)));
-			}
-
-			return self.sendAll(parsed.rows, buttons, status, api.calls.poolAdd, {
-				id: id.value.trim(),
-				prefix: prefix.value.trim(),
-				carrier: carrier.value.trim(),
-				seq_from: seq,
-				table_base: table,
-				vlan: tag,
-				accounts: parsed.rows.slice(0, CHUNK)
-			}, id.value.trim(), refresh);
-		}
-
-		dom.content(buttons, [
-			E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Cancel')),
-			' ',
-			E('button', {
-				'class': 'btn cbi-button-add',
-				'click': ui.createHandlerFn(self, submit)
-			}, _('Create it'))
-		]);
-
-		ui.showModal(_('Create a PPPoE pool'), [
-			E('p', {}, _('One interface per account, dialled by netifd and watched by this router. The pool record is what makes deleting it later mean these interfaces and no others.')),
-			field(_('Pool name'), id, _('Lower case letters, digits and underscores. This is what you delete it by.')),
-			field(_('Interface prefix'), prefix, _('1 to 4 characters, starting with a letter. Sessions are named prefix00001 upwards.')),
-			field(_('Carrier device'), carrier, _('The physical device the sessions dial over, such as eth1.')),
-			field(_('VLAN'), vlan, _('0 for none. A VLAN device is created for it if one is needed.')),
-			field(_('First session number'), seqFrom, _('Where this pool\'s numbering starts, from 1. Two pools sharing a prefix must not overlap.')),
-			field(_('Routing table base'), tableBase, _('Each session gets its own table, counting up from here.')),
-			field(_('Accounts'), E('div', {}, [accounts.box, accounts.count]),
-				_('One per line: username, password, and optionally a VLAN. Separate them with a tab, a comma, a semicolon, a pipe or a space. Lines starting with # are ignored.')),
-			E('p', {}, _('The passwords go to the router over this login\'s connection and are written straight into the network configuration. They are never an argument to any command, on this router or anywhere else.')),
-			status,
-			buttons
-		]);
-
-		return Promise.resolve();
-	},
-
-	/** More sessions on the end of a pool that already exists. */
-	askAppend(pool, refresh) {
-		const self = this;
-
-		const accounts = self.accountBox();
-		const status = E('div', { 'style': 'margin:.5em 0' });
-		const buttons = E('div', { 'class': 'right' });
-
-		const next = (pool.seqTo | 0) + 1;
-
-		function submit() {
-			const parsed = parseAccounts(accounts.box.value);
-
-			if (!parsed.rows.length) {
-				dom.content(status, E('p', { 'class': 'alert-message warning' },
-					_('Paste at least one account.')));
-				return Promise.resolve();
-			}
-
-			if (parsed.errors.length) {
-				dom.content(status, E('div', { 'class': 'alert-message warning' }, [
-					E('p', {}, _('%d line(s) cannot be read, so nothing was added:').format(parsed.errors.length)),
-					E('ul', {}, parsed.errors.slice(0, SHOWN_ERRORS).map(text => E('li', {}, text)))
-				]));
-				return Promise.resolve();
-			}
-
-			if (next + parsed.rows.length - 1 > 99999) {
-				dom.content(status, E('p', { 'class': 'alert-message warning' },
-					_('Starting at %d, %d accounts would run past session number 99999, and a session is named with five digits.').format(next, parsed.rows.length)));
-				return Promise.resolve();
-			}
-
-			if ((pool.tableBase | 0) + next + parsed.rows.length - 1 > 65535) {
-				dom.content(status, E('p', { 'class': 'alert-message warning' },
-					_('This pool\'s table base plus session %d is past 65535, which is the highest routing table there is.').format(next + parsed.rows.length - 1)));
-				return Promise.resolve();
-			}
-
-			return self.sendAll(parsed.rows, buttons, status, api.calls.poolAppend, {
-				id: pool.id,
-				accounts: parsed.rows.slice(0, CHUNK)
-			}, pool.id, refresh);
-		}
-
-		dom.content(buttons, [
-			E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Cancel')),
-			' ',
-			E('button', {
-				'class': 'btn cbi-button-add',
-				'click': ui.createHandlerFn(self, submit)
-			}, _('Add them'))
-		]);
-
-		ui.showModal(_('Add sessions to %s').format(pool.id), [
-			E('p', {}, _('These go on the end of the pool, numbered from %s%05d. Everything else - the prefix, the carrier, the VLAN, the table base - is what the pool was created with.').format(pool.prefix, next)),
-			E('p', {}, _('Adding here rather than creating a second pool with the same prefix is the point: a second pool whose numbering overlaps would quietly rewrite this one\'s credentials, and the router refuses it for that reason.')),
-			field(_('Accounts'), E('div', {}, [accounts.box, accounts.count]),
-				_('One per line: username, password, and optionally a VLAN.')),
-			status,
-			buttons
-		]);
-
-		return Promise.resolve();
-	},
-
-	paintPools(node, result) {
-		if (!result.ok) {
-			dom.content(node, E('p', { 'class': 'alert-message warning' }, result.error));
-			return;
-		}
-
-		const info = result.data;
-		const list = info.pools ?? [];
-		const now = api.routerNow(info);
+	/** The pools the old model wrote: shown, explained, and only deletable. */
+	legacyBlock(legacy) {
 		const self = this;
 
 		const table = new ui.Table([
-			_('Pool'), _('Prefix'), _('Carrier'), _('Sessions'), _('Up'), _('Dialing'),
-			_('Down'), _('Error'), _('Redials'), _('Throughput'), _('Last pass'), ''
-		], {
-			id: 'bm-pools',
-			captionClasses: [null, null, null, null, null, null, null, null, null, null, null, 'cbi-section-actions']
-		}, E('em', {}, _('This router has no pools yet. Create one with the button below, from the Bored Manager app, or with "bmpppoe create" at a console.')));
+			_('Pool'), _('Prefix'), _('Carrier'), _('Sessions'), ''
+		], { id: 'bm-legacy-pools' });
 
-		table.update(list.map(one => [
+		table.update(legacy.map(one => [
 			one.id,
 			one.prefix,
 			one.carrier,
 			'%d'.format(one.count | 0),
-			'%d'.format(one.up | 0),
-			'%d'.format(one.dialing | 0),
-			'%d'.format(one.down | 0),
-			(one.error | 0) ? E('strong', {}, '%d'.format(one.error | 0)) : '0',
-			'%d'.format(one.redials | 0),
-			api.rate(((one.rate && one.rate.rxBps) | 0) + ((one.rate && one.rate.txBps) | 0)),
-			api.ago(one.lastPassAt, now),
-			E('div', {}, [
-				E('button', {
-					'class': 'btn cbi-button-action',
-					'click': ui.createHandlerFn(self, function() {
-						state.pool = (state.pool === one.id) ? '' : one.id;
-						state.chosen = {};
-						return self.refresh();
-					})
-				}, state.pool === one.id ? _('Show all pools') : _('Show only this')),
-				' ',
-				E('button', {
-					'class': 'btn cbi-button-add',
-					'click': ui.createHandlerFn(self, function() {
-						return self.askAppend(one, self.refresh);
-					})
-				}, _('Add sessions')),
-				' ',
-				E('button', {
-					'class': 'btn cbi-button-remove',
-					'click': ui.createHandlerFn(self, function() {
-						return self.confirmDelete(one);
-					})
-				}, _('Delete'))
-			])
+			E('button', {
+				'class': 'btn cbi-button-remove',
+				'click': ui.createHandlerFn(self, function() {
+					return self.confirmDelete({ id: one.id, members: one.count | 0, legacy: true });
+				})
+			}, _('Delete'))
 		]));
 
-		dom.content(node, [
-			api.figures([
-				[_('Pools'), '%d'.format(list.length)],
-				[_('Counter interval'), _('%d s').format(info.counterInterval | 0)],
-				[_('Redial after'), _('%d s').format(info.redialAfter | 0)],
-				[_('Daemon up'), api.duration(info.uptime)]
-			]),
+		return E('div', { 'class': 'alert-message warning' }, [
+			E('h4', {}, _('Pools from the old model')),
+			E('p', {}, _('These were created by an earlier release as numbered session runs. This release neither edits nor watches them: delete each one and create it again as a pool of VLANs. Deleting removes its interfaces exactly as the old release would have.')),
 			table.render()
 		]);
 	},
 
+	/** One pool: its header, its always-complete member table, its buttons. */
+	poolCard(pool) {
+		const self = this;
+		const rows = state.rows.filter(row => row.pool === pool.id);
+		const sections = rows.map(row => row.section);
+
+		const account = pool.mode === 'multi'
+			? _('account %s').format(pool.username || '?')
+			: _('one account per VLAN');
+
+		const macness = pool.mac_mode === 'auto'
+			? _('per-VLAN MACs')
+			: _('carrier MAC');
+
+		const header = E('div', { 'style': 'display:flex;flex-wrap:wrap;align-items:baseline;gap:.75em' }, [
+			E('h3', { 'style': 'margin:0' }, pool.label && pool.label.length ? '%s (%s)'.format(pool.label, pool.id) : pool.id),
+			E('span', {
+				'style': 'padding:.1em .55em;border-radius:1em;font-size:.85em;color:#fff;background:%s'
+					.format(pool.mode === 'multi' ? '#7a5195' : '#336699')
+			}, pool.mode === 'multi' ? _('shared account') : _('per-VLAN accounts')),
+			E('span', { 'style': 'opacity:.8' }, _('on %s').format(pool.carrier)),
+			E('span', { 'style': 'opacity:.8' }, account),
+			E('span', { 'style': 'opacity:.8' }, macness),
+			E('span', { 'style': 'opacity:.8' },
+				_('%d up, %d error, %d stopped of %d').format(pool.up | 0, pool.error | 0, pool.stopped | 0, pool.members | 0)),
+			E('span', { 'style': 'opacity:.8' },
+				api.rate((((pool.rate && pool.rate.rxBps) || 0) + ((pool.rate && pool.rate.txBps) || 0)) * 8))
+		]);
+
+		function bulk(action, label, confirmText) {
+			return E('button', {
+				'class': 'btn cbi-button-action',
+				'click': ui.createHandlerFn(self, function() {
+					if (!sections.length)
+						return Promise.resolve();
+					if (confirmText && !confirm(confirmText.format(sections.length)))
+						return Promise.resolve();
+
+					return api.run(api.calls.poolAction,
+						{ action: action, sections: sections.slice(0, ACTION_LIMIT) },
+						_('Asked the router to %s %d interface(s).').format(label, sections.length))
+						.then(() => self.refresh());
+				})
+			}, label);
+		}
+
+		const buttons = E('div', { 'style': 'margin:.5em 0' }, [
+			bulk('up', _('Start all'), null),
+			' ',
+			bulk('down', _('Stop all'), _('Stop all %d interface(s)? Anybody using them loses their connection.')),
+			' ',
+			bulk('redial', _('Redial all'), _('Redial all %d interface(s)? Each one drops and dials again.')),
+			' ',
+			E('button', {
+				'class': 'btn cbi-button-action',
+				'click': ui.createHandlerFn(self, function() {
+					return self.openEditor(pool);
+				})
+			}, _('Edit')),
+			' ',
+			E('button', {
+				'class': 'btn cbi-button-remove',
+				'click': ui.createHandlerFn(self, function() {
+					return self.confirmDelete(pool);
+				})
+			}, _('Delete'))
+		]);
+
+		const table = new ui.Table([
+			_('Section'), _('VLAN'), _('Device'), _('Username'), _('MAC'), _('IPv4'),
+			_('Table'), _('State'), _('Error'), ''
+		], {
+			id: 'bm-pool-%s'.format(pool.id),
+			captionClasses: [null, null, null, null, null, null, null, null, null, 'cbi-section-actions']
+		}, E('em', {}, _('The row list has not arrived yet.')));
+
+		table.update(rows.map(row => [
+			row.section,
+			'%d'.format(row.vlan | 0),
+			row.device,
+			row.username || '-',
+			row.mac || '-',
+			row.ip || '-',
+			'%d'.format(row.table | 0),
+			stateDot(row.status),
+			row.errorCode || '',
+			this.rowActions(row)
+		]));
+
+		return E('div', { 'class': 'cbi-section' }, [header, buttons, table.render()]);
+	},
+
+	rowActions(row) {
+		const self = this;
+
+		function act(action, label, confirmText, cls) {
+			return E('button', {
+				'class': 'btn %s'.format(cls ?? 'cbi-button-action'),
+				'style': 'margin-right:.25em',
+				'click': ui.createHandlerFn(self, function() {
+					if (confirmText && !confirm(confirmText.format(row.section)))
+						return Promise.resolve();
+
+					return api.run(api.calls.poolAction, { action: action, sections: [row.section] },
+						_('%s: asked the router to %s.').format(row.section, label))
+						.then(() => self.refresh());
+				})
+			}, label);
+		}
+
+		const toggle = row.status === 'stopped'
+			? act('enable', _('Enable'), null, 'cbi-button-apply')
+			: act('disable', _('Disable'), _('Disable %s? It stops now and stays stopped across reboots.'), 'cbi-button-remove');
+
+		return E('div', {}, [
+			act('up', _('Up'), null),
+			act('down', _('Down'), _('Take %s down? Anybody using it loses their connection.')),
+			act('redial', _('Redial'), _('Redial %s? It drops and dials again.')),
+			toggle
+		]);
+	},
+
 	/**
-	 * Two steps, and the second one has to be typed.
-	 *
-	 * Deleting a pool takes away every interface in it at once. A confirm box
-	 * that only wants a click is the same gesture as the button that opened
-	 * it, which is no second step at all.
+	 * Create and edit are one form. `pool` is null for a create; for an edit
+	 * the fields arrive filled from the pool's own record, the immutable ones
+	 * disabled with the reason beside them, and only what changed is sent.
+	 */
+	openEditor(pool) {
+		const self = this;
+		const creating = !pool;
+
+		return api.ask(api.calls.poolCarriers).then(function(answer) {
+			const carriers = (answer.ok && answer.data.ok !== false) ? (answer.data.carriers ?? []) : [];
+			self.editorModal(pool, creating, carriers);
+		});
+	},
+
+	editorModal(pool, creating, carriers) {
+		const self = this;
+
+		// ---- identity
+		const modeSelect = selectInput(MODES, creating ? 'multi' : pool.mode);
+		if (!creating) modeSelect.disabled = true;
+
+		const idInput = textInput(creating ? '' : pool.id, 'fpt1', '10em', !creating);
+		const labelInput = textInput(creating ? '' : (pool.label ?? ''), _('optional'), '18em');
+		const prefixInput = textInput(creating ? '' : pool.prefix, 'fpt', '6em', !creating);
+
+		const carrierOptions = carriers.map(one => [one.name, '%s%s'.format(one.name, one.up ? '' : _(' (down)'))]);
+		const currentCarrier = creating ? (carrierOptions.length ? carrierOptions[0][0] : '') : pool.carrier;
+		if (currentCarrier && !carrierOptions.some(entry => entry[0] === currentCarrier))
+			carrierOptions.unshift([currentCarrier, currentCarrier]);
+		const carrierSelect = carrierOptions.length
+			? selectInput(carrierOptions, currentCarrier)
+			: textInput(currentCarrier, 'eth1', '10em');
+
+		const macSelect = selectInput([
+			['auto', _('auto - one derived MAC per VLAN')],
+			['inherit', _('inherit - every VLAN keeps the carrier MAC')]
+		], creating ? 'auto' : pool.mac_mode);
+
+		const tableBaseInput = textInput(creating ? '10000' : '%d'.format(pool.table_base | 0), '10000', '8em');
+
+		// ---- accounts and members
+		const usernameInput = textInput(creating ? '' : (pool.username ?? ''), 'user@isp', '14em');
+		const passwordInputNode = passwordInput(creating ? '' : _('unchanged if left empty'));
+
+		const memberVlans = creating ? [] : (pool.memberList ?? []).map(one => one.vlan | 0);
+		const vlanBox = E('textarea', {
+			'class': 'cbi-input-textarea',
+			'rows': '3',
+			'style': 'width:100%;font-family:monospace',
+			'placeholder': '101-150,200,0'
+		}, creating ? '' : compressVlans(memberVlans));
+
+		const memberLines = creating ? '' : (pool.memberList ?? [])
+			.map(one => '%d,%s,'.format(one.vlan | 0, one.username ?? ''))
+			.join('\n');
+		const memberBox = E('textarea', {
+			'class': 'cbi-input-textarea',
+			'rows': '6',
+			'style': 'width:100%;font-family:monospace',
+			'placeholder': '101,line101@isp,secret\n102,line102@isp,secret2'
+		}, memberLines);
+
+		// ---- general
+		const serviceInput = textInput(creating ? '' : (pool.service ?? ''), _('auto'), '12em');
+		const acInput = textInput(creating ? '' : (pool.ac ?? ''), _('auto'), '12em');
+		const acMacInput = textInput(creating ? '' : (pool.ac_mac ?? ''), _('auto'), '12em');
+
+		// ---- advanced
+		const mtuInput = textInput(creating || !(pool.mtu | 0) ? '' : '%d'.format(pool.mtu), '1492', '6em');
+		const keepalive = String((creating ? '' : pool.keepalive) ?? '').match(/^([0-9]+)(?:[ ,]([0-9]+))?$/);
+		const kaFailInput = textInput(keepalive ? keepalive[1] : '', '5', '5em');
+		const kaIntInput = textInput(keepalive && keepalive[2] ? keepalive[2] : '', '1', '5em');
+		const ipv6Select = selectInput([
+			['0', _('Disabled')], ['auto', _('Automatic')], ['1', _('Manual')]
+		], creating ? '0' : (pool.ipv6 ?? '0'));
+		const peerdnsCheck = checkInput(creating ? false : pool.peerdns === true);
+		const dnsInput = textInput(creating ? '' : (pool.dns ?? []).join(' '), '1.1.1.1 8.8.8.8', '20em');
+		const defaultrouteCheck = checkInput(creating ? true : pool.defaultroute !== false);
+		const hostUniqInput = textInput(creating ? '' : (pool.host_uniq ?? ''), _('empty unless the ISP requires it'), '14em');
+		const demandInput = textInput(creating || !(pool.demand | 0) ? '' : '%d'.format(pool.demand), '0', '6em');
+		const padiAttemptsInput = textInput(creating || !(pool.padi_attempts | 0) ? '' : '%d'.format(pool.padi_attempts), _('default'), '6em');
+		const padiTimeoutInput = textInput(creating || !(pool.padi_timeout | 0) ? '' : '%d'.format(pool.padi_timeout), _('default'), '6em');
+		const pppdInput = textInput(creating ? '' : (pool.pppd_options ?? ''), '', '24em');
+
+		// ---- firewall
+		const zoneInput = textInput(creating ? 'bmwanpool' : pool.zone, 'bmwanpool', '10em');
+		const masqCheck = checkInput(creating ? true : pool.masq !== false);
+		const mtuFixCheck = checkInput(creating ? true : pool.mtu_fix !== false);
+		const lanForwardCheck = checkInput(creating ? true : pool.lan_forward !== false);
+
+		const status = E('div', { 'style': 'margin:.5em 0' });
+		const buttons = E('div', { 'class': 'right' });
+
+		// Which member editor is on show follows the mode. `conditional`
+		// rendering by hand, because the two modes ask for different things.
+		const multiBlock = E('div', {}, [
+			field(_('Username'), usernameInput, _('The one account every VLAN dials with.')),
+			field(_('Password'), passwordInputNode,
+				creating ? '' : _('Leave empty to keep the stored password.')),
+			field(_('VLANs'), vlanBox,
+				_('Ranges and numbers: 101-150,200. VLAN 0 means untagged, straight over the carrier, at most once.'))
+		]);
+
+		const singleBlock = E('div', {}, [
+			field(_('Members'), memberBox,
+				_('One per line: VLAN, username, password - separated by a comma, a tab, a semicolon, a pipe or spaces. # starts a comment. On an edit, an empty password keeps the stored one.'))
+		]);
+
+		function syncMode() {
+			const multi = modeSelect.value === 'multi';
+			multiBlock.style.display = multi ? '' : 'none';
+			singleBlock.style.display = multi ? 'none' : '';
+		}
+		modeSelect.addEventListener('change', syncMode);
+		syncMode();
+
+		function carrierValue() {
+			return String(carrierSelect.value ?? '').trim();
+		}
+
+		/** The spec the form describes right now, or null with the reason shown. */
+		function buildSpec() {
+			const spec = {};
+			const mode = modeSelect.value;
+
+			if (creating) {
+				spec.mode = mode;
+				spec.id = idInput.value.trim();
+				spec.prefix = prefixInput.value.trim();
+			}
+			else {
+				spec.id = pool.id;
+			}
+
+			spec.label = labelInput.value.trim();
+			spec.carrier = carrierValue();
+			spec.mac_mode = macSelect.value;
+
+			const tableBase = whole(tableBaseInput, 1, 65535);
+			if (tableBase === null) {
+				dom.content(status, riskNote(_('The table base has to be 1 to 65535.')));
+				return null;
+			}
+			spec.table_base = tableBase;
+
+			if (mode === 'multi') {
+				spec.username = usernameInput.value.trim();
+				if (passwordInputNode.value.length)
+					spec.password = passwordInputNode.value;
+
+				const parsed = parseVlans(vlanBox.value);
+				if (parsed.errors.length) {
+					dom.content(status, riskNote(parsed.errors.slice(0, 5).join('; ')));
+					return null;
+				}
+				spec.members = parsed.vlans.map(vlan => ({ vlan: vlan }));
+			}
+			else {
+				const parsed = parseMembers(memberBox.value);
+				if (parsed.errors.length) {
+					dom.content(status, riskNote(parsed.errors.slice(0, 5).join('; ')));
+					return null;
+				}
+				spec.members = parsed.members;
+			}
+
+			spec.service = serviceInput.value.trim();
+			spec.ac = acInput.value.trim();
+			spec.ac_mac = acMacInput.value.trim();
+
+			const mtuRaw = mtuInput.value.trim();
+			if (mtuRaw.length) {
+				const mtu = whole(mtuInput, 576, 9200);
+				if (mtu === null) {
+					dom.content(status, riskNote(_('MTU has to be 576 to 9200, or empty for the default.')));
+					return null;
+				}
+				spec.mtu = mtu;
+			}
+			else {
+				spec.mtu = 0;
+			}
+
+			const kaFail = kaFailInput.value.trim();
+			if (kaFail.length)
+				spec.keepalive = kaIntInput.value.trim().length
+					? '%s %s'.format(kaFail, kaIntInput.value.trim())
+					: kaFail;
+			else
+				spec.keepalive = '';
+
+			spec.ipv6 = ipv6Select.value;
+			spec.peerdns = peerdnsCheck.checked;
+			spec.dns = dnsInput.value.trim().length ? dnsInput.value.trim().split(/\s+/) : [];
+			spec.defaultroute = defaultrouteCheck.checked;
+			spec.host_uniq = hostUniqInput.value.trim();
+			spec.demand = demandInput.value.trim().length ? (whole(demandInput, 0, 86400) ?? -1) : 0;
+			spec.padi_attempts = padiAttemptsInput.value.trim().length ? (whole(padiAttemptsInput, 0, 100) ?? -1) : 0;
+			spec.padi_timeout = padiTimeoutInput.value.trim().length ? (whole(padiTimeoutInput, 0, 300) ?? -1) : 0;
+
+			if (spec.demand < 0 || spec.padi_attempts < 0 || spec.padi_timeout < 0) {
+				dom.content(status, riskNote(_('Demand and the PADI numbers have to be whole numbers.')));
+				return null;
+			}
+
+			spec.pppd_options = pppdInput.value.trim();
+			spec.zone = zoneInput.value.trim();
+			spec.masq = masqCheck.checked;
+			spec.mtu_fix = mtuFixCheck.checked;
+			spec.lan_forward = lanForwardCheck.checked;
+
+			return spec;
+		}
+
+		function submit() {
+			const spec = buildSpec();
+			if (!spec)
+				return Promise.resolve();
+
+			dom.content(status, E('p', { 'class': 'spinning' }, _('Asking the router to check it...')));
+
+			return api.ask(api.calls.poolCheck, spec).then(function(result) {
+				if (!result.ok) {
+					dom.content(status, riskNote(result.error));
+					return null;
+				}
+
+				const data = result.data ?? {};
+				if (data.ok === false && !Array.isArray(data.findings)) {
+					dom.content(status, riskNote(data.reason ?? _('The router would not say why.')));
+					return null;
+				}
+
+				const passed = data.ok === true;
+
+				dom.content(status, [
+					findingsList(data.findings),
+					passed
+						? E('div', { 'class': 'right' }, [
+							E('button', {
+								'class': 'btn cbi-button-%s'.format(creating ? 'add' : 'apply'),
+								'click': ui.createHandlerFn(self, function() {
+									return api.run(creating ? api.calls.poolAdd : api.calls.poolSet, spec,
+										creating
+											? _('Pool %s created. Its interfaces are dialling now.').format(spec.id)
+											: _('Pool %s updated across every interface.').format(spec.id))
+										.then(function(done) {
+											if (done) ui.hideModal();
+											return self.refresh();
+										});
+								})
+							}, creating ? _('Create it') : _('Apply to the whole pool'))
+						])
+						: riskNote(_('Fix the errors above and check again; nothing has been written.'))
+				]);
+
+				return null;
+			});
+		}
+
+		dom.content(buttons, [
+			E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Cancel')),
+			' ',
+			E('button', {
+				'class': 'btn cbi-button-action',
+				'click': ui.createHandlerFn(self, submit)
+			}, _('Check'))
+		]);
+
+		ui.showModal(creating ? _('Create a PPPoE pool') : _('Edit pool %s').format(pool.id), [
+			E('p', {}, creating
+				? _('Every field below can also be changed later, except the id, the mode and the prefix.')
+				: _('Changes apply to every interface in the pool in one pass. Nothing is written until the check passes and you apply.')),
+
+			field(_('Mode'), modeSelect, creating
+				? _('Shared account: one login, many VLANs, one derived MAC per VLAN. One account per VLAN: each line has its own login.')
+				: _('The mode of a pool cannot change; delete it and create a new one.')),
+			field(_('Pool id'), idInput, creating
+				? _('Lowercase letters, digits and underscores. This is what you delete it by.')
+				: _('Fixed for the life of the pool.')),
+			field(_('Label'), labelInput, _('Only for people; shown wherever the pool is.')),
+			field(_('Prefix'), prefixInput, creating
+				? _('1-4 characters. Interface names derive from it: prefix fpt, VLAN 101 dials as fpt101 on pppoe-fpt101.')
+				: _('Fixed: every interface is named by it.')),
+			field(_('Carrier'), carrierSelect, _('The physical uplink. Changing it later redials the whole pool.')),
+			field(_('MAC mode'), macSelect, _('auto derives 02:xx:xx:xx:VV:VV from the carrier MAC, the pool id and the VLAN - stable across reboots. Shared-account pools require it.')),
+			field(_('Table base'), tableBaseInput, _('Each member routes in table base + VLAN. Changing it later strands binding rules until bm-wanbind\'s next pass.')),
+
+			multiBlock,
+			singleBlock,
+
+			groupHeading(_('General')),
+			field(_('Service name'), serviceInput, _('Empty means autodetect.')),
+			field(_('Access concentrator'), acInput, _('Empty means autodetect.')),
+			field(_('AC MAC address'), acMacInput, _('Empty means autodetect.')),
+
+			groupHeading(_('Advanced')),
+			field(_('MTU'), mtuInput, _('Empty uses the pppd default of 1492. Above 1492 needs an ISP that supports RFC 4638.')),
+			field(_('LCP echo failure / interval'), E('span', {}, [kaFailInput, ' / ', kaIntInput]),
+				_('Presume the peer dead after this many missed echoes sent this many seconds apart. Empty leaves pppd\'s default.')),
+			field(_('IPv6'), ipv6Select, ''),
+			field(_('Use ISP DNS servers'), peerdnsCheck, _('Off means the servers below are used instead.')),
+			field(_('DNS servers'), dnsInput, _('Space separated. Only used while ISP DNS is off.')),
+			field(_('Default route'), defaultrouteCheck, _('Each session installs its default route into its own table.')),
+			field(_('Host-Uniq'), hostUniqInput, _('Raw hex bytes. Leave empty unless the ISP requires it.')),
+			field(_('Inactivity timeout'), demandInput, _('Seconds of idle before hanging up; 0 keeps sessions up.')),
+			field(_('PADI attempts'), padiAttemptsInput, ''),
+			field(_('PADI timeout'), padiTimeoutInput, ''),
+			field(_('Extra pppd options'), pppdInput, _('Passed to pppd verbatim. A wrong word here fails every session in the pool.')),
+
+			groupHeading(_('Firewall')),
+			field(_('Zone'), zoneInput, _('Created and owned by the router\'s pool daemon; pools may share one. Changing it later moves every membership.')),
+			field(_('Masquerade'), masqCheck, ''),
+			field(_('MTU fix (MSS clamping)'), mtuFixCheck, ''),
+			field(_('Allow LAN to reach this zone'), lanForwardCheck, _('Writes one forwarding from the LAN zone.')),
+
+			E('p', { 'style': 'opacity:.75' },
+				_('VLAN 0 dials untagged on the bare carrier; VLANs 1-4094 add an 802.1Q tag, and the upstream must answer on that exact VLAN - a wrong tag looks like a PADO timeout. A shared account carries as many sessions as the ISP allows: try two or three VLANs before pasting the full list.')),
+
+			status,
+			buttons
+		]);
+
+		return Promise.resolve();
+	},
+
+	/**
+	 * Two steps, and the second one has to be typed. Deleting a pool takes
+	 * away every interface in it, their tagged devices and MACs, the routing
+	 * tables, and the pool's zone memberships - the zone itself too when
+	 * nothing else uses it.
 	 */
 	confirmDelete(pool) {
 		const self = this;
-		const field = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:12em' });
+		const nameField = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:12em' });
+		const forceCheck = checkInput(false);
 
 		ui.showModal(_('Delete pool %s').format(pool.id), [
-			E('p', {}, _('This removes all %d sessions in the pool and the interfaces behind them. Anybody dialling through one of them loses their connection.').format(pool.count | 0)),
-			E('p', {}, _('The accounts themselves are not touched; they live wherever the list came from.')),
-			E('p', {}, _('Type the pool name to confirm:')),
-			field,
+			E('p', {}, _('This removes all %d interface(s), their VLAN devices, their routing tables and their firewall memberships. Anybody dialling through them loses their connection.').format(pool.members | 0)),
+			pool.legacy ? E('p', {}, _('This is an old-model pool: its numbered sessions are removed exactly as the release that made them would have.')) : '',
+			E('p', {}, _('The router refuses while a bm-wanbind instance hands clients to this carrier, unless forced.')),
+			field(_('Force'), forceCheck, _('Delete even while a binder instance uses this carrier.')),
+			E('p', {}, _('Type the pool id to confirm:')),
+			nameField,
 			E('div', { 'class': 'right' }, [
 				E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Cancel')),
 				' ',
 				E('button', {
 					'class': 'btn cbi-button-remove',
 					'click': ui.createHandlerFn(self, function() {
-						if (field.value !== pool.id) {
-							ui.addNotification(null, E('p', {}, _('That is not the pool name; nothing was deleted.')), 'warning');
+						if (nameField.value !== pool.id) {
+							ui.addNotification(null, E('p', {}, _('That is not the pool id; nothing was deleted.')), 'warning');
 							return Promise.resolve();
 						}
 						ui.hideModal();
-						return api.run(api.calls.poolDelete, { id: pool.id },
+						return api.run(api.calls.poolDelete, { id: pool.id, force: forceCheck.checked },
 							_('Pool %s is gone.').format(pool.id)).then(() => self.refresh());
 					})
 				}, _('Delete it'))
@@ -688,81 +896,41 @@ return view.extend({
 		return Promise.resolve();
 	},
 
-	paintSessions(node, result, now) {
-		if (!result.ok) {
-			dom.content(node, E('p', { 'class': 'alert-message warning' }, result.error));
-			return;
-		}
+	/** The daemon's own numbers: the counter pass and the watchdog. */
+	settingsBlock(settings) {
+		const self = this;
 
-		const rows = result.data.sessions ?? [];
-		const limit = result.data.limit | 0;
+		const interval = textInput('%d'.format(settings.counter_interval | 0), '5', '6em');
+		const redialAfter = textInput('%d'.format(settings.redial_after | 0), '120', '6em');
+		const redialBatch = textInput('%d'.format(settings.redial_batch | 0), '20', '6em');
 
-		// Rows that have gone out of view keep no tick. Otherwise a filter
-		// change could leave a session selected that nobody can see, and the
-		// next Stop would take down something that was never on the screen.
-		const visible = {};
-		state.shown = rows.map(row => row.section);
-		for (const row of rows)
-			visible[row.section] = true;
-		for (const name of Object.keys(state.chosen))
-			if (!visible[name]) delete state.chosen[name];
+		return api.section(_('Daemon settings'),
+			_('The watchdog redials sessions netifd has given up on. 0 seconds turns it off and leaves every retry to netifd.'),
+			E('div', {}, [
+				field(_('Counter interval (s)'), interval, _('1 to 300. How often /proc/net/dev is read and the dump corrected.')),
+				field(_('Redial after (s)'), redialAfter, _('0 to 86400. How long a session may stay down before the watchdog redials it.')),
+				field(_('Redial batch'), redialBatch, _('1 to 500. The most redials one watchdog pass starts.')),
+				E('div', { 'class': 'right' }, [
+					E('button', {
+						'class': 'btn cbi-button-apply',
+						'click': ui.createHandlerFn(self, function() {
+							const values = {
+								counter_interval: whole(interval, 1, 300),
+								redial_after: whole(redialAfter, 0, 86400),
+								redial_batch: whole(redialBatch, 1, 500)
+							};
 
-		if (this.counter) {
-			const ticked = chosenSections().length;
-			dom.content(this.counter, ticked
-				? _('%d ticked').format(ticked)
-				: _('nothing ticked'));
-		}
+							if (values.counter_interval === null || values.redial_after === null || values.redial_batch === null) {
+								ui.addNotification(null, E('p', {}, _('Counter interval is 1-300, redial after 0-86400, batch 1-500.')), 'warning');
+								return Promise.resolve();
+							}
 
-		const table = new ui.Table([
-			'', _('Session'), _('Pool'), _('State'), _('IPv4'), _('Table'), _('In this state'), _('Note')
-		], {
-			id: 'bm-sessions',
-			sortable: [false, true, true, true, true, true, true, true]
-		}, E('em', {}, this.emptyText()));
-
-		table.update(rows.map(row => {
-			// `since` is when it came up and `downSince` when it went away, so
-			// which one is the age depends on where the session is now. A
-			// session the router has never seen has neither.
-			const stamp = (row.state === 'up') ? (row.since | 0) : (row.downSince | 0);
-
-			return [
-				E('input', {
-					'type': 'checkbox',
-					'checked': state.chosen[row.section] ? '' : null,
-					'click': function(ev) {
-						state.chosen[row.section] = ev.target.checked;
-					}
-				}),
-				row.section,
-				row.pool,
-				stateDot(row.state),
-				(row.ipv4 && row.ipv4.length) ? row.ipv4 : '-',
-				(row.table === null || row.table === undefined) ? '-' : '%d'.format(row.table),
-				(stamp && now) ? api.duration(now - stamp) : '-',
-				(row.error && row.error.length) ? row.error : ''
-			];
-		}));
-
-		dom.content(node, [
-			table.render(),
-			rows.length >= limit
-				? E('p', { 'class': 'alert-message warning' },
-					_('The router stopped at %d rows. Narrow this down with the filter above, or look at one pool at a time.').format(limit))
-				: ''
-		]);
-	},
-
-	/** Why a table is empty, which is never the same sentence twice. */
-	emptyText() {
-		if (state.scope === 'attention')
-			return _('Nothing needs attention: every session in view is up or dialing.');
-		if (state.scope === 'up')
-			return _('No session is up.');
-		if (state.scope === 'down')
-			return _('Every session is up.');
-		return _('This router knows of no sessions at all.');
+							return api.run(api.calls.poolSettingsSet, values, _('Daemon settings applied.'))
+								.then(() => self.refresh());
+						})
+					}, _('Save'))
+				])
+			]));
 	},
 
 	handleSave: null,

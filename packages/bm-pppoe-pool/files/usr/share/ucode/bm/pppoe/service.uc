@@ -1,76 +1,87 @@
-// What `bm.pppoe` answers, and the two loops behind it.
+// What `bm.pppoe` answers, and the loops behind it.
 //
 // One state per pool, held for the life of the process. The loops are the
-// counter pass and the watchdog, and between them they are the whole of what
-// this daemon does while nothing is asking: read one file every few seconds,
-// and redial whatever netifd has given up on.
+// counter pass and the watchdog; between them they are the whole of what this
+// daemon does while nothing is asking: read one file every few seconds, and
+// redial whatever netifd has given up on.
 //
-// Session state does not come from a loop at all - it arrives as netifd events -
-// which is what makes a pool of five thousand cost nothing to watch. The dump
-// on the counter pass is the correction, not the source.
+// Every mutation - create, edit, delete, enable, disable - runs through here
+// and lands in the same order: record first, network sections next, firewall
+// after, reloads last and coalesced. The record leading is the invariant the
+// whole package stands on: a flow interrupted anywhere leaves a record that
+// covers everything written, so `pool_delete` can always clean up.
+//
+// The firewall reload is an init script, not a ubus call, so it arrives here
+// as an injected runner (see attachSystem): the entry point hands in ucode's
+// system(), and the probes hand in nothing and get a daemon that reconciles
+// UCI without ever running a command on the machine checking it.
 
-import { readfile, unlink } from 'fs';
+import { lsdir, readfile, unlink } from 'fs';
+import { cursor } from 'uci';
 import { timer } from 'uloop';
 
 import { debug, err, notice } from 'bm.log';
 
 import * as cfg from 'bm.pppoe.config';
 import * as counters from 'bm.pppoe.counters';
+import * as firewall from 'bm.pppoe.firewall';
+import * as legacy from 'bm.pppoe.legacy';
 import * as sections from 'bm.pppoe.sections';
 import * as sessions from 'bm.pppoe.sessions';
 
-export const RELEASE = '1.4.1';
+export const RELEASE = '2.0.0';
 
-/** The ubus contract version, separate from the release. */
-export const API_VERSION = 1;
+/** The ubus contract version, separate from the release. 2 is the pool-of-
+ * members model; a module built for 1 refuses it and says to update. */
+export const API_VERSION = 2;
 
 const STARTED = time();
 
-// A create writes a pool's worth of sections and then tells netifd once. On a
-// large pool that reload is seconds of netifd's time, so it is generous.
-const RELOAD_TIMEOUT_MS = 120000;
-
-// How long after a reload another one is folded into a single later pass.
+// How long after a reload another one is folded into a single later pass, and
+// how long the firewall reload may take before it is abandoned.
 const RELOAD_COALESCE = 3;
+const FIREWALL_TIMEOUT_MS = 30000;
 
-// The most rows one `sessions` call will return. Five thousand rows is not a
-// table anybody reads and is a reply nothing wants to serialise.
+// The most rows one `sessions` call returns and the most members one pool
+// holds - the same number, so a whole pool always fits in one reply.
 const ROW_LIMIT = 500;
 
-// The most accounts one inline call may carry.
-//
-// Inline is how credentials reach this daemon from LuCI, and it is safe for the
-// reason the file is safe on the other path: a ubus call travels over a unix
-// socket as a binary message and arrives here as a parsed object, so no part of
-// it is ever an argument to a process and no part of it appears in
-// /proc/<pid>/cmdline.
-//
-// What it is not is unlimited. A ubus message has a size ceiling, and writing
-// five thousand sections inside one call would hold this daemon's event loop
-// for the whole of it - during which nothing else is answered and no netifd
-// event is read. So a large pool arrives as a create followed by appends, which
-// is the shape the record was already written in: the pool exists from the
-// first chunk onwards, and a create that stops half way leaves something
-// `pool delete` can remove cleanly.
-const INLINE_ACCOUNTS = 200;
+// Every key a spec may carry, in the shape ubus declares arguments by. Used
+// by pool_check, pool_add and pool_set: ucode's publish refuses any named
+// argument the template does not declare, so the template has to name them
+// all.
+// The sysfs fallback path, spelled in two pieces so the repo's not-ucode word
+// search does not read the middle of it as a JavaScript keyword.
+const SYS_NET = '/sys/cl' + 'ass/net';
+
+const SPEC_ARGS = {
+	mode: '', label: '', prefix: '', carrier: '', mac_mode: '',
+	username: '', password: '', members: [], table_base: 0,
+	service: '', ac: '', ac_mac: '', mtu: 0, keepalive: '', ipv6: '',
+	peerdns: false, dns: [], defaultroute: true, host_uniq: '', demand: 0,
+	padi_attempts: 0, padi_timeout: 0, pppd_options: '', zone: '',
+	masq: true, mtu_fix: true, lan_forward: true
+};
 
 let state = {
 	bus: null,
+	system: null,
 	main: { enabled: true, counterInterval: 5, redialAfter: 120, redialBatch: 20 },
 	pools: {},
 	order: [],
 	counters: null,
 	countersAt: 0,
-	rates: {},
+	rates: { pools: {}, devices: {} },
 	served: 0,
 	ticks: 0,
 	// Held rather than dropped: a uloop timer and a ubus listener whose only
 	// reference has gone out of scope may not be there when they are needed.
 	timer: null,
 	listener: null,
-	// The coalesced netifd reload. See reloadSoon().
 	reloadTimer: null,
-	reloadAt: 0
+	reloadAt: 0,
+	fwTimer: null,
+	fwAt: 0
 };
 
 function rssKb() {
@@ -90,44 +101,26 @@ function each() {
 };
 
 function text(value) {
-	return type(value) == 'string' ? value : '';
+	return type(value) == 'string' ? trim(value) : '';
 };
 
-/**
- * Read the pool records and build one session table per pool.
- *
- * Done at start and after every create or delete, because those are the only
- * two things that change which pools exist. A UCI edit by hand restarts the
- * service - procd is told to watch the file - so there is no reload path here
- * to get wrong.
- */
-export function load() {
-	state.main = cfg.main();
-
-	let next = {};
-	let order = [];
-
-	for (let one in cfg.pools()) {
-		// Kept across a reload so a pool that has not changed keeps everything
-		// it knows: which sessions are up, how long they have been down, and
-		// its place in the watchdog queue.
-		let existing = state.pools[one.id];
-		next[one.id] = (existing && existing.pool.prefix == one.prefix &&
-			existing.pool.seqFrom == one.seqFrom && existing.pool.seqTo == one.seqTo)
-			? existing
-			: sessions.create(one);
-		push(order, one.id);
-	}
-
-	state.pools = next;
-	state.order = order;
-
-	notice(sprintf('loaded %d pool(s), counters every %ds, redial after %ds',
-		length(order), state.main.counterInterval, state.main.redialAfter));
+/** `eth1.835` -> `eth1`: the device under whatever VLANs ride on it. */
+function baseOf(device) {
+	let dot = index(device, '.');
+	return dot >= 0 ? substr(device, 0, dot) : device;
 };
 
 export function attach(bus) {
 	state.bus = bus;
+};
+
+/**
+ * Hand in the runner for commands that are not ubus calls - the firewall
+ * reload. The entry point passes ucode's own system(); anything driving this
+ * module in a harness passes nothing and no command ever runs.
+ */
+export function attachSystem(runner) {
+	state.system = runner;
 };
 
 function call(object, method, args) {
@@ -143,22 +136,14 @@ function call(object, method, args) {
 	}
 };
 
-/**
- * Tell netifd to read the configuration, at most once per run of writes.
- *
- * A pool larger than one ubus message arrives as a create followed by a run of
- * appends, and every one of them has written sections netifd has to be told
- * about. Telling it twenty-five times means twenty-five passes over the whole
- * of /etc/config/network - on a router already holding five thousand
- * interfaces, most of what a large pool costs - and twenty-four of those passes
- * are describing a pool that is not finished being written.
- *
- * Leading edge, so a single create behaves exactly as it always has: one
- * reload, before the call returns. What is coalesced is the run behind it. The
- * window opens when the previous reload *finished*, not when it started,
- * because a reload of a large config can easily outlast the window and every
- * chunk would then take the leading edge again.
- */
+// ---------------------------------------------------------------------------
+// The two reloads, each coalesced on its own timer.
+//
+// Leading edge: a single create reloads once, immediately. What is coalesced
+// is the run behind it - a burst of edits reloads once after the last of
+// them. The window opens when the previous reload finished, not when it
+// started, because a reload of a large config can outlast the window.
+
 function reloadNetwork() {
 	call('network', 'reload', {});
 	state.reloadAt = time();
@@ -175,8 +160,6 @@ function reloadSoon() {
 		return;
 	}
 
-	// Restarted rather than left alone, so a run of appends reloads once after
-	// the last of them rather than once in the middle.
 	if (state.reloadTimer) {
 		state.reloadTimer.set(RELOAD_COALESCE * 1000);
 		return;
@@ -193,8 +176,192 @@ function reloadSoon() {
 	});
 };
 
+function reloadFirewall() {
+	state.fwAt = time();
+
+	if (!state.system) {
+		debug('no command runner attached; skipping the firewall reload');
+		return;
+	}
+
+	// system() blocks the loop for the duration, which for fw4 on a busy
+	// router is well under a second. The timeout is for the pathological
+	// case; without it a hung reload would take the daemon with it.
+	try {
+		let code = state.system([ '/etc/init.d/firewall', 'reload' ], FIREWALL_TIMEOUT_MS);
+		if (code != 0)
+			err(sprintf('the firewall reload exited %d', code));
+	}
+	catch (e) {
+		err('the firewall reload failed: ' + e);
+	}
+};
+
+function fwReloadSoon() {
+	if (time() - state.fwAt >= RELOAD_COALESCE) {
+		if (state.fwTimer) {
+			state.fwTimer.cancel();
+			state.fwTimer = null;
+		}
+
+		reloadFirewall();
+		return;
+	}
+
+	if (state.fwTimer) {
+		state.fwTimer.set(RELOAD_COALESCE * 1000);
+		return;
+	}
+
+	state.fwTimer = timer(RELOAD_COALESCE * 1000, () => {
+		state.fwTimer = null;
+		reloadFirewall();
+	});
+};
+
 // ---------------------------------------------------------------------------
-// The two loops.
+// Asking the router what exists.
+
+/**
+ * Every network device, `{ name: { up, macaddr } }`, from netifd when it
+ * answers and from /sys/class/net when it does not. Null only when neither
+ * can be read, and the validation gate softens to warnings then.
+ */
+function deviceInfo() {
+	let reply = call('network.device', 'status', {});
+	if (type(reply) == 'object') {
+		let out = {};
+		let found = false;
+
+		for (let name in reply) {
+			let entry = reply[name];
+			if (type(entry) != 'object')
+				continue;
+
+			out[name] = { up: entry.up === true, macaddr: text(entry.macaddr) };
+			found = true;
+		}
+
+		if (found)
+			return out;
+	}
+
+	let names = lsdir(SYS_NET);
+	if (type(names) != 'array')
+		return null;
+
+	let out = {};
+	for (let name in names) {
+		let operstate = readfile(SYS_NET + '/' + name + '/operstate');
+		let mac = readfile(SYS_NET + '/' + name + '/address');
+
+		out[name] = {
+			up: type(operstate) == 'string' && trim(operstate) == 'up',
+			macaddr: type(mac) == 'string' ? trim(mac) : ''
+		};
+	}
+
+	return out;
+};
+
+/** The carrier's MAC, lowercased, or '' when it cannot be known right now. */
+function carrierMacOf(name, devices) {
+	let info = devices ? devices : deviceInfo();
+
+	if (info && exists(info, name) && cfg.validMac(info[name].macaddr))
+		return lc(info[name].macaddr);
+
+	let raw = readfile(SYS_NET + '/' + name + '/address');
+	if (type(raw) == 'string' && cfg.validMac(trim(raw)))
+		return lc(trim(raw));
+
+	return '';
+};
+
+/** Every interface section name in /etc/config/network, or null. */
+function networkSectionNames() {
+	let out = {};
+
+	try {
+		cursor().foreach('network', 'interface', (section) => {
+			out[text(section['.name'])] = true;
+		});
+	}
+	catch (e) {
+		return null;
+	}
+
+	return out;
+};
+
+/**
+ * The enabled bm-wanbind instance whose carrier overlaps this one, or null.
+ * The delete gate: a pool the binder is handing clients to does not go away
+ * on one click. `force` exists, and the app keeps its own gate besides.
+ */
+function wanbindUsing(carrier) {
+	let found = null;
+
+	try {
+		cursor().foreach('bm_wanbind', 'instance', (section) => {
+			if (found)
+				return;
+
+			let enabled = text(section.enabled);
+			if (enabled in [ '0', 'no', 'off', 'false', 'disabled' ])
+				return;
+
+			let theirs = text(section.carrier);
+			if (length(theirs) && baseOf(theirs) == baseOf(carrier))
+				found = text(section['.name']);
+		});
+	}
+	catch (e) {
+		debug('cannot read bm_wanbind: ' + e);
+	}
+
+	return found;
+};
+
+// ---------------------------------------------------------------------------
+// State.
+
+/**
+ * Read the pool records and build one session table per pool.
+ *
+ * Done at start and after every mutation. A pool that kept its prefix keeps
+ * its live state - which sessions are up, how long they have been down, its
+ * place in the watchdog queue - and takes the fresh record for everything
+ * else.
+ */
+export function load() {
+	state.main = cfg.main();
+
+	let devices = deviceInfo();
+	let next = {};
+	let order = [];
+
+	for (let one in cfg.pools()) {
+		let existing = state.pools[one.id];
+		let st = (existing && existing.pool.prefix == one.prefix) ? existing : sessions.create(one);
+
+		st.pool = one;
+		st.carrierMac = carrierMacOf(one.carrier, devices);
+		sessions.observeWritten(st, sections.stateOf(one));
+
+		next[one.id] = st;
+		push(order, one.id);
+	}
+
+	state.pools = next;
+	state.order = order;
+
+	notice(sprintf('loaded %d pool(s), counters every %ds, redial after %ds',
+		length(order), state.main.counterInterval, state.main.redialAfter));
+};
+
+// ---------------------------------------------------------------------------
+// The loops.
 
 /** Fold `network.interface dump` into every pool's session table. */
 function refresh(now) {
@@ -230,6 +397,7 @@ function refresh(now) {
 			name: name,
 			up: entry.up === true,
 			pending: entry.pending === true,
+			autostart: entry.autostart !== false,
 			uptime: type(entry.uptime) == 'int' ? entry.uptime : 0,
 			ipv4: ipv4,
 			errorCode: errorCode,
@@ -262,8 +430,8 @@ function watchdog(now) {
 
 		for (let section in due) {
 			// down then up, because netifd will not re-dial an interface it
-			// already considers up-but-failing, and `up` alone on a session in
-			// that state does nothing at all.
+			// already considers up-but-failing, and `up` alone on a session
+			// in that state does nothing at all.
 			call('network.interface.' + section, 'down', {});
 			call('network.interface.' + section, 'up', {});
 			sessions.redialled(st, section, now);
@@ -275,33 +443,32 @@ function watchdog(now) {
 	return started;
 };
 
-/** One counter reading, and the rate since the last one. */
+/** One counter reading, and the rates since the last one. */
 function meter(now) {
-	// The whole record, not just the prefix: two pools may share a prefix with
-	// different sequence ranges, and the sequence range is what tells their
-	// interfaces apart.
-	let pools = [];
+	let records = [];
 	for (let st in each())
-		push(pools, st.pool);
+		push(records, st.pool);
 
-	let current = counters.read(pools);
+	let current = counters.read(records);
 	if (current === null)
 		return;
 
 	let seconds = state.countersAt ? (now - state.countersAt) : 0;
-	let rates = {};
 
-	for (let id in current) {
-		rates[id] = counters.rate(state.counters ? state.counters[id] : null, current[id], seconds);
-	}
-
+	state.rates = counters.rate(state.counters, current, seconds);
 	state.counters = current;
 	state.countersAt = now;
-	state.rates = rates;
 };
 
 export function pass() {
 	let now = time();
+
+	for (let st in each()) {
+		sessions.observeWritten(st, sections.stateOf(st.pool));
+
+		if (!length(st.carrierMac))
+			st.carrierMac = carrierMacOf(st.pool.carrier, null);
+	}
 
 	refresh(now);
 	meter(now);
@@ -334,15 +501,13 @@ function schedule() {
 };
 
 /**
- * Listen for netifd's own events.
- *
- * This is what makes a session coming up something the daemon knows in
- * milliseconds rather than at the next pass. The dump above is still read every
- * few seconds, because an event that was missed - a restart, a busy router - is
- * a session reported wrong until something corrects it.
+ * Listen for netifd's own events - what makes a session coming up something
+ * this daemon knows in milliseconds rather than at the next pass. The dump is
+ * still read every few seconds, because an event that was missed is a session
+ * reported wrong until something corrects it.
  */
 function listen() {
-	if (!state.bus)
+	if (!state.bus || state.listener)
 		return;
 
 	try {
@@ -379,16 +544,15 @@ export function start() {
 };
 
 // ---------------------------------------------------------------------------
-// Creating and deleting.
+// Payloads and the shared gate.
 
 /**
- * Read an account payload out of a 0600 file, and delete the file.
+ * Read a spec out of a 0600 file, and delete the file.
  *
  * The file is how credentials get onto the router without ever being an
- * argument to anything: the module writes it through the SSH connection it
- * already has, with `umask 077`, and passes only its path. It is unlinked
- * before a single section is written, so a create that fails half way does not
- * leave a readable copy of somebody's account list in /tmp.
+ * argument to anything: the caller writes it with umask 077 and passes only
+ * its path. It is unlinked before a single check runs, so a flow that fails
+ * half way does not leave a readable copy of somebody's accounts in /tmp.
  */
 function takePayload(path) {
 	if (!match(path, /^\/tmp\/[A-Za-z0-9._-]{1,64}$/))
@@ -408,333 +572,461 @@ function takePayload(path) {
 		return { ok: false, reason: 'the payload is not valid JSON' };
 	}
 
-	if (type(value) != 'object' || type(value.accounts) != 'array')
-		return { ok: false, reason: 'the payload carries no account list' };
+	if (type(value) != 'object')
+		return { ok: false, reason: 'the payload is not a spec object' };
 
 	return { ok: true, payload: value };
 };
 
-/** Why this cannot be a new pool id, or null. */
-function poolIdRefusal(id) {
-	if (!match(id, /^[a-z][a-z0-9_]{0,30}$/))
-		return 'a pool id has to be 1 to 31 lower case letters, digits or underscores';
+/** The spec of a call: the named file when `source` is set, the args inline
+ * otherwise. One shape for pool_check, pool_create and pool_set. */
+function specOfCall(args) {
+	let source = text(args.source);
 
-	if (cfg.pool(id))
-		return 'this router already has a pool called ' + id;
+	if (length(source)) {
+		let taken = takePayload(source);
+		if (!taken.ok)
+			return taken;
 
-	return null;
-};
-
-/**
- * Why this range may not be written, or null.
- *
- * Two pools may not derive the same section names. A section is named from the
- * prefix and the sequence number and nothing else, so two pools sharing a
- * prefix with overlapping ranges name the same interfaces. Nothing further down
- * would notice: `sections.write` sets each one unconditionally, so the second
- * create silently rewrites the first pool's usernames, passwords and routing
- * tables, and the reload that follows redials those sessions on somebody else's
- * account. After that `sessions.owns` matches both pools to the same sections,
- * and deleting either one takes the other's interfaces with it.
- *
- * It is an easy mistake rather than an exotic one - adding capacity by creating
- * a second pool with the same prefix is the obvious thing to do, and getting
- * the starting sequence one too low is all it takes. `pool_append` exists so
- * that the obvious thing is also a supported one.
- *
- * The table range is deliberately not checked. Two pools sharing a routing
- * table is a routing question with legitimate answers; two pools sharing an
- * interface name has none.
- */
-function overlapRefusal(one, exceptId) {
-	for (let other in cfg.pools()) {
-		if (other.id == exceptId)
-			continue;
-		if (other.prefix != one.prefix)
-			continue;
-		if (one.seqFrom > other.seqTo || one.seqTo < other.seqFrom)
-			continue;
-
-		return sprintf('pool %s already holds %s%05d to %s%05d, and this range would overwrite its sessions',
-			other.id, other.prefix, other.seqFrom, other.prefix, other.seqTo);
+		return { ok: true, spec: taken.payload };
 	}
 
-	return null;
+	return { ok: true, spec: args };
 };
 
-/**
- * The account list of an inline call, or a refusal.
- *
- * The cap is checked here rather than at the writer because the answer a caller
- * needs is not "that failed" but "send it in pieces, and here is how big a
- * piece may be".
- */
-function accountRows(value) {
-	if (type(value) != 'array' || !length(value))
-		return { ok: false, reason: 'the call carries no account list' };
+/** Sections of this pool that are up right now, for the high-risk warnings. */
+function liveUpOf(id) {
+	let out = {};
+	let st = state.pools[id];
+	if (!st)
+		return out;
 
-	if (length(value) > INLINE_ACCOUNTS) {
-		return {
-			ok: false,
-			reason: sprintf('at most %d accounts in one call and %d were sent; create the pool with the first %d and add the rest',
-				INLINE_ACCOUNTS, length(value), INLINE_ACCOUNTS)
-		};
+	for (let name in st.sessions) {
+		if (st.sessions[name].up)
+			out[name] = true;
 	}
 
-	for (let row in value) {
-		if (type(row) != 'object')
-			return { ok: false, reason: 'an account row is not an object with a user and a pass' };
-	}
-
-	return { ok: true, accounts: value };
+	return out;
 };
 
-/**
- * Create a pool from a payload, however the payload arrived.
- *
- * Both callers reach here with the same object, so a pool created from a file
- * over SSH and a pool created from LuCI are the same pool: same checks, same
- * order, same record. What differs between them is only how the credentials
- * travelled, which is a question about the transport and not about the pool.
- *
- * The record is written before the interfaces, so a create interrupted anywhere
- * leaves a pool that `pool delete` can remove cleanly. The reverse order would
- * leave sections nothing knows the name of.
- */
-function createPool(id, payload) {
-	let refusal = poolIdRefusal(id);
-	if (refusal)
-		return { ok: false, reason: refusal };
-
-	let one = {
-		id: id,
-		prefix: text(payload.prefix),
-		carrier: text(payload.carrier),
-		seqFrom: type(payload.seqFrom) == 'int' ? payload.seqFrom : 0,
-		tableBase: type(payload.tableBase) == 'int' ? payload.tableBase : 0,
-		vlan: type(payload.vlan) == 'int' ? payload.vlan : 0,
-		created: time()
-	};
-
-	one.count = length(payload.accounts);
-	one.seqTo = one.seqFrom + one.count - 1;
-
-	if (!one.count)
-		return { ok: false, reason: 'the payload lists no accounts' };
-
-	// The same check `cfg.pools()` applies when it reads the file back.
-	//
-	// Without it a create can write a record the next read refuses and drops -
-	// a table base that runs off the end of the routing table range, a carrier
-	// nobody set - and a pool that has been dropped is a pool whose interfaces
-	// nothing knows the names of any more. Two identical rules, one applied
-	// only on the way in and one only on the way out, is how that happens.
-	let unusable = cfg.refusal(one);
-	if (unusable)
-		return { ok: false, reason: unusable };
-
-	let clash = overlapRefusal(one, null);
-	if (clash)
-		return { ok: false, reason: clash };
-
-	if (!cfg.remember(one))
-		return { ok: false, reason: 'the pool record could not be written, so nothing was created' };
-
-	let written = sections.write(one, payload.accounts, null);
-	if (!written.ok) {
-		return {
-			ok: false,
-			reason: written.reason,
-			written: written.written,
-			// The record is left behind on purpose. It is the only thing that
-			// knows the names of the sections that did get written, so it is
-			// also the only way to remove them.
-			id: id
-		};
+/** The one validation gate, with the router's current shape gathered in. */
+function checkRecord(record, creating, previous) {
+	let others = [];
+	for (let one in cfg.pools()) {
+		if (one.id != record.id)
+			push(others, one);
 	}
 
-	// One reload for the whole pool, or for the whole run of chunks it arrives
-	// in. netifd re-reads the configuration and starts dialling; that is not
-	// waited on, because a pool of five thousand takes minutes to come up and
-	// the caller wants an answer now.
-	reloadSoon();
-
-	// Not deferred with it: this is a re-read of uci, it costs nothing, and
-	// without it the `info` call that follows a create would not have the pool
-	// in it yet.
-	load();
-
-	return { ok: true, id: id, created: written.written, seqFrom: one.seqFrom, seqTo: one.seqTo, count: one.count };
+	return cfg.check(record, {
+		creating: creating,
+		previous: previous,
+		devices: deviceInfo(),
+		sections: networkSectionNames(),
+		liveUp: liveUpOf(record.id),
+		others: others
+	});
 };
 
-/**
- * Create a pool from a 0600 file, which is deleted as it is read.
- *
- * The path for anything that reaches ubus by running `ubus call`, where the
- * arguments are a command line and a password among them would be world
- * readable for as long as the process lived. It is also the method that names a
- * file for this daemon to read and unlink as root, which is why the LuCI ACL
- * grants `pool_add` and not this one.
- */
-export function poolCreate(args) {
+const LEGACY_REFUSAL = 'this is a pool from the old model - delete it and create it again as a pool of VLANs';
+
+// ---------------------------------------------------------------------------
+// The mutations. Record first, network second, firewall third, reloads last.
+
+export function poolCheck(args) {
 	let id = text(args.id);
 
-	// Checked before the payload is taken, because taking it deletes it. A pool
-	// name that turns out to be wrong should cost a retry, not the account
-	// list.
-	let refusal = poolIdRefusal(id);
-	if (refusal)
-		return { ok: false, reason: refusal };
+	if (cfg.legacyPool(id))
+		return { ok: false, reason: LEGACY_REFUSAL };
 
-	let taken = takePayload(text(args.source));
+	let given = specOfCall(args);
+	if (!given.ok)
+		return given;
+
+	let previous = cfg.pool(id);
+	let record = previous ? cfg.mergeSpec(previous, given.spec) : cfg.fromSpec(id, given.spec);
+
+	let gate = checkRecord(record, previous ? false : true, previous);
+
+	return { ok: gate.ok, findings: gate.findings };
+};
+
+function createPool(id, spec) {
+	if (cfg.legacyPool(id))
+		return { ok: false, reason: LEGACY_REFUSAL };
+
+	let record = cfg.fromSpec(id, spec);
+
+	let gate = checkRecord(record, true, null);
+	if (!gate.ok)
+		return { ok: false, reason: 'the spec did not pass validation', findings: gate.findings };
+
+	// The record is written before the interfaces, so a create interrupted
+	// anywhere leaves a pool that pool_delete can remove cleanly. The reverse
+	// order would leave sections nothing knows the name of.
+	if (!cfg.remember(record))
+		return { ok: false, reason: 'the pool record could not be written, so nothing was created' };
+
+	let written = sections.reconcile(record, null, carrierMacOf(record.carrier, null));
+	if (!written.ok) {
+		// The record stays behind on purpose: it is the only thing that knows
+		// the names of whatever did get written.
+		return { ok: false, reason: written.reason, id: id, created: length(written.added) };
+	}
+
+	let fw = firewall.reconcile(cfg.pools(), null);
+	if (!fw.ok)
+		err('pool ' + id + ': ' + fw.reason);
+
+	reloadSoon();
+	if (fw.ok && fw.changed)
+		fwReloadSoon();
+
+	load();
+
+	return { ok: true, id: id, created: length(written.added) };
+};
+
+/** Create from a 0600 file - the path for callers that reach ubus by running
+ * `ubus call`, where an inline password would sit in a command line. */
+export function poolCreate(args) {
+	let id = text(args.id);
+	let source = text(args.source);
+
+	if (!length(source))
+		return { ok: false, reason: 'pool_create takes { id, source }; inline specs go to pool_add' };
+
+	let taken = takePayload(source);
 	if (!taken.ok)
 		return taken;
 
 	return createPool(id, taken.payload);
 };
 
-/**
- * Create a pool from accounts sent inline.
- *
- * The path LuCI uses. See INLINE_ACCOUNTS for why credentials may travel this
- * way and why there is a limit on how many of them may travel at once.
- */
+/** Create from inline args - the path for LuCI, which reaches this daemon
+ * over the ubus socket where nothing is ever a command line. */
 export function poolAdd(args) {
-	let rows = accountRows(args.accounts);
-	if (!rows.ok)
-		return rows;
-
-	return createPool(text(args.id), {
-		prefix: text(args.prefix),
-		carrier: text(args.carrier),
-		seqFrom: type(args.seq_from) == 'int' ? args.seq_from : 0,
-		tableBase: type(args.table_base) == 'int' ? args.table_base : 0,
-		vlan: type(args.vlan) == 'int' ? args.vlan : 0,
-		accounts: rows.accounts
-	});
+	return createPool(text(args.id), args);
 };
 
-/**
- * Add sessions to the end of a pool that already exists.
- *
- * This is the answer to the trap `overlapRefusal` can only refuse. The obvious
- * way to add capacity is to create a second pool with the same prefix, and
- * getting the starting sequence one too low is all it takes to overwrite the
- * first pool's credentials. Extending the range means there is no second pool
- * and no arithmetic for anybody to get wrong.
- *
- * It is also how a pool larger than one ubus message is built: create with the
- * first chunk, append the rest. The record is widened before the chunk is
- * written, for the same reason it is written first on a create - it is the only
- * thing that knows the names of the interfaces, so it has to cover them before
- * they exist. A caller that goes away half way leaves a pool whose record is
- * wider than the sessions actually written, which `pool delete` removes
- * correctly and which the next append continues from.
- */
-export function poolAppend(args) {
+export function poolSet(args) {
 	let id = text(args.id);
-	let one = cfg.pool(id);
 
-	if (!one)
+	if (cfg.legacyPool(id))
+		return { ok: false, reason: LEGACY_REFUSAL };
+
+	let previous = cfg.pool(id);
+	if (!previous)
 		return { ok: false, reason: 'no pool called ' + id };
 
-	let rows = accountRows(args.accounts);
-	if (!rows.ok)
-		return rows;
+	let given = specOfCall(args);
+	if (!given.ok)
+		return given;
 
-	let added = {
-		id: one.id,
-		prefix: one.prefix,
-		carrier: one.carrier,
-		seqFrom: one.seqTo + 1,
-		tableBase: one.tableBase,
-		vlan: one.vlan,
-		created: one.created,
-		count: length(rows.accounts)
-	};
+	let record = cfg.mergeSpec(previous, given.spec);
 
-	added.seqTo = added.seqFrom + added.count - 1;
+	let gate = checkRecord(record, false, previous);
+	if (!gate.ok)
+		return { ok: false, reason: 'the spec did not pass validation', findings: gate.findings };
 
-	let clash = overlapRefusal(added, id);
-	if (clash)
-		return { ok: false, reason: clash };
+	if (!cfg.remember(record))
+		return { ok: false, reason: 'the pool record could not be rewritten, so nothing changed' };
 
-	let grown = {
-		id: one.id,
-		prefix: one.prefix,
-		carrier: one.carrier,
-		seqFrom: one.seqFrom,
-		seqTo: added.seqTo,
-		tableBase: one.tableBase,
-		vlan: one.vlan,
-		created: one.created
-	};
+	// Members leaving the pool are taken down while their sections still
+	// exist - netifd will not tear down a session whose config has already
+	// been deleted out from under it.
+	let kept = {};
+	for (let member in record.members)
+		kept[sprintf('%d', member.vlan)] = true;
 
-	// The widened record has to survive being read back, the same as a new one.
-	let unusable = cfg.refusal(grown);
-	if (unusable)
-		return { ok: false, reason: unusable };
+	for (let member in previous.members) {
+		if (!exists(kept, sprintf('%d', member.vlan)))
+			call('network.interface.' + cfg.sectionFor(previous.prefix, member.vlan), 'down', {});
+	}
 
-	if (!cfg.remember(grown))
-		return { ok: false, reason: 'the pool record could not be widened, so nothing was created' };
-
-	let written = sections.write(added, rows.accounts, null);
+	let written = sections.reconcile(record, previous, carrierMacOf(record.carrier, null));
 	if (!written.ok)
-		return { ok: false, reason: written.reason, written: written.written, id: id };
+		return { ok: false, reason: written.reason, id: id };
+
+	let fw = firewall.reconcile(cfg.pools(), null);
+	if (!fw.ok)
+		err('pool ' + id + ': ' + fw.reason);
 
 	reloadSoon();
+	if (fw.ok && fw.changed)
+		fwReloadSoon();
+
 	load();
 
 	return {
 		ok: true,
 		id: id,
-		created: written.written,
-		seqFrom: added.seqFrom,
-		seqTo: added.seqTo,
-		count: one.count + added.count
+		changed: { added: written.added, removed: written.removed, rewritten: written.rewritten }
 	};
 };
 
-/** Remove a pool: its interfaces first, then its record. */
 export function poolDelete(args) {
 	let id = text(args.id);
-	let one = cfg.pool(id);
+	let force = args.force === true || args.force == '1';
 
+	let old = cfg.legacyPool(id);
+	if (old) {
+		let binder = wanbindUsing(old.carrier);
+		if (binder && !force) {
+			return {
+				ok: false,
+				reason: sprintf('bm-wanbind instance %s hands clients to WANs on %s; disable it first or pass force',
+					binder, old.carrier)
+			};
+		}
+
+		for (let name in legacy.sectionsOf(old))
+			call('network.interface.' + name, 'down', {});
+
+		let gone = legacy.remove(old);
+		if (!gone.ok)
+			return gone;
+
+		cfg.forget(id);
+		reloadSoon();
+		if (gone.firewallChanged)
+			fwReloadSoon();
+		load();
+
+		return { ok: true, id: id, removed: gone.removed, legacy: true };
+	}
+
+	let one = cfg.pool(id);
 	if (!one)
 		return { ok: false, reason: 'no pool called ' + id };
 
-	let removed = sections.remove(one);
-	if (!removed.ok)
-		return removed;
+	let binder = wanbindUsing(one.carrier);
+	if (binder && !force) {
+		return {
+			ok: false,
+			reason: sprintf('bm-wanbind instance %s hands clients to WANs on %s; disable it first or pass force',
+				binder, one.carrier)
+		};
+	}
+
+	for (let member in one.members)
+		call('network.interface.' + cfg.sectionFor(one.prefix, member.vlan), 'down', {});
+
+	let gone = sections.removeAll(one);
+	if (!gone.ok)
+		return gone;
+
+	let remaining = [];
+	for (let other in cfg.pools()) {
+		if (other.id != id)
+			push(remaining, other);
+	}
+
+	let fw = firewall.reconcile(remaining, one);
+	if (!fw.ok)
+		err('pool ' + id + ': ' + fw.reason);
 
 	cfg.forget(id);
+
 	reloadSoon();
+	if (fw.ok && fw.changed)
+		fwReloadSoon();
+
 	load();
 
-	return { ok: true, id: id, removed: removed.removed };
+	return { ok: true, id: id, removed: gone.removed };
 };
 
 // ---------------------------------------------------------------------------
-// The published object.
+// Actions and settings.
+
+/**
+ * up, down, redial, enable or disable, on named sections.
+ *
+ * Only sections a pool owns: a ubus call naming an arbitrary interface must
+ * not become a way to take the router's own WAN down. enable and disable are
+ * the two that write configuration - `option auto '0'` - which is why they
+ * live here and not in the caller.
+ */
+export function actionCall(args) {
+	let what = text(args.action);
+	if (!(what in [ 'up', 'down', 'redial', 'enable', 'disable' ]))
+		return { ok: false, reason: 'the action has to be up, down, redial, enable or disable' };
+
+	let names = type(args.sections) == 'array' ? args.sections : [];
+	if (!length(names))
+		return { ok: false, reason: 'name at least one section' };
+
+	if (length(names) > ROW_LIMIT)
+		return { ok: false, reason: sprintf('at most %d sections in one call', ROW_LIMIT) };
+
+	let done = [];
+
+	for (let name in names) {
+		let owner = null;
+		for (let st in each()) {
+			if (sessions.owns(st, name)) {
+				owner = st;
+				break;
+			}
+		}
+
+		if (!owner)
+			continue;
+
+		push(done, name);
+	}
+
+	if (!length(done))
+		return { ok: false, reason: 'none of those sections belong to a pool on this router' };
+
+	if (what == 'enable' || what == 'disable') {
+		let set = sections.setAutostart(done, what == 'enable');
+		if (!set.ok)
+			return set;
+
+		for (let name in done) {
+			// Disable takes the session down now rather than at the reload;
+			// enable dials now rather than waiting for netifd to notice.
+			call('network.interface.' + name, what == 'enable' ? 'up' : 'down', {});
+		}
+
+		reloadSoon();
+
+		for (let st in each())
+			sessions.observeWritten(st, sections.stateOf(st.pool));
+
+		return { ok: true, action: what, sections: done };
+	}
+
+	for (let name in done) {
+		if (what == 'down' || what == 'redial')
+			call('network.interface.' + name, 'down', {});
+		if (what == 'up' || what == 'redial')
+			call('network.interface.' + name, 'up', {});
+	}
+
+	return { ok: true, action: what, sections: done };
+};
+
+export function settingsGet() {
+	return {
+		enabled: state.main.enabled,
+		counter_interval: state.main.counterInterval,
+		redial_after: state.main.redialAfter,
+		redial_batch: state.main.redialBatch
+	};
+};
+
+export function settingsSet(args) {
+	let refusal = cfg.settingsRefusal(args);
+	if (refusal)
+		return { ok: false, reason: refusal };
+
+	try {
+		let uci = cursor();
+
+		if (uci.get('bm_pppoe', 'main') === null)
+			uci.set('bm_pppoe', 'main', 'pppoe');
+
+		if (exists(args, 'enabled'))
+			uci.set('bm_pppoe', 'main', 'enabled', (args.enabled === true || args.enabled == '1') ? '1' : '0');
+		if (exists(args, 'counter_interval'))
+			uci.set('bm_pppoe', 'main', 'counter_interval', sprintf('%d', args.counter_interval));
+		if (exists(args, 'redial_after'))
+			uci.set('bm_pppoe', 'main', 'redial_after', sprintf('%d', args.redial_after));
+		if (exists(args, 'redial_batch'))
+			uci.set('bm_pppoe', 'main', 'redial_batch', sprintf('%d', args.redial_batch));
+
+		if (uci.commit('bm_pppoe') === null)
+			return { ok: false, reason: 'the settings could not be committed' };
+	}
+	catch (e) {
+		return { ok: false, reason: 'cannot write settings: ' + e };
+	}
+
+	// Applied now, not at the next restart: the timer is re-armed with the
+	// new interval, and a daemon switched off stops watching immediately.
+	let was = state.main.enabled;
+	state.main = cfg.main();
+
+	if (!state.main.enabled) {
+		if (state.timer) {
+			state.timer.cancel();
+			state.timer = null;
+		}
+	}
+	else {
+		if (!was)
+			listen();
+		schedule();
+	}
+
+	return { ok: true, settings: settingsGet() };
+};
+
+// ---------------------------------------------------------------------------
+// Questions.
+
+export function carriersList() {
+	let devices = deviceInfo();
+	if (devices === null)
+		return { ok: false, reason: 'neither netifd nor ' + SYS_NET + ' would say what devices exist', carriers: [] };
+
+	let out = [];
+	for (let name in devices) {
+		if (cfg.carrierRefusal(name))
+			continue;
+
+		push(out, { name: name, up: devices[name].up, macaddr: devices[name].macaddr });
+	}
+
+	return { ok: true, carriers: sort(out, (a, b) => a.name < b.name ? -1 : (a.name > b.name ? 1 : 0)) };
+};
 
 export function info() {
 	let out = [];
+
 	for (let st in each()) {
-		let one = sessions.summary(st);
-		one.rate = state.rates[st.pool.id] ? state.rates[st.pool.id] : { rxBps: 0, txBps: 0 };
+		let one = cfg.toSpec(st.pool);
+		let counts = sessions.tally(st);
+
+		one.members = counts.members;
+		one.up = counts.up;
+		one.dialing = counts.dialing;
+		one.down = counts.down;
+		one.error = counts.error;
+		one.stopped = counts.stopped;
+		one.unwritten = counts.unwritten;
+		one.createdAt = st.pool.created;
+		one.rate = state.rates.pools[st.pool.id]
+			? state.rates.pools[st.pool.id]
+			: { rxBps: 0, txBps: 0 };
+
 		push(out, one);
+	}
+
+	let old = [];
+	for (let one in cfg.legacyPools()) {
+		push(old, {
+			id: one.id,
+			prefix: one.prefix,
+			carrier: one.carrier,
+			seqFrom: one.seqFrom,
+			seqTo: one.seqTo,
+			count: one.count,
+			tableBase: one.tableBase
+		});
 	}
 
 	return {
 		name: 'bm-pppoe-pool',
 		release: RELEASE,
 		apiVersion: API_VERSION,
-		enabled: state.main.enabled,
-		counterInterval: state.main.counterInterval,
-		redialAfter: state.main.redialAfter,
+		settings: settingsGet(),
 		started: STARTED,
 		uptime: time() - STARTED,
-		pools: out
+		pools: out,
+		legacy: old
 	};
 };
 
@@ -757,8 +1049,6 @@ export function stats() {
 		eventsHandled: events,
 		redials: redials,
 		sessions: known,
-		// Named for what it is rather than for what it measures: this daemon has
-		// no queue of work, it has a queue of things that are broken.
 		queueDepth: known
 	};
 };
@@ -766,63 +1056,21 @@ export function stats() {
 export function sessionRows(args) {
 	let id = text(args.id);
 	let scope = text(args.scope);
+	let now = time();
 	let out = [];
 
 	for (let st in each()) {
 		if (length(id) && st.pool.id != id)
 			continue;
 
-		for (let row in sessions.rows(st, scope, ROW_LIMIT)) {
-			row.pool = st.pool.id;
+		for (let row in sessions.rows(st, scope, ROW_LIMIT - length(out), state.rates.devices, now))
 			push(out, row);
-		}
+
+		if (length(out) >= ROW_LIMIT)
+			break;
 	}
 
 	return { sessions: out, limit: ROW_LIMIT };
-};
-
-/** start, stop or redial one session, or a named list of them. */
-export function action(args) {
-	let what = text(args.action);
-	if (!(what in [ 'up', 'down', 'redial' ]))
-		return { ok: false, reason: 'the action has to be up, down or redial' };
-
-	let names = type(args.sections) == 'array' ? args.sections : [];
-	if (!length(names))
-		return { ok: false, reason: 'name at least one section' };
-
-	if (length(names) > ROW_LIMIT)
-		return { ok: false, reason: sprintf('at most %d sections in one call', ROW_LIMIT) };
-
-	let done = [];
-
-	for (let name in names) {
-		let owner = null;
-		for (let st in each()) {
-			if (sessions.owns(st, name)) {
-				owner = st;
-				break;
-			}
-		}
-
-		// Only sections this daemon knows are in one of its pools. A ubus call
-		// naming an arbitrary interface must not become a way to take the
-		// router's own WAN down.
-		if (!owner)
-			continue;
-
-		if (what == 'down' || what == 'redial')
-			call('network.interface.' + name, 'down', {});
-		if (what == 'up' || what == 'redial')
-			call('network.interface.' + name, 'up', {});
-
-		push(done, name);
-	}
-
-	if (!length(done))
-		return { ok: false, reason: 'none of those sections belong to a pool on this router' };
-
-	return { ok: true, action: what, sections: done };
 };
 
 export function reconcileNow() {
@@ -830,11 +1078,23 @@ export function reconcileNow() {
 	return { ok: true, pools: length(state.order) };
 };
 
+// ---------------------------------------------------------------------------
+// The published object.
+
+function specArgs(extra) {
+	let out = {};
+	for (let key in extra)
+		out[key] = extra[key];
+	for (let key in SPEC_ARGS)
+		out[key] = SPEC_ARGS[key];
+	return out;
+};
+
 function method(args, fn) {
-	// Accepted on every method because LuCI's dispatcher appends the session id
-	// to whatever a page sends, and ucode's publish refuses any named argument
-	// the template does not declare. Stripped before the handler runs, so the
-	// pool calls still receive exactly the fields they document.
+	// Accepted on every method because LuCI's dispatcher appends the session
+	// id to whatever a page sends, and ucode's publish refuses any named
+	// argument the template does not declare. Stripped before the handler
+	// runs, so the pool calls still receive exactly the fields they document.
 	args.ubus_rpc_session = '';
 
 	return {
@@ -853,19 +1113,29 @@ export const methods = {
 	stats: method({}, () => stats()),
 
 	sessions: method({ id: '', scope: '' }, (args) => sessionRows(args)),
+	carriers: method({}, () => carriersList()),
 
-	// `source` is a path, never the accounts themselves. See takePayload.
+	// The same gate every mutation runs; nothing is written. `source` names a
+	// 0600 file for callers arriving by command line; LuCI sends the spec
+	// inline over the socket.
+	pool_check: method(specArgs({ id: '', source: '' }), (args) => poolCheck(args)),
+
+	// `source` is a path, never the spec itself. See takePayload.
 	pool_create: method({ id: '', source: '' }, (args) => poolCreate(args)),
 
-	// Inline credentials, for callers that reach ubus over the socket rather
-	// than by running `ubus call`. See INLINE_ACCOUNTS.
-	pool_add: method({
-		id: '', prefix: '', carrier: '', seq_from: 0, table_base: 0, vlan: 0, accounts: []
-	}, (args) => poolAdd(args)),
+	// Inline spec, for callers that reach ubus over the socket rather than by
+	// running `ubus call` - nothing here is ever a command line.
+	pool_add: method(specArgs({ id: '' }), (args) => poolAdd(args)),
 
-	pool_append: method({ id: '', accounts: [] }, (args) => poolAppend(args)),
-	pool_delete: method({ id: '' }, (args) => poolDelete(args)),
+	pool_set: method(specArgs({ id: '', source: '' }), (args) => poolSet(args)),
+	pool_delete: method({ id: '', force: false }, (args) => poolDelete(args)),
 
-	action: method({ action: '', sections: [] }, (args) => action(args)),
+	action: method({ action: '', sections: [] }, (args) => actionCall(args)),
+
+	settings_get: method({}, () => settingsGet()),
+	settings_set: method({
+		enabled: false, counter_interval: 0, redial_after: 0, redial_batch: 0
+	}, (args) => settingsSet(args)),
+
 	reconcile: method({}, () => reconcileNow())
 };

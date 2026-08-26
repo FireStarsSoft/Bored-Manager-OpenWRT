@@ -39,22 +39,9 @@ const INSTANCE = {
   slot: 0
 }
 
-const BATCH = {
-  id: 'b1',
-  name: 'Home',
-  prefix: 'pd',
-  seqFrom: 1,
-  seqTo: 2,
-  count: 2,
-  carrier: 'eth1',
-  createdAt: 1
-}
-
 function hostData(): unknown {
   return {
-    version: 1,
-    nextSeq: 3,
-    batches: [BATCH],
+    version: 2,
     instances: [INSTANCE],
     extraTables: [],
     stickyMap: [],
@@ -119,7 +106,7 @@ describe('the registry and the manifest are the same list', () => {
     // left open.
     expect(FEATURES.deviceRows).toBeNull()
     expect(FEATURES.eventRows).toBeNull()
-    expect(FEATURES.pppoeBatchApply?.requires.length).toBeGreaterThan(0)
+    expect(FEATURES.poolCreateApply?.requires.length).toBeGreaterThan(0)
   })
 })
 
@@ -140,22 +127,15 @@ describe('what the gate stops', () => {
 
   it('refuses an apply whose capability disappeared after the check passed', async () => {
     // The gap the registry was written for. A token is issued by a check, and
-    // the apply that spends it used to trust the token alone.
+    // the apply that spends it used to trust the token alone. The gate sits in
+    // front of the token handling, so a router that lost the dialing stack
+    // refuses before any token is even looked at.
     const owrt = await router()
-    const checked = report(
-      await owrt.call('pppoeBatchCheck', {
-        name: 'Home',
-        carrier: 'eth1',
-        count: 2,
-        user: 'a@isp',
-        pass: 'x'
-      })
-    )
-
     await owrt.reprobe({ without: ['pppd'] })
-    const applied = await owrt.call('pppoeBatchApply', {
-      token: checked.token,
-      values: { name: 'Home', carrier: 'eth1', count: 2, user: 'a@isp', pass: 'x' }
+
+    const applied = await owrt.call('poolCreateApply', {
+      token: 'issued-before-the-router-changed',
+      values: { mode: 'multi', id: 'home', carrier: 'eth1', vlans: '101' }
     })
 
     expect((applied as OkResult).ok).toBe(false)
@@ -197,7 +177,7 @@ describe('what the gate stops', () => {
 })
 
 describe('what the gate deliberately lets through', () => {
-  it('never traps a user with a pool or an instance they cannot remove', async () => {
+  it('never traps a user with an instance they cannot remove', async () => {
     // A router that has lost everything. Stop and delete are the way out of
     // that, so refusing them would leave the user with records they can see,
     // cannot act on, and cannot get rid of.
@@ -205,13 +185,25 @@ describe('what the gate deliberately lets through', () => {
 
     for (const [method, args] of [
       ['bindingStop', ['bind_1']],
-      ['bindingDelete', ['bind_1']],
-      ['pppoeBatchDelete', ['b1']]
+      ['bindingDelete', ['bind_1']]
     ] as Array<[string, unknown[]]>) {
       const result = (await owrt.call(method, ...args)) as OkResult
       expect(errorOf(result)).not.toContain('missing on this router')
       expect(errorOf(result)).not.toContain('has not been checked yet')
     }
+    owrt.dispose()
+  })
+
+  it('sends a pool delete without its daemon to the page that restores it', async () => {
+    // Pools live on the router and only bm-pppoe-pool can take one apart -
+    // there is no SSH deleter left to fall back to. What the gate owes the
+    // user is the way back: the page that installs or updates the package.
+    const owrt = await router({ without: ['pppd', 'dnsmasq', 'fw4', 'nft', 'ip-full'] })
+
+    const result = (await owrt.call('poolDelete', 'fpt1')) as OkResult
+
+    expect(result.ok).toBe(false)
+    expect(errorOf(result)).toContain('Router packages')
     owrt.dispose()
   })
 
@@ -234,7 +226,8 @@ describe('what the gate deliberately lets through', () => {
     // A table that refuses to render is strictly worse than an empty one that
     // says why - and the sentence saying why is itself one of these reads.
     expect(await owrt.call('deviceRows')).toEqual([])
-    expect(await owrt.call('pppoeBatches')).toHaveLength(1)
+    expect(await owrt.call('pppoePools')).toEqual([])
+    expect(await owrt.call('pppoeLegacyRows')).toEqual([])
     expect((await owrt.call('installHint')) as { hint: string }).toHaveProperty('hint')
     owrt.dispose()
   })

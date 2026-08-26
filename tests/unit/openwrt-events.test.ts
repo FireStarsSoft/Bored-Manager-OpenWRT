@@ -6,6 +6,7 @@ import { EventLog, type EventStore, type EventStoreData } from '../../openwrt/ma
 import { DEFAULT_RULES } from '../../openwrt/main/config'
 import { HostStore, MAX_MODULE_EVENTS } from '../../openwrt/main/store'
 import { moduleHarness, sharedModuleConfig } from '../helpers/module-harness'
+import { isProbeCommand, POOL_AGENT_INFO, routerProbeOutput } from '../helpers/router'
 
 /**
  * PPPoE and router notices used to reach the app log and nowhere else: a create
@@ -229,37 +230,92 @@ describe('module event log', () => {
 })
 
 describe('PPPoE lifecycle events reaching the module UI', () => {
-  it('records a delete through the wired hook and serves it to the Events table', async () => {
+  /** A router whose pool daemon answers, so the delete flow can run whole. */
+  function pooledRouter(): ReturnType<typeof moduleHarness> {
+    let deleted = false
     const harness = moduleHarness('openwrt', () => ok(''), {
-      hostData: {
-        version: 1,
-        nextSeq: 5,
-        batches: [
-          {
-            id: 'b1',
-            name: 'Home',
-            prefix: 'pd',
-            carrier: 'eth1',
-            createdAt: 1,
-            count: 1,
-            seqFrom: 1,
-            seqTo: 1
-          }
-        ]
-      },
       config: sharedModuleConfig(null)
     })
-    harness.exec.mockImplementation(async (command, options) => {
-      const stdin = options?.stdin ?? ''
-      if (command === 'sh -s' && stdin.startsWith('uci -q show network')) {
-        return ok('network.pd00001=interface\nfirewall.bmwanpool=zone')
+    harness.exec.mockImplementation(async (command) => {
+      if (isProbeCommand(command)) {
+        return ok(routerProbeOutput({ agent: POOL_AGENT_INFO }))
       }
-      if (command.startsWith('nft list ruleset')) return ok('1')
+      if (command.includes('bm.pppoe pool_delete')) {
+        deleted = true
+        return ok(JSON.stringify({ ok: true, id: 'fpt1', removed: 1 }))
+      }
+      if (command.includes('bm.pppoe info')) {
+        return ok(
+          JSON.stringify({
+            name: 'bm-pppoe-pool',
+            release: '2.0.0',
+            apiVersion: 2,
+            settings: { enabled: true, counter_interval: 5, redial_after: 120, redial_batch: 20 },
+            started: 1,
+            uptime: 1,
+            pools: deleted
+              ? []
+              : [
+                  {
+                    id: 'fpt1',
+                    mode: 'multi',
+                    label: 'Home',
+                    prefix: 'fpt',
+                    carrier: 'eth1',
+                    mac_mode: 'auto',
+                    username: 'u@isp',
+                    hasPassword: true,
+                    table_base: 10_000,
+                    service: '',
+                    ac: '',
+                    ac_mac: '',
+                    mtu: 0,
+                    keepalive: '',
+                    ipv6: '0',
+                    peerdns: false,
+                    dns: [],
+                    defaultroute: true,
+                    host_uniq: '',
+                    demand: 0,
+                    padi_attempts: 0,
+                    padi_timeout: 0,
+                    pppd_options: '',
+                    zone: 'bmwanpool',
+                    masq: true,
+                    mtu_fix: true,
+                    lan_forward: true,
+                    created: 1,
+                    memberList: [{ vlan: 101, username: '' }],
+                    members: 1,
+                    up: 0,
+                    dialing: 0,
+                    down: 1,
+                    error: 0,
+                    stopped: 0,
+                    unwritten: 0,
+                    createdAt: 1,
+                    rate: { rxBps: 0, txBps: 0 }
+                  }
+                ],
+            legacy: []
+          })
+        )
+      }
+      if (command.includes('bm.pppoe sessions')) {
+        return ok(JSON.stringify({ sessions: [], limit: 500 }))
+      }
       return ok('')
     })
-    const runtime = activate(harness.ctx)
+    return harness
+  }
 
-    harness.handlers.get('pppoeBatchDelete')?.('b1')
+  it('records a delete through the wired hook and serves it to the Events table', async () => {
+    const harness = pooledRouter()
+    const runtime = activate(harness.ctx)
+    runtime.applyPollers?.()
+    await settle(30)
+
+    harness.handlers.get('poolDelete')?.('fpt1')
     await settle(40)
 
     const rows = harness.handlers.get('eventRows')?.('pppoe') as Array<{
@@ -269,42 +325,18 @@ describe('PPPoE lifecycle events reaching the module UI', () => {
     }>
     expect(rows.some((row) => row.kind === 'pppoe-delete')).toBe(true)
     expect(rows[0].source).toBe('pppoe')
-    expect(rows[0].text).toContain('Home')
+    expect(rows[0].text).toContain('fpt1')
     runtime.dispose?.()
     harness.revoke()
     expect(harness.afterStopCalls).toEqual([])
   })
 
   it('emits nothing the specs do not read', async () => {
-    const harness = moduleHarness('openwrt', () => ok(''), {
-      hostData: {
-        version: 1,
-        nextSeq: 5,
-        batches: [
-          {
-            id: 'b1',
-            name: 'Home',
-            prefix: 'pd',
-            carrier: 'eth1',
-            createdAt: 1,
-            count: 1,
-            seqFrom: 1,
-            seqTo: 1
-          }
-        ]
-      },
-      config: sharedModuleConfig(null)
-    })
-    harness.exec.mockImplementation(async (command, options) => {
-      const stdin = options?.stdin ?? ''
-      if (command === 'sh -s' && stdin.startsWith('uci -q show network')) {
-        return ok('network.pd00001=interface\nfirewall.bmwanpool=zone')
-      }
-      if (command.startsWith('nft list ruleset')) return ok('1')
-      return ok('')
-    })
+    const harness = pooledRouter()
     const runtime = activate(harness.ctx)
-    harness.handlers.get('pppoeBatchDelete')?.('b1')
+    runtime.applyPollers?.()
+    await settle(30)
+    harness.handlers.get('poolDelete')?.('fpt1')
     await settle(40)
     runtime.dispose?.()
 

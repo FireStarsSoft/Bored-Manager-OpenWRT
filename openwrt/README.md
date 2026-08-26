@@ -45,14 +45,16 @@ of it still has a working dashboard:
 |---|---|---|
 | Dashboard, interfaces, history charts | nothing beyond the base system above | - |
 | DHCP device table, and device discovery generally | dnsmasq | Leases are where devices come from, so the table stays empty. |
-| Managed PPPoE pools | fw4 + nft, plus `ppp`, `ppp-mod-pppoe` and kernel PPPoE | The create check refuses and names the piece that is missing. |
+| Managed PPPoE pools | fw4 + nft, plus `ppp`, `ppp-mod-pppoe` and kernel PPPoE, plus the router packages with `bm-pppoe-pool` 2.x | The create check refuses and names the piece that is missing. Pools are owned end to end by the router's own daemon; there is no SSH path for them. |
 | WAN binding | fw4 + nft, `ip rule` support, dnsmasq | The create check refuses; each of the three has its own reason. |
 | PPPoE dial errors | `logread` | A failed session still shows as failed, with no reason for it. |
 
 Three of those are package groups the module installs for you from Module
 settings: PPPoE support (`ppp ppp-mod-pppoe kmod-pppoe`), policy routing
 (`ip-full`) for `ip rule`, and DHCP leases (`dnsmasq`). `logread` is part of the
-base system and is not installed from here.
+base system and is not installed from here. The router packages have a section
+of their own - **Router packages**, under Module settings - and the PPPoE tab
+points there whenever the pool daemon is what is missing.
 
 fw4 is the one entry the module will not close for you, and it is deliberately
 **not** a blocking requirement. A router still on fw3/iptables keeps its
@@ -93,7 +95,7 @@ Source, issues and changelog live in
 | Where | What |
 |---|---|
 | Sidebar → OpenWRT → Dashboard | Four groups on a rail. **Overview**: router health and seven live tiles with sparklines. **History**: four charts at 1 hour, 6 hours or 24 hours. **Devices**: DHCP clients, and every device waiting for a WAN. **Interfaces**: the interfaces *outside* the managed PPPoE pool - the first 64 by name, since this table is pushed on every tick. The pool itself is summarised rather than listed: a thousand `pppoe-*` sessions are a number, not a thousand rows, and the page says how many interfaces it is *not* listing. |
-| Sidebar → OpenWRT → Automation → PPPoE Dialer | Everything about the dialer in one place: create, start, stop, redial, inspect and remove one to thousands of PPPoE sessions from a text file or pasted list, plus the batch pacing and limits behind them. |
+| Sidebar → OpenWRT → Automation → PPPoE Dialer | Everything about the dialer in one place, on its own rail: **Pools** - every pool the router's daemon holds, member states, throughput, per-row and per-pool actions, and the legacy list; **Create a pool** - one member per VLAN, from a pasted or uploaded list; **Daemon settings** - the counter interval and the redial watchdog, edited on the router where they live. |
 | Sidebar → OpenWRT → Automation → WAN Binding | Everything about binding in one place: create an instance that assigns every DHCP client on one selected LAN to one free WAN on one selected carrier, one-to-one, and the defaults new instances start from. |
 | Sidebar → OpenWRT → Automation → Jobs | Live progress cards for chunked operations, per-step timings, and finished-job history. |
 | Sidebar → OpenWRT → Automation → Events | Binding, PPPoE and router events in one table. Outside this page they reach the app log and stop there. |
@@ -238,25 +240,33 @@ does have business doing is saying so before an apply.
 ### What each control needs before it will run
 
 Every method the pages can call is listed in `main/requirements.ts`, and
-`runtime/handlers.ts` routes all thirty-nine through the one gate that reads it.
+`runtime/handlers.ts` routes all forty-five through the one gate that reads it.
 Before that, the requirements were two hand-written `if` chains inside the two
-create handlers: `pppoeBatchApply` would apply a plan the check had refused, and
+create handlers: an apply would run on a plan its own check had refused, and
 `bindingStart` on an instance created months ago never asked again whether
 `ip rule` still worked - a router that had lost `ip-full` answered a start with
 whatever BusyBox prints for a subcommand that does not exist.
 
 | Control | Needs |
 |---|---|
-| Every table, list and chip - `deviceRows`, `pppoeBatches`, `pppoeRows`, `bindingRows`, `eventRows`, `rulesEffective` | nothing. A table that refuses to render is strictly worse than an empty one that says why |
+| Every table, list and chip - `deviceRows`, `pppoePools`, `pppoeRows`, `pppoeLegacyRows`, `pppoeCarriers`, `pppoeSettingsGet`, `bindingRows`, `eventRows`, `rulesEffective` | nothing. A table that refuses to render is strictly worse than an empty one that says why |
 | Check now / refresh (`sweepNow`), the hints toggle | nothing. It is the only way out of a stale verdict, so nothing derived from that verdict may block it |
 | Install missing packages (`setupCheck`, `setupApply`) | nothing. Gating the installer on the packages it exists to install is a loop with no way out; it does its own checking |
-| Create a PPPoE batch (`pppoeBatchCheck`, `pppoeBatchApply`) | PPPoE support - Firewall4 present - its ruleset loaded - netifd running |
-| Start / stop / redial a session (`pppoeBatchAction`, `pppoeConnAction`) | PPPoE support |
+| Create or edit a pool (`poolCreateCheck`, `poolCreateApply`, `poolSetCheck`, `poolSetApply`) | PPPoE support - Firewall4 present - its ruleset loaded - the pool daemon - netifd running |
+| Up / down / redial / enable / disable (`pppoePoolAction`, `pppoeConnAction`), Delete a pool (`poolDelete`), the daemon settings (`pppoeSettingsCheck`, `pppoeSettingsApply`) | the pool daemon. Every one of them is a daemon call now, including delete - see below |
 | Create a binding instance (`bindingCheck`, `bindingApply`) and Start (`bindingStart`) | Firewall4 present - its ruleset loaded - `ip rule` support - dnsmasq present - dnsmasq running - netifd running |
 | Unassign / Reassign / Pin (`bindingUnassign`, `bindingReassign`, `bindingPin`) | `ip rule` support |
 | Rename an instance (`bindingUpdate`), the Rules editor, job bookkeeping | nothing. None of them touches the router |
 | Router packages (`agentRows`, `agentInstallCheck`, `agentInstallApply`, `agentUninstallCheck`, `agentUninstallApply`) | nothing, for the same reason the installer needs nothing: these are the flows that put a router into the state everything else asks for. Each does its own checking, in far more detail than a capability flag could carry |
-| Stop and Delete (`bindingStop`, `bindingDelete`, `pppoeBatchDelete`) | nothing, deliberately. A pool on a router that has since lost ppp is exactly the pool somebody most wants to be able to delete |
+| Stop and Delete a binding instance (`bindingStop`, `bindingDelete`) | nothing, deliberately. An instance on a router that has since lost `ip-full` is exactly the instance somebody most wants to be able to remove |
+
+Deleting a pool is the one flow that moved the other way, and on purpose: only
+the pool daemon knows everything a pool derived - the sections, the tagged
+devices, the zone memberships, the record - so a router that lost
+`bm-pppoe-pool` cannot delete a pool until the package is back, and the refusal
+says to reinstall it. That is also the only path that ever removes the pool;
+netifd keeps dialling the sessions meanwhile, so nothing is stranded by
+waiting.
 
 A requirement is worded in exactly one place, so the card, the create form and
 the row action cannot describe one router in three vocabularies. Where the fix
@@ -379,16 +389,26 @@ somebody's five thousand sessions down with it, so it takes nothing at all.
 Three states, and the readiness list names all three rather than folding the
 middle one into either end:
 
-| The router has | Binding and pools are | The safety net is |
-|---|---|---|
-| nothing | this module's, over SSH | not available |
-| `bm-agent` only | this module's, over SSH | there |
-| the feature packages too | the router's own | there |
+| The router has | Binding is | PPPoE pools are | The safety net is |
+|---|---|---|---|
+| nothing | this module's, over SSH | not available | not available |
+| `bm-agent` only | this module's, over SSH | not available | there |
+| the feature packages too | the router's own | the router's own | there |
 
 The middle row is the one that used to have no name. It is not compatibility
 mode - snapshots and the commit-confirm guard are working - and it is not fully
-set up either, and a person looking at a router that binds a little slowly than
+set up either, and a person looking at a router that binds a little slower than
 they expected deserves to be told which of the two they have.
+
+The two automations sit differently in that table, and the difference is
+deliberate. Binding predates the packages and keeps its SSH half for ever: a
+router that loses `bm-wanbind` falls back at the capability verdict and every
+client keeps its WAN. Pools moved to the router entirely at 3.0.0 - the daemon
+owns the record, the sections, the firewall and the MACs, and this module is a
+client of it. A router without `bm-pppoe-pool` has no pool surface beyond the
+sentence saying what to install; the sessions of a pool created before the
+package went missing keep dialling regardless, because they are ordinary
+netifd configuration.
 
 When the router is binding, this module plans nothing and writes no ip rule at
 all. That is not a preference, it is the only safe arrangement: two writers in
@@ -399,71 +419,99 @@ lives at the capability verdict, where "no package" and "a stopped service" and
 
 ## Automation 1: PPPoE Dialer
 
-The input is one account per line:
+A pool is one uplink and a list of VLANs, one PPPoE session each - which is the
+shape ISPs actually hand these routers: a handful of tagged VLANs on one cable,
+often all of them on one shared account that the access concentrator tells
+apart by MAC. The router's own daemon, `bm-pppoe-pool`, owns the pool end to
+end; this module is a client of it, and so is the router's LuCI page, and so is
+`bmpppoe` at a console - one gate, one set of refusals, whichever surface asks.
+
+Two modes, chosen at creation and fixed for the pool's life:
+
+- **One shared account** - the username and password sit on the pool, every
+  member dials with them, and every member presents its own derived MAC so the
+  BRAS can keep the sessions apart. This is the mode the model exists for.
+- **One account per VLAN** - each member line carries its own credentials.
+
+The member list is one line per VLAN:
 
 ```text
-# username password [vlan]
-account-001 password-001
-account-002,password-002,35
-account-003|password-003|35
+# vlan [username password]
+101
+102
+35 account-003 password-003
+0
 ```
 
-Tab, comma, semicolon, pipe, or repeated whitespace can separate fields. Blank
-and `#` comment lines are ignored. Uploading a `.txt` file and pasting the same
-text are equivalent; uploaded text is read in the browser and sent through the
-normal module RPC.
+Tab, comma, semicolon, pipe, or repeated whitespace can separate fields; blank
+and `#` comment lines are ignored; uploading a `.txt` file and pasting the same
+text are equivalent. VLAN 0 means untagged - the pool dials straight over the
+carrier, and only one member can. A pool holds at most 500 members, which is
+also why the whole spec travels in one call and a create is never half-done by
+a connection that dropped.
 
-Each row becomes an OpenWRT `config interface` with:
+Everything else about a member is derived on the router, never stored, and
+never spelled twice: prefix `fpt` and VLAN 101 are interface section `fpt101`
+dialling as device `pppoe-fpt101` over `eth1.101`, with routing table
+`table base + 101` and a MAC hashed from the carrier's own MAC and the pool id.
+Deterministic MACs are what make the shared account safe: a pool re-created
+after a reboot presents the same addresses, so the BRAS never meets a stranger
+and never drops the lot. Each pool also names its firewall zone (pools may
+share one); the daemon builds its member list, masquerading and MTU fix, and
+writes one forwarding from the LAN zone - found from the router's own firewall
+configuration, not assumed to be called `lan`.
 
-- `proto pppoe`;
-- the selected physical carrier or VLAN device;
-- its own `ip4table`, derived from the section sequence;
-- automatic netifd startup and retry;
-- peer DNS and IPv6 disabled, so thousands of sessions do not fight over the
-  router's default DNS or IPv6 routes.
+The carrier dropdown is served by the router's daemon and offers bare devices
+only - `eth1`, never `eth1.835` - because the VLANs are the member list's job.
+It refuses bridges, tunnels and already-tagged devices with the same sentences
+the daemon would refuse them with. WAN Binding has its own dropdown with the
+opposite rule; see below.
 
-The carrier dropdown on this form lists bare devices only - `eth1`, never
-`eth1.835`. The VLAN field beside it is what builds the tagged device, so
-offering a tagged one would have the batch dial on `eth1.835.100`. WAN Binding
-has its own dropdown with the opposite rule; see below.
+The check runs on the router, through the same gate the apply uses, so what the
+preview says is what the apply would refuse. Local parse errors are named by
+line number; a control character in a credential is an error named by VLAN and
+never quoted back - a password echoed into a check report is a password in
+whatever keeps that report. Two accounts the same within a pool is a warning
+(that is what shared-account mode is for); a VLAN another pool already dials on
+the same carrier is a refusal by pool name.
 
-The check refuses a list before it writes anything. Two of its answers are worth
-knowing in advance:
+**A pool can be edited.** Members, label, credentials, DNS, MTU, the firewall
+switches, the advanced pppd knobs - everything except the prefix and the mode,
+which name what the pool is; the refusal for those says to delete and recreate.
+A member kept by its VLAN keeps whatever the edit does not restate, so
+reshaping the list never means retyping secrets, and the check says which
+changes redial sessions - a moved carrier, a changed table base, a new shared
+password - with the count of sessions they take down, before anything is
+applied.
 
-- **A control character in a username or a password is an error**, named by row
-  and by field. The value is never quoted back - a password echoed into a check
-  report is a password in whatever keeps that report - so re-export the list as
-  plain text rather than looking for the offending character in the message. The
-  same sieve applies to the batch name and to a binding instance name.
-- **A username the router already dials is a warning**, whether it came from an
-  earlier batch of this module's or from a `config interface` someone wrote by
-  hand. Most access concentrators answer a second session on one account by
-  dropping the first, which looks like a flapping line rather than a duplicate.
+A member reads `up`, `dialing`, `down`, `error`, `stopped` or `unwritten`.
+`stopped` is a member somebody took down or disabled; `unwritten` is one the
+record names that has no section on the router - what a create that died half
+way leaves behind, and what any later edit of the pool writes out.
+**Enable and disable** persist `option auto` on the router, so a disabled
+member stays down across reboots rather than dialling again at the next one.
+The redial watchdog is the daemon's own - netifd retries a session better than
+anything else could, and the watchdog is for the ones it has given up on - and
+its patience and batch size are edited on the **Daemon settings** tab, stored
+in `/etc/config/bm_pppoe` where the daemon reads them.
 
-Creation and control happen in bounded chunks (100 by default) with a delay
-between chunks. A 5,000-account import therefore creates about 50 job items,
-not 5,000 UI items or 5,000 simultaneous commands. Netifd performs normal PPP
-retry; the optional slow watchdog can redial a session that remains failed for
-an unusually long time.
+Deleting a pool is the daemon's teardown: sessions down, interface sections and
+tagged devices removed, zone memberships dropped and the zone with them when
+nothing else uses it, record last. This module adds the one gate the daemon
+cannot see - a delete is refused by instance name while a running WAN Binding
+instance is distributing clients across that pool's carrier, because the pool
+would go while the fail-closed catch-all stayed. Pools created by releases
+before 3.0.0 appear in a **legacy** list: visible, counted, and delete-only,
+because the old model recorded a sequence range and there is nothing safe to
+translate it into.
 
-A session reads `up`, `dialing`, `error`, `stopped`, `missing` or `unknown`.
-`missing` is a session this module has a record for that the router's interface
-list does not contain; `unknown` is one that nothing has been read about yet,
-which is the state of every session for the first tick after a connect. A
-session that stays in `dialing` for five minutes - far longer than any real
-PPPoE negotiation, and longer than the inter-chunk delays of the largest create
-this module will run - becomes an error with code `DIAL_TIMEOUT`, so the
-watchdog can pick it up and the batch chip stops calling it healthy.
-
-Deleting a batch stops its sessions, removes its UCI sections and any VLAN
-device nothing else is using, and rebuilds the shared firewall zone around
-whatever is left. Deleting the *last* batch takes the zone and its LAN
-forwarding off the router entirely rather than leaving an empty one behind.
-
-PPPoE passwords must exist in `/etc/config/network` for netifd to dial. That
-file is clear text on the router. Passwords are never copied into Bored Manager
-config or host data, returned by a query, emitted in a stream, or placed on a
-command line. Protect root access and router backups accordingly.
+PPPoE passwords must exist in `/etc/config/network` for netifd to dial, and
+the pool record in `/etc/config/bm_pppoe` carries them too (the daemon's
+install marks that file `0600`). Both files are clear text on the router. Passwords
+are never copied into Bored Manager config or host data, returned by a query,
+emitted in a stream, or placed on a command line - a spec travels to the router
+as a `0600` file that the daemon unlinks as it reads. Protect root access and
+router backups accordingly.
 
 ## Automation 2: WAN Binding
 
@@ -558,10 +606,11 @@ When a reconcile fails, the tables keep the timestamp of the last pass that
 actually reached the router rather than being restamped as fresh, and the tab
 shows what went wrong.
 
-While an instance is running, the PPPoE batch on the same carrier cannot be
-deleted. The pool it hands out would go and the fail-closed catch-all would
+While an instance is running, the PPPoE pool on the same carrier cannot be
+deleted. The WANs it hands out would go and the fail-closed catch-all would
 stay, which leaves the scoped LAN with no route out and nothing on screen to
-explain it. The refusal names the instance to stop first.
+explain it. The refusal names the instance to stop first, and `eth1` and
+`eth1.835` count as the same uplink in both directions.
 
 ## Real-time data and scale
 
@@ -570,14 +619,15 @@ chart points are pushed with module events. Tables that may contain thousands
 of rows are requested over that same socket only while visible and are answered
 from the server's RAM cache; opening a table never starts another SSH probe.
 
-The two tables that can be genuinely large are split further. A batch drawer and
-a binding instance's Assignments each sit behind a two-tab subnav - **Needs
-attention** and **All** - and only the open tab is asked for. A 5,000-account
-batch is about a megabyte of rows, and a drawer left open re-polls on the fast
-interval for as long as it is open.
+The one table that can be genuinely large is split further: a binding
+instance's Assignments sit behind a two-tab subnav - **Needs attention** and
+**All** - and only the open tab is asked for. A pool is at most 500 members, so
+its drawer is one filterable table; the member rows come from the daemon's
+record, cached module-side with a short TTL, and a drawer left open re-polls on
+the fast interval for as long as it is open.
 
 The fast sweep itself steps down when there is nothing to be fast for. On a
-router with no PPPoE batch and no binding instance, and with neither the
+router with no PPPoE pool and no binding instance, and with neither the
 Overview widget nor an OpenWRT page open, it runs at the *slow* interval instead:
 there is nothing to reconcile, so it would only be feeding a dashboard nobody is
 looking at. With either automation configured the rate never changes, because a
@@ -646,22 +696,24 @@ wrong.
 | Data | Location | Notes |
 |---|---|---|
 | Module rules and hint preference | `data/user-settings/module-config/openwrt.json` | Shared preference document; no credentials. |
-| Batch metadata, binding instances, sticky MAC hints, binding events, PPPoE and router events, finished jobs | `data/module-data/openwrt/<hostKey>.json` | Per router; kept below the 512 KiB module-data limit. A file written by 1.0.x is read as-is; the two event rings are kept apart so binding churn cannot push out the rarer PPPoE and router entries, and each binding instance gets its own share of its ring so one busy LAN cannot empty a quiet instance's drawer. |
+| Binding instances, sticky MAC hints, binding events, PPPoE and router events, finished jobs | `data/module-data/openwrt/<hostKey>.json` | Per router; kept below the 512 KiB module-data limit. A file written by an earlier release is read as-is - the batch records a 2.x file carries are deliberately not read, because the router's own pool records replaced them as the truth. The two event rings are kept apart so binding churn cannot push out the rarer PPPoE and router entries, and each binding instance gets its own share of its ring so one busy LAN cannot empty a quiet instance's drawer. |
+| Pool records - members, credentials, zone, table base | `/etc/config/bm_pppoe` on OpenWRT | The daemon's own; `0600`; snapshotted and restored by `bm-agent` with the rest. |
 | PPPoE interface definitions and passwords | `/etc/config/network` on OpenWRT | Router is the source of truth. |
 | Live assignments | `ip rule` plus DHCP leases on OpenWRT | Derived each tick; not duplicated in host data. |
 
-Most writes are debounced by ten seconds. Creating, editing or deleting a batch
-or a binding instance is not: that record is the only way the module can ever
-find five thousand live PPPoE sections again, and a crash inside the debounce
-would bring the module back distributing clients under flags the page it was
-changed on has already forgotten. Those go straight to disk.
+Most writes are debounced by ten seconds. Creating, editing or deleting a
+binding instance is not: that record is the only place its flags live, and a
+crash inside the debounce would bring the module back distributing clients
+under flags the page it was changed on has already forgotten. Those go straight
+to disk. A pool needs no such care on this side any more - its record lives on
+the router, and the module's copy is a cache that refills on the next read.
 
 When the document will not fit, the sticky map is what shrinks first, down to a
 floor of 100 entries, and only then the event rings and the job history - a
 document is large because of sticky entries, so spending history first sacrifices
 the record of what the module did to save something that was never the problem.
 A job that has to be trimmed keeps its failures, warnings and cancellations
-rather than its first few steps. Batches, binding instances and routing-table
+rather than its first few steps. Binding instances and routing-table
 assignments are never candidates; losing one of those loses the router.
 
 Running jobs are in memory and are cancelled when the module stops;
@@ -681,31 +733,33 @@ items 1 to 6 are what 2.0.0 changed most, 15 to 19 what 2.1.0 did, 25 to 29
 what 2.2.0 did, 30 to 37 what the router packages at 1.3.0 and module 2.3.0 did
 together, and 38 to 49 the LuCI app, the two-writer fixes and the standing
 promise that the router keeps every capability with no app attached, all in
-1.4.0 / 2.4.0.
+1.4.0 / 2.4.0. The PPPoE items among them - 4, 5, 7, 10, 11, 26, 43, 45 and
+46 - are written against the pool model of 3.0.0 and the 2.0.0 packages, which
+replaced the batches every earlier release tested.
 
 1. **The probe reads the router correctly.** At a router shell, `for t in ubus uci ip fw4 logread nft netifd pppd dnsmasq opkg apk; do command -v "$t"; done` and compare the result with the cards under Router readiness. Nothing present should be listed as missing. (`command -v ubus uci ip …` on one line is the 1.0.x form, and answers only the first name - that is the bug 2.0.0 fixes, so the two outputs disagreeing is the expected result.) Confirm too that `df -k /overlay` and `id -u` match what the Install readiness card reports.
 2. **A 24.10 router is refused, and refused in the right words.** Connect one. Both pages must show the blocked panel - "This router cannot be managed yet" on the Dashboard, "This router cannot be automated yet" on Automation - with the Problem row reading *"This module needs OpenWrt 25.12 or newer. This router runs 24.10.2 and still uses opkg."*, naming the release the router actually runs. Nothing is collected, and **Install missing packages** must offer no form at all, only the sentence saying why. A router with neither package database instead reads *"No apk package database on this router. This module needs OpenWrt 25.12 or newer, which replaced opkg with apk."* - the two are deliberately different, because "no package manager" on a working 24.10 router sends the user hunting for a broken installer instead of at a firmware upgrade.
 3. **Installing through apk.** On a 25.12 router that is genuinely missing one of the three groups, run Install missing packages. The job should run `apk update`, then one `apk add` per package as its own cancellable step, then a verify step that re-probes and turns the readiness card green - and the create form that was refusing should stop refusing, without a reconnect. On a snapshot build, `kmod-pppoe` may refuse over a kernel-version mismatch: the job must fail on that step and say so, not report success. Open LuCI's Software page and start an install with it held open: the step should say the database is locked, in words, and succeed on its retry three seconds later once the page is closed. The check report names the commands before you confirm them: they must only ever be `apk update` and `apk add <name>`, and never `apk upgrade`.
-4. **A PPPoE batch on a VLAN-tagged uplink.** With the ISP on, say, VLAN 835, the carrier dropdown must offer `eth1` and **not** `eth1.835` - this form builds the tagged device itself. Choose `eth1`, put 835 in the VLAN field, and create a small batch. The router should end up with a `bmv835` device section describing `eth1.835`, every session dialing on that device, and the pool zone claiming `pppoe-<prefix>+` in `nft list ruleset`. Delete the batch afterwards and confirm the VLAN device goes with it once nothing else is using it.
-5. **Deleting a batch under a running binding instance is refused.** Create a PPPoE batch on a carrier, create a binding instance on the same carrier, start it, then try to delete the batch. It must be refused by instance name - not queued, not partially executed - because the pool would go while the fail-closed catch-all stayed, leaving the scoped LAN with no route out. Repeat with the batch on the bare `eth1` and the instance on `eth1.835`: those count as the same uplink, and so does the reverse. Stop the instance and the delete should then be accepted.
+4. **A pool of tagged members.** With the ISP handing VLANs 101 and 102 on `eth1`, the carrier dropdown must offer `eth1` and **not** `eth1.101` - the VLANs are the member list's job. Create a pool with members 101 and 102. The router should end up with a `config device` section per member describing `eth1.101` and `eth1.102`, each carrying a derived `macaddr` starting `02:`, two `config interface` sections named `<prefix>101` and `<prefix>102` whose `ip4table` is the table base plus the VLAN, and the pool's zone listing both in `uci -q show firewall`. Delete the pool afterwards and confirm the device sections and the zone memberships go with it.
+5. **Deleting a pool under a running binding instance is refused.** Create a pool on a carrier, create a binding instance on the same carrier, start it, then try to delete the pool. It must be refused by instance name - not queued, not partially executed - because the WANs would go while the fail-closed catch-all stayed, leaving the scoped LAN with no route out. Repeat with the pool on the bare `eth1` and the instance on `eth1.835`: those count as the same uplink, and so does the reverse. Stop the instance and the delete should then be accepted.
 6. **Pinning a device to a WAN.** From Assignments, pin a device to a named WAN and confirm it moves there and stays there across a lease renewal. Then confirm the refusals, each with its own message: a WAN that is not in the pool, a WAN another device already carries, a WAN that is dialing or in error, and several rows selected at once. Finally, on an instance with *Keep a device on the same WAN* switched **off**, pin a device that holds no lease - that must be refused outright, and the pin of a device that does hold one must be understood to last only as long as that lease.
-7. **A cancelled create leaves a correctly shrunk record.** Start a create of several hundred sessions and cancel it mid-way. The firewall zone should already exist - it is prepared before the first chunk - and the batch record must cover exactly the chunks that reached `uci commit network`, including any chunk that committed and then failed its reload. Compare the batch's session count on the page with `uci -q show network | grep -cE "^network\.<prefix>[0-9]{5}=interface$"`. Then delete that batch: it must succeed, removing only what the router actually has, rather than aborting on the first section the create never wrote.
+7. **The record survives what the router loses.** With a pool up, remove one member's interface section by hand - `uci delete network.<prefix>101; uci commit network; ubus call network reload` - and wait a tick: the member's row must read `unwritten` rather than disappearing, because the daemon's record still names it, and nothing may quietly decide the pool shrank. Then apply any edit to the pool - changing the label is enough - and confirm the daemon writes the section back and the row returns to `up`: an edit reconciles every member against the record, which is also how a create that died half way is finished.
 8. **The five readiness states.** Before connecting (`connecting`, a waiting note); while the first probe is still out (`checking`, its own panel saying nothing has been read yet, with Check now); a machine that is not OpenWRT, or a router still on opkg (`blocked`, the refusal panel); a router missing `ip-full` or dnsmasq (`attention`, a banner **above a working page**); and a complete router (`ready`). The failure this replaces was the blocked panel appearing during a normal startup.
 9. **Connection.** Add the router as a Bored Manager machine, connect as `root` through dropbear, and confirm a Terminals session works.
-10. **Firewall verification.** After creating a PPPoE batch, `nft list ruleset` contains `pppoe-<prefix>` (wildcard `+` on fw4, or explicit `network` members when `zoneMode` is `networks`), the zone masquerades, and the LAN zone's own `forward_<lan>` chain reaches it. Break either half deliberately - rename the LAN zone, or use an fw4 build that does not materialize the glob - and the job's "Register N interfaces with the firewall" step must finish as a **warning** rather than green, naming which half is missing.
-11. **Soak.** Create 100, then 500, then 1,000 sessions from a text list. Record apply time, router CPU/RAM, and whether the dashboard stays smooth. Use the Low (5 s) fast interval above roughly 2,000 sessions. Open a batch drawer on the large pool and confirm the **Needs attention** tab is what loads first.
+10. **Firewall verification.** After creating a pool, `uci -q show firewall` must show the pool's zone with every member in its `network` list, masquerading and MTU fix on, and one forwarding from the LAN zone - and `nft list ruleset` must show the LAN zone's `forward_<lan>` chain reaching it. On a router whose LAN zone is not named `lan`, the forwarding must name the zone the daemon actually found. Edit the pool with *Allow LAN to reach this zone* off and the forwarding must go while the zone stays; delete the pool and the zone must go too, unless another pool or a `bm-wanbind` instance still names it.
+11. **Soak.** Create a pool of 100 members, then one of 500 - the cap, and one call rather than fifty chunks. Record apply time, router CPU/RAM, and whether the dashboard stays smooth with several pools up. Use the Low (5 s) fast interval above roughly 2,000 sessions across all pools. Open the largest pool's drawer and confirm the member table filters in place rather than pushing the page around.
 12. **Binding scenarios.** A new DHCP client gets an `ip rule` within two fast ticks and exits through its assigned WAN; a WAN that stays failed remaps after the grace period; an extra client waits with DNS but no internet; a lease IP change keeps the same WAN; a missing lease releases the WAN after its grace; a router reboot reapplies rules and shows a router event; an app restart rebuilds assignments from the router. LAN and WAN interfaces outside the instance stay untouched. On a router whose LAN firewall zone is not named `lan`, the check should name the zone it found rather than assuming one. Remove `option ip4table` from one pooled WAN by hand and confirm the audit repairs it, and that repeating the removal three times ends with the module saying it has stopped trying rather than writing on every slow tick.
 13. **The UCI filters.** `uci -q show firewall | grep -E '=zone$|\.name=|\.network='`, `uci -q show network | grep -E '\.(ip4table|username)='`, and the `dhcp`, `network` and `firewall` filters in the binding preparation probe all return what the parsers expect under BusyBox grep, not GNU grep.
 15. **A stopped service is not a missing package.** `service dnsmasq stop`. The Extras card must turn amber and read *"Installed, but the service is not running"* with `service dnsmasq start`, **not** "Present" and **not** an offer to install dnsmasq - it is already there. The WAN Binding create form must refuse in the same words. Start it again and both go back to green without a reconnect. Repeat with `service firewall stop`: Firewall & routing turns amber and says no `inet fw4` table is loaded. Then `service network stop` on a router you can still reach - the Core card must show netifd installed but not running, and the page must move to `attention` rather than to the blocked panel.
 16. **A router with no `pidof`.** On a build without it, every service row must read *"This router has no pidof, so whether the service is running could not be checked"* and nothing may refuse. An answer nobody could obtain must never become a fault.
 17. **Competing policy routing.** Install and enable mwan3. The Firewall & routing card and the WAN Binding check must both warn, name mwan3, say that the lowest preference wins, and **still let the check through** - it is a warning, not a refusal. Then remove mwan3 and add a rule of your own below the module's base, e.g. `ip -4 rule add from 192.168.9.0/24 lookup 42 pref 100`: the warning must name the preference and the rule text, and the count must be the number of such rules on the router, not the number shown. Delete it and the row goes back to green.
-18. **The gate is one gate.** With `ip-full` removed from a router that has a binding instance, **Start** must be refused by name - "The ip command on this router has no rule support" plus where to install it - rather than failing somewhere inside a reconcile. Check a PPPoE batch on a healthy router, then remove `ppp` before pressing Apply: the apply must be refused, because a token is not permission for a router that has changed. **Stop**, **Delete** and the Rules editor must keep working throughout.
+18. **The gate is one gate.** With `ip-full` removed from a router that has a binding instance, **Start** must be refused by name - "This router cannot steer traffic by routing table" plus where the reason is - rather than failing somewhere inside a reconcile. Check a pool on a healthy router, then remove `ppp` before pressing Apply: the apply must be refused, because a token is not permission for a router that has changed. Binding **Stop** and **Delete** and the Rules editor must keep working throughout; a pool delete is the daemon's and needs it, which item 43's legacy path also exercises.
 19. **Running the install again, and running out of room.** On a router with all three groups present, a plain check is refused and names the checkbox; with **Run the install again** ticked it plans `apk add` for every ticked group and the report says what that does and does not fix. Confirm the commands are still only `apk update` and `apk add <name>`. Then fill `/overlay` to a few hundred KB free part-way through a three-package group: the job must stop **before** the next `apk add`, name the package it did not start, and say the earlier ones stay installed - not fail inside apk on a router that is now full.
 
-14. **Disable / uninstall.** With the module connected, switch it off and uninstall it. Pollers stop, `data/app.log` shows no leftover `openwrt:` execs, and UCI leftovers remain only if batches or binding instances were not deleted first.
+14. **Disable / uninstall.** With the module connected, switch it off and uninstall it. Pollers stop, `data/app.log` shows no leftover `openwrt:` execs, and UCI leftovers remain only if pools or binding instances were not deleted first - a pool outlives the app by design, since its record and its sections are the router's own.
 
 25. **Install the agent from a bundle, on a router with no internet.** Unplug the WAN. Module settings, Router packages, source "A `.apkbundle` from this machine": the check must unpack and checksum it on the router and say nothing has been installed yet; apply must install it and the readiness card must go green without a reconnect. Then edit one byte of the bundle and check again - it must refuse before `apk add` runs, naming the checksum, and take its half-unpacked directory away with it.
-26. **The compatibility banner is honest.** On a router with no agent, both the Dashboard and Automation must carry it and everything below it must still work: create a PPPoE batch and a binding instance, and confirm neither refuses. Then install the agent and confirm both banners go without anything being switched off and on again.
+26. **The compatibility banner is honest.** On a router with no agent, both the Dashboard and Automation must carry it and binding must still work: create a binding instance and confirm nothing refuses. The pool create must refuse - pools are the router's own from 3.0.0 - and the refusal must point at Router packages rather than at a missing firmware feature. Then install the packages and confirm the banners go, the pool form opens, and nothing was switched off and on again.
 27. **The safety net does its job.** With an agent installed, create a binding instance and watch `logread -e bm-agent`: a guard is armed before the write and confirmed after it. Then, mid-apply, `killall -9 sshd` from a console - the confirm never arrives, and the router must restore the snapshot and reload the network on its own within the countdown.
 28. **Remove them.** Try with a binding instance running: refused, by instance name. Stop it, remove with "Delete the configuration" **off**, reinstall: the configuration is still there. Remove again with it **on**: `/etc/config/bm_*` and `/etc/bm/` are gone **except `/etc/bm/snapshots/baseline`**, and `ip -4 rule show` has nothing left of this module. Compare against `apk del bm-agent` typed at a shell - the two must leave the same router.
 29. **An agent from the future.** Set `apiVersion` higher than this module knows (edit `bm/version.uc` on the router and restart the service). Every page must keep working over SSH, the readiness row must say the module is the thing to update, and nothing anywhere may refuse.
@@ -729,9 +783,10 @@ promise that the router keeps every capability with no app attached, all in
     on the router. Nothing. Then check `/tmp` holds no account file afterwards:
     the daemon unlinks it before writing a single section.
 34. **Removing the PPPoE package leaves every session dialling.** `apk del
-    bm-pppoe-pool` with a pool up, then `ifstatus ppp00001` - still up, still
-    dialling. This is the opposite of item 32 and deliberately so: those
-    sections are the user's own configuration and netifd owns them.
+    bm-pppoe-pool` with a pool up, then `ifstatus <prefix>101` - still up,
+    still dialling. This is the opposite of item 32 and deliberately so: those
+    sections are the user's own configuration and netifd owns them. The app's
+    pool surfaces go back to naming the missing package until it returns.
 
 35. **The two halves never both write.** With `bm-wanbind` running, watch the
     module's own traffic (`Jobs`, and `logread -e bm-agent` on the router): the
@@ -780,29 +835,33 @@ promise that the router keeps every capability with no app attached, all in
     they share a priority base and differ only in their catch-all, so an
     instance that claimed by priority alone would delete the other's rules once
     every thirty seconds.
-43. **An older batch still starts and stops.** Create a PPPoE batch over SSH,
-    then install `bm-pppoe-pool`, then press Stop on that batch. The router has
-    no pool record for it, so the ubus call is refused - and the job must still
-    succeed, over SSH, with the sessions actually down. Create a second batch
-    now that the package is there and confirm that one goes through the daemon.
+43. **A batch from an earlier release is legacy, and says so.** On a router
+    whose packages were upgraded from 1.x with an old batch still configured,
+    the Pools tab must list it under legacy with its prefix and range, offer
+    Delete and nothing else, and `bmpppoe status` must show it as legacy too.
+    Its sessions keep dialling untouched throughout. Delete it and confirm the
+    five-digit sections and any `bmv<vid>` device nothing else uses go with
+    it - and that a v2 pool on the same router never flinched.
 44. **Disconnect the app and lose nothing.** The rest of these are one test:
     close the app, or point it at another router, and do a full day's work from
     the router alone. Every one of them has to pass with nothing but a browser
     and a console.
-45. **A pool of five thousand, created from a browser.** In LuCI, Create a pool,
-    paste five thousand `user<tab>password` lines and watch the counter under
-    the box agree before pressing anything. It must report progress in chunks
-    and finish; `ubus call bm.pppoe info` must then show five thousand and
-    `uci show network | grep ppp00001` the credentials. While it runs, check
-    `ps` and `/proc/*/cmdline` on the router: not one password may appear in
-    either. Close the browser tab half way through a second, smaller pool and
-    confirm what did arrive is a real pool - Delete removes it, and **Add
-    sessions** carries on from where it stopped.
-46. **Add sessions rather than a second pool.** With a pool `ppp` covering
-    1-500, try to create a second one with prefix `ppp` starting at 400: it must
-    be refused by name, saying which pool holds that range. Then press Add
-    sessions on `ppp`, add fifty, and confirm they are numbered from 00501 and
-    that the pool record covers them.
+45. **A pool of five hundred, created from a browser.** In LuCI, Create a pool
+    in shared-account mode, paste five hundred VLAN lines and watch the member
+    counter under the box agree before pressing anything. It must land as one
+    call; `ubus call bm.pppoe info` must then show the pool, and
+    `uci show network.<prefix>101` the derived `02:` MAC and the right
+    `ip4table`. While it runs, check `ps` and `/proc/*/cmdline` on the router:
+    not one password may appear in either - from a browser the spec travels
+    inline over ubus, never through a file or a command line. Close the browser
+    tab mid-create and confirm the result is a pool or nothing - never half of
+    one.
+46. **Edit rather than a second pool.** With a pool `fpt` dialling VLANs
+    101-105 on `eth1`, try to create a second pool on `eth1` with VLAN 101 in
+    its list: it must be refused by name, saying which pool holds that VLAN on
+    that carrier. Then Edit `fpt`, add VLAN 106 without retyping anything else,
+    and confirm the new member dials, the other five never dropped, and their
+    credentials were kept.
 47. **A binding instance, written from LuCI.** Add an instance with a priority
     range of 32: the form must refuse it while you are typing, not after saving.
     Fix it and add it. Then write a broken one by hand -
@@ -830,10 +889,12 @@ promise that the router keeps every capability with no app attached, all in
 - Many Linux policy rules are evaluated linearly. Flow offload is recommended
   at high client counts; benchmark the intended packet rate on the target
   hardware.
-- The wildcard firewall zone is verified after creation. If a particular fw4
-  build does not materialize it, the create job's firewall step finishes as a
-  warning and names the setting: Firewall membership mode, under Module settings
-  → Rules, switched to the explicit UCI network list.
+- A pool holds at most 500 members - one per VLAN, which is the model. A
+  deployment that genuinely needs more sessions than that on one uplink runs
+  more pools, each with its own prefix and table base.
+- PPPoE pools need the router packages; there is no SSH path for them. A router
+  that cannot take the packages can still be monitored and can still bind, but
+  its PPPoE is its own to configure.
 - Only firewall4 is supported by the two automations, and it is the one missing
   piece the module will not install for you: putting fw4 under a running fw3
   would take the firewall down rather than fix anything. A router on fw3 is not
@@ -841,17 +902,18 @@ promise that the router keeps every capability with no app attached, all in
   pools and WAN binding refuse to be created on it.
 - Only OpenWrt 25.12.0 and newer are supported at all. A router on 24.10 or
   older is blocked with the release it runs; there is no opkg path left.
-- The six numbering and firewall-layout rules are locked while a router has
-  batches or binding instances - and also while no router is connected at all.
-  The second half is deliberate: those records are per router while the rules
-  are global, so a disconnected app cannot tell "this router has none" from "we
-  cannot see this router", and answering the second as the first renumbers a
-  live pool. Connect the router the rules apply to, then change them.
+- The three rules that place binding's objects - the two priority bases and the
+  catch-all table - are locked while a router has binding instances, and also
+  while no router is connected at all. The second half is deliberate: those
+  records are per router while the rules are global, so a disconnected app
+  cannot tell "this router has none" from "we cannot see this router", and
+  answering the second as the first renumbers a live instance. Connect the
+  router the rules apply to, then change them.
 - A pin made on an instance that does not keep the same WAN across reconnects
   lasts only as long as the device's current DHCP lease. There is nowhere
   durable to record it on such an instance; turn *Keep a device on the same WAN*
   on if the choice has to survive.
-- On a router with no PPPoE batch and no binding instance, and with no OpenWRT
+- On a router with no PPPoE pool and no binding instance, and with no OpenWRT
   page or Overview widget open, the fast sweep runs at the slow interval. Open a
   page, or configure an automation, and it returns to full rate immediately.
 - A module cannot watch multiple routers in one page. Add each router as a
@@ -873,10 +935,12 @@ main/
   probe/            what this router can do, and the readiness verdict
   setup/            the install gate and the install job
   service/          the fast and slow collectors, and the dashboard payload
-  pppoe/            the PPPoE dialer, end to end
+  pppoe/            the PPPoE pools, as a client of the router's own daemon
   binding/          WAN binding, end to end
-  uci/              everything written to a router
+  agent/            the router packages: every ubus call, the guard, the installer
+  uci/              the `uci batch` primitive binding still writes through
   store/            the per-router document
+  config/           effective module rules and the hint preference
   *.ts              what more than one of those folders shares
 ui/pages/*.json     the three page specs the app renders
 ui/widgets/*.json   the Overview widget spec
@@ -889,15 +953,16 @@ ui/widgets/*.json   the Overview widget spec
 | `main/probe/` | The one command that establishes what the router can do, and the pure function that turns its answers into the readiness verdict every surface renders. |
 | `main/setup/` | The gate an install has to pass, and the job that runs it. The only place in the module that builds an apk command line. |
 | `main/service/` | Adaptive fast/slow collection, the two remote shell commands, the small dashboard payload, and collector health. |
-| `main/pppoe/` | Check, create, the action waves and their watchdog, delete, the router inspections, and the rows every surface renders. |
+| `main/pppoe/` | The pool client: the daemon's answers cached behind a short TTL, the check/apply sessions for create and edit, the actions, the delete with its binding gate, and the rows every surface renders. |
 | `main/binding/` | WAN-pool discovery, the pure planner, one-to-one rule reconciliation, the routing-table audit, device actions, and its rows. |
-| `main/uci/` | Everything this module writes to a router: legal names, PPPoE lines, the shared firewall zone and its verification, and the only code that executes a `uci batch`. |
+| `main/agent/` | The client for the router packages: every `bm.agent`, `bm.wanbind` and `bm.pppoe` call, the `0600` spec push, the commit-confirm guard wrapper, and the package install and remove flows. |
+| `main/uci/` | What this side still writes to a router: the legal-name and value sieves, and the only code that executes a `uci batch` - binding's, now that pool sections are the daemon's. |
 | `main/store/` | The bounded, debounced per-router document, and the trimming that keeps it inside its size budget. |
 | `main/packages.ts` | The allowlist: every package this module may install, and why. |
 | `main/config/` | Effective module rules and the hint preference: the schema and defaults, the cached store, and the settings-form editor. |
 | `main/events.ts` | The PPPoE, router and binding event rings, and the live log stream. |
 | `main/jobs.ts` | Cancellable chunk-job progress and history. |
-| `main/parse.ts` | OpenWRT output and account-list parsers. |
+| `main/parse.ts` | OpenWRT output parsers, and the UCI value quoting. |
 | `main/options.ts` | Dynamic form choices from the in-memory model - including the two carrier dropdowns and their different rules. |
 | `main/queries.ts` | Large table rows built from the in-memory model. |
 | `main/badges.ts` | One colour per meaning, for every status shown anywhere. |
@@ -920,8 +985,8 @@ folder is meant to have it.
 anything below it and nothing imports `runtime/` back. Below it are the four
 domains that do the work - `service/`, `pppoe/`, `binding/`, `setup/` - then
 `probe/`, whose verdict `setup/` and `runtime/` both read, then the shared
-libraries (`uci/`, `store/`, and the loose `*.ts` files, which may import each
-other), then `@shared/*`.
+libraries (`agent/`, `uci/`, `store/`, `config/`, and the loose `*.ts` files,
+which may import each other), then `@shared/*`.
 
 `pppoe/` contains no mention of `binding/` and vice versa, and neither knows
 `service/` exists. Where two of them genuinely need each other - the PPPoE

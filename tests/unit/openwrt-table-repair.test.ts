@@ -45,6 +45,9 @@ const MODEL: RouterModel = {
       uptimeSec: 4_000,
       ipv4: { addr: '10.0.0.2', mask: 24 }
     },
+    // Pool members carry their tables in the dump - written and owned by
+    // bm-pppoe-pool - which is what the audit's expected map is built from
+    // now that no module-side record derives them.
     {
       name: 'pd00001',
       proto: 'pppoe',
@@ -54,6 +57,7 @@ const MODEL: RouterModel = {
       pending: false,
       autostart: true,
       uptimeSec: 3_000,
+      ip4Table: 10_001,
       ipv4: { addr: '198.51.100.1', mask: 32 }
     },
     {
@@ -65,6 +69,7 @@ const MODEL: RouterModel = {
       pending: false,
       autostart: true,
       uptimeSec: 3_000,
+      ip4Table: 10_002,
       ipv4: { addr: '198.51.100.2', mask: 32 }
     }
   ],
@@ -76,20 +81,7 @@ const MODEL: RouterModel = {
 
 function hostData(): unknown {
   return {
-    version: 1,
-    nextSeq: 3,
-    batches: [
-      {
-        id: 'b1',
-        name: 'Home',
-        prefix: 'pd',
-        carrier: 'eth1',
-        createdAt: 1,
-        count: 2,
-        seqFrom: 1,
-        seqTo: 2
-      }
-    ],
+    version: 2,
     instances: [
       {
         id: 'bind1',
@@ -113,7 +105,7 @@ function hostData(): unknown {
   }
 }
 
-/** `tableBase` is 10 000, so batch sequence 1 and 2 own tables 10001 and 10002. */
+/** The two pool members own tables 10001 and 10002, as the dump reports. */
 const BOTH: Array<[string, number]> = [
   ['pd00001', 10_001],
   ['pd00002', 10_002]

@@ -26,7 +26,7 @@ import {
 import {
   EXEC_TIMEOUT_MS,
   buildFastSweepCommand,
-  managedRanges,
+  isManagedRange,
   type ManagedPppoeRange
 } from './command'
 import { noteError, reportHealth } from './health'
@@ -122,7 +122,10 @@ function publish(
 export async function sampleFast(runtime: SweepRuntime, generation: number): Promise<void> {
   if (!isCurrent(runtime, generation)) return
   const rules = runtime.config.effectiveRules()
-  const ranges = managedRanges(runtime.store)
+  // From the pool cache - the router is the record - and filtered before the
+  // spec is interpolated into a command: a range whose bounds make no sense
+  // would match either everything or nothing.
+  const ranges = (runtime.hooks.pppoeRanges?.() ?? []).filter(isManagedRange)
   runtime.ticksSinceDump += 1
   if (runtime.dumpBackoff > 0) runtime.dumpBackoff -= 1
   const cadence = dumpCadence(runtime.cachedIfaces.length)

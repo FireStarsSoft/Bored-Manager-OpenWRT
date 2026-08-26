@@ -1,128 +1,119 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { ModuleCheckReport } from '@shared/check'
 import type { ModuleExecResult } from '@shared/modules'
-import activate from '../../openwrt/main/index'
-import { DEFAULT_RULES } from '../../openwrt/main/config'
+import { PppoeManager } from '../../openwrt/main/pppoe'
 import type { JobSpec, OpenWrtJob } from '../../openwrt/main/jobs'
-import {
-  PppoeManager,
-  type PppoeRules,
-  type PppoeService,
-  type PppoeStoreData
-} from '../../openwrt/main/pppoe'
-import { buildPppoeUci } from '../../openwrt/main/uci'
-import type { RouterModel } from '../../openwrt/main/types'
-import { moduleHarness, sharedModuleConfig } from '../helpers/module-harness'
+import type { AgentCapability } from '../../openwrt/main/probe'
+import { moduleHarness } from '../helpers/module-harness'
 
 /**
- * The guards around a PPPoE pool that only bite in the cases nobody exercises
- * by hand: a carrier typed rather than picked, a session that never finishes
- * dialing, a router nothing has read yet, a watchdog racing a delete, and a
- * credential carrying a byte a config file cannot hold.
+ * The pool flows, driven against a scripted bm.pppoe.
+ *
+ * What is being proved is the module's half of the contract: forms become the
+ * spec the daemon documents, credentials travel only inside the 0600 payload
+ * file, the check's findings reach the report verbatim, the token pins what
+ * was checked to what is applied, and the delete gate refuses while a binding
+ * instance is distributing clients across the pool's carrier. The daemon's
+ * own behaviour - validation, reconciliation, the firewall - is proved by the
+ * ucode probes in packages/ci, against the real modules.
  */
 
 const ok = (stdout = '', stderr = '', code = 0): ModuleExecResult => ({ code, stdout, stderr })
 
-const settle = async (rounds = 20): Promise<void> => {
-  for (let index = 0; index < rounds; index++) {
-    await new Promise((resolve) => setTimeout(resolve, 0))
-  }
+const DAEMON: AgentCapability = {
+  installed: true,
+  running: true,
+  release: '2.0.0',
+  apiVersion: 3,
+  schema: 2,
+  dataSchema: 2,
+  provides: ['pppoe'],
+  features: [{ name: 'bm-pppoe-pool', version: '2.0.0', apiVersion: 2, provides: ['pppoe'] }],
+  guard: null,
+  usable: true,
+  problem: null,
+  canGuard: true,
+  canUpdate: true
 }
 
-const ROUTER_TOOLS = [
-  '/sbin/ubus',
-  '/sbin/uci',
-  '/sbin/ip',
-  '/sbin/fw4',
-  '/sbin/logread',
-  '/usr/sbin/nft',
-  '/sbin/netifd',
-  '/usr/sbin/pppd'
-]
-
-function probeOutput(): string {
-  return [
-    '===REL===',
-    "DISTRIB_ID='OpenWrt'",
-    "DISTRIB_RELEASE='25.12.0'",
-    '===BOARD===',
-    JSON.stringify({ model: 'Test Router', release: { distribution: 'OpenWrt', version: '25.12.0' } }),
-    '===TOOLS===',
-    ...ROUTER_TOOLS,
-    '===PPP===',
-    'plugin',
-    'kmod',
-    '===PKG===',
-    'apkdb',
-    '===DONE==='
-  ].join('\n')
+interface Router {
+  manager: PppoeManager
+  /** Every JSON payload written into a /tmp file, in order. */
+  payloads: unknown[]
+  /** Every ubus method called, in order. */
+  methods: string[]
+  /** Every event line the module recorded. */
+  events: string[]
+  jobs: Array<{ label: string; state: string }>
 }
-
-function sweepOutput(dump: string | null): string {
-  return [
-    '===SYS===',
-    JSON.stringify({ uptime: 4_000, load: [0, 0, 0], memory: { total: 1, free: 1 } }),
-    '===DEV===',
-    '===POOL=== 0 0 0',
-    '===LEASES===',
-    '===RULES===',
-    '===RULESOK===',
-    '1',
-    ...(dump === null ? [] : ['===DUMP===', dump])
-  ].join('\n')
-}
-
-const BATCH = {
-  id: 'b1',
-  name: 'Pool',
-  prefix: 'pd',
-  carrier: 'eth1',
-  createdAt: 1,
-  count: 2,
-  seqFrom: 1,
-  seqTo: 2
-}
-
-const text = (report: ModuleCheckReport): string =>
-  report.findings.map((finding) => `${finding.label} ${finding.detail ?? ''}`).join('\n')
-
-// ---------------------------------------------------------------- standalone
 
 /**
- * PPPoE on its own, through the dependency interfaces the domain declares. The
- * jobs double deliberately never runs an item: a job that stays started is what
- * holds the `deleting` guard open long enough to ask the watchdog about it.
+ * A router whose bm.pppoe answers from a script. The payload files are held
+ * in memory the way tmpfs would hold them, and consumed the way the daemon
+ * consumes them - a second read of the same path is a miss.
  */
-function standalone(options: {
-  batches?: PppoeStoreData['batches']
-  rules?: Partial<PppoeRules>
-  service?: Partial<PppoeService>
-  answer?: (command: string) => ModuleExecResult
-}): {
-  manager: PppoeManager
-  started: JobSpec[]
-  harness: ReturnType<typeof moduleHarness>
-} {
-  const harness = moduleHarness('openwrt', options.answer ?? (() => ok()))
-  const data: PppoeStoreData = {
-    nextSeq: 1,
-    batches: options.batches ? [...options.batches] : []
-  }
-  const started: JobSpec[] = []
-  let next = 0
+function router(
+  answer: (method: string, args: Record<string, unknown>, payload: unknown) => unknown,
+  overrides: { bindingCarriers?: Array<{ id: string; name: string; carrier: string; running: boolean }> } = {}
+): Router {
+  const harness = moduleHarness('openwrt', () => ok())
+  const files = new Map<string, string>()
+  const payloads: unknown[] = []
+  const methods: string[] = []
+  const events: string[] = []
+  const jobs: Array<{ label: string; state: string }> = []
+  let made = 0
+
+  harness.exec.mockImplementation(async (command: string, options?: { stdin?: string }) => {
+    if (command.includes('mktemp /tmp/bm-pool.XXXXXX')) {
+      made += 1
+      return ok(`/tmp/bm-pool.${String(made).padStart(6, 'A')}\n`)
+    }
+    const write = command.match(/cat > '(\/tmp\/bm-pool\.[A-Za-z0-9]{6})'/)
+    if (write) {
+      files.set(write[1]!, options?.stdin ?? '')
+      payloads.push(JSON.parse(options?.stdin ?? 'null'))
+      return ok()
+    }
+    if (command.startsWith('rm -f ')) return ok()
+
+    const call = command.match(/^ubus -S call bm\.pppoe (\w+) '(.*)'$/s)
+    if (call) {
+      const method = call[1]!
+      const args = JSON.parse(call[2]!.replace(/'\\''/g, "'")) as Record<string, unknown>
+      methods.push(method)
+      let payload: unknown = null
+      if (typeof args.source === 'string') {
+        const raw = files.get(args.source)
+        files.delete(args.source)
+        payload = raw === undefined ? undefined : JSON.parse(raw)
+      }
+      return ok(JSON.stringify(answer(method, args, payload)))
+    }
+    return ok()
+  })
+
   const manager = new PppoeManager(
     harness.ctx,
-    { effectiveRules: () => ({ ...DEFAULT_RULES, ...options.rules }) },
-    {
-      read: () => data,
-      update: <T>(mutate: (value: PppoeStoreData) => T): T => mutate(data)
-    },
+    { effectiveRules: () => ({ execTimeoutSec: 60, tableBase: 10_000 }) },
     {
       start: (spec: JobSpec): OpenWrtJob => {
-        started.push(spec)
-        next += 1
+        const record = { label: spec.label, state: 'running' }
+        jobs.push(record)
+        // Run the items the way the real runner does: sequentially, abort on
+        // the first failure, then the completion hook.
+        void (async () => {
+          let state = 'done'
+          try {
+            for (const item of spec.items) await item.run(() => false)
+          } catch {
+            state = 'failed'
+          }
+          record.state = state
+          await spec.onFinished?.({ state } as never)
+        })()
         return {
-          id: `job_${next}`,
+          id: 'job_1',
           kind: spec.kind,
           label: spec.label,
           state: 'running',
@@ -137,451 +128,376 @@ function standalone(options: {
       list: () => []
     },
     {
-      model: () => null,
       forceDump: () => {},
-      ...options.service
-    }
+      event: (kind, text) => events.push(`${kind}: ${text}`),
+      ...(overrides.bindingCarriers
+        ? { bindingCarriers: () => overrides.bindingCarriers! }
+        : {})
+    },
+    () => DAEMON
   )
-  return { manager, started, harness }
+
+  return { manager, payloads, methods, events, jobs }
 }
 
-function modelWith(ifaces: RouterModel['ifaces']): RouterModel {
-  return {
-    t: 1_700_000_000_000,
-    sys: { uptimeSec: 4_000, load1: 0, memTotal: 1, memFree: 1 },
-    ifaces,
-    poolDev: { count: 0, rx: 0, tx: 0 },
-    leases: [],
-    rules: [],
-    rates: {}
+const settle = async (rounds = 20): Promise<void> => {
+  for (let index = 0; index < rounds; index++) {
+    await new Promise((resolve) => setTimeout(resolve, 0))
   }
 }
 
-function failedIface(name: string): RouterModel['ifaces'][number] {
+/** The daemon's own standing findings, echoed the way pool_check answers. */
+function checkReply(ok: boolean, extra: unknown[] = []): unknown {
   return {
-    name,
-    proto: 'pppoe',
-    device: 'eth1',
-    l3Device: `pppoe-${name}`,
-    up: false,
-    pending: false,
-    autostart: true,
-    uptimeSec: 0,
-    errorCode: 'AUTH_FAILED'
+    ok,
+    findings: [
+      ...extra,
+      { level: 'info', label: 'Tagged and untagged', detail: 'VLAN 0 is untagged.' }
+    ]
   }
 }
 
-// ------------------------------------------------------------------- carrier
+const MULTI_FORM = {
+  mode: 'multi',
+  id: 'fpt1',
+  carrier: 'eth1',
+  prefix: 'fpt',
+  vlans: '101-102, 0',
+  username: 'u@isp',
+  password: 'pw',
+  keepalive_failure: '5',
+  keepalive_interval: '1',
+  zone: 'bmwanpool',
+  masq: true,
+  mtu_fix: true,
+  lan_forward: true
+}
 
-describe('the carrier a PPPoE batch is dialed on', () => {
-  const CARRIER_ANSWER = (command: string): ModuleExecResult =>
-    command === 'sh -s' ? ok('===CARRIER===1\n===NETWORK===\n') : ok()
+describe('the create gate', () => {
+  it('composes the spec the daemon documents, and never puts the password on a command line', async () => {
+    const run = router((method) =>
+      method === 'pool_check' ? checkReply(true) : { ok: true }
+    )
 
-  it('refuses a tagged carrier that the dropdown would never have offered', async () => {
-    // `isSafeDeviceName` allows the dot, on purpose - the binding half carries
-    // its uplink on `eth1.835`. Submitted here with a VLAN of its own, this
-    // built device `eth1.835.100` under section `bmv100`, a section whose whole
-    // job is to say "VLAN 100 on the carrier".
-    const { manager } = standalone({ answer: CARRIER_ANSWER })
+    const report = await run.manager.createCheck(MULTI_FORM)
 
-    const report = await manager.check({
-      name: 'Tagged',
-      carrier: 'eth1.835',
-      prefix: 'pd',
-      vlan: '100',
-      listText: 'u1,p1'
+    expect(report.ok).toBe(true)
+    expect(report.token).toBeTruthy()
+    // The spec travelled as a payload file, not as ubus arguments.
+    expect(run.methods).toEqual(['pool_check'])
+    expect(run.payloads[0]).toMatchObject({
+      mode: 'multi',
+      prefix: 'fpt',
+      carrier: 'eth1',
+      username: 'u@isp',
+      password: 'pw',
+      keepalive: '5 1',
+      // In list order; the daemon sorts and validates, one gate for every UI.
+      members: [{ vlan: 101 }, { vlan: 102 }, { vlan: 0 }],
+      table_base: 10_000
     })
-
-    expect(report.ok).toBe(false)
-    expect(text(report)).toContain('eth1.835 is already a tagged VLAN device')
-    // The refusal has to say what to do instead, or it reads as "this router
-    // does not have that device", which it does.
-    expect(text(report)).toContain('Choose eth1 instead')
+    // The daemon's standing note came through word for word.
+    expect(report.findings.some((f) => f.label === 'Tagged and untagged')).toBe(true)
   })
 
-  it('accepts the device beneath the tag', async () => {
-    const { manager } = standalone({ answer: CARRIER_ANSWER })
+  it('refuses locally on a list that does not parse, before any round trip', async () => {
+    const run = router(() => checkReply(true))
 
-    const report = await manager.check({
-      name: 'Bare',
+    const report = await run.manager.createCheck({ ...MULTI_FORM, vlans: '101-xyz' })
+
+    expect(report.ok).toBe(false)
+    expect(run.methods).toEqual([])
+    expect(report.findings.some((f) => f.label.includes('cannot be read'))).toBe(true)
+  })
+
+  it('hands the daemon refusal back as the report', async () => {
+    const run = router((method) =>
+      method === 'pool_check'
+        ? checkReply(false, [{ level: 'error', label: 'Pool fpt1 already exists' }])
+        : { ok: true }
+    )
+
+    const report = await run.manager.createCheck(MULTI_FORM)
+
+    expect(report.ok).toBe(false)
+    expect(report.findings.some((f) => f.label === 'Pool fpt1 already exists')).toBe(true)
+  })
+
+  it('parses per-VLAN member lines in single mode', async () => {
+    const run = router((method) =>
+      method === 'pool_check' ? checkReply(true) : { ok: true }
+    )
+
+    const report = await run.manager.createCheck({
+      mode: 'single',
+      id: 'vnpt1',
       carrier: 'eth1',
-      prefix: 'pd',
-      vlan: '100',
-      listText: 'u1,p1'
+      prefix: 'vnp',
+      mac_mode: 'inherit',
+      listText: '201,a@isp,p1\n202\tb@isp\tp2\n# comment'
     })
 
     expect(report.ok).toBe(true)
-  })
-
-  it('still refuses a bridge and a name no device could have', async () => {
-    const { manager } = standalone({ answer: CARRIER_ANSWER })
-
-    expect(text(await manager.check({ name: 'A', carrier: 'br-lan', prefix: 'pd', listText: 'u1,p1' })))
-      .toContain('is a bridge')
-    expect(text(await manager.check({ name: 'B', carrier: 'eth1;reboot', prefix: 'pd', listText: 'u1,p1' })))
-      .toContain('Choose a valid carrier interface')
-  })
-})
-
-// --------------------------------------------------------------- credentials
-
-describe('credentials that a config file cannot hold', () => {
-  const CARRIER_ANSWER = (command: string): ModuleExecResult =>
-    command === 'sh -s' ? ok('===CARRIER===1\n===NETWORK===\n') : ok()
-
-  it('refuses a control character by row and field without quoting the value', async () => {
-    // `uciQuote` quotes, it does not strip, so this reached
-    // `/etc/config/network` intact - and came back out on the line `uci batch`
-    // echoes when it rejects the command, which is the one output in this
-    // module that may never be shown.
-    const { manager } = standalone({ answer: CARRIER_ANSWER })
-
-    const report = await manager.check({
-      name: 'Dirty',
-      carrier: 'eth1',
-      prefix: 'pd',
-      listText: ['clean,fine', `bob,swordfish${String.fromCharCode(1)}x`].join('\n')
-    })
-
-    expect(report.ok).toBe(false)
-    const reported = text(report)
-    expect(reported).toContain('1 account row(s) contain a control character')
-    expect(reported).toContain('row 2 (password)')
-    expect(reported).not.toContain('swordfish')
-  })
-
-  it('names the username when that is the field carrying it', async () => {
-    const { manager } = standalone({ answer: CARRIER_ANSWER })
-
-    const report = await manager.check({
-      name: 'Dirty',
-      carrier: 'eth1',
-      prefix: 'pd',
-      listText: `al${String.fromCharCode(127)}ice,secret`
-    })
-
-    expect(text(report)).toContain('row 1 (username)')
-  })
-
-  it('refuses to build the UCI even if the gate is bypassed', () => {
-    // The last gate before a credential becomes a line on `uci batch`'s stdin.
-    expect(() =>
-      buildPppoeUci([{ user: 'a', pass: `p${String.fromCharCode(10)}q` }], {
-        prefix: 'pd',
-        carrier: 'eth1',
-        seqFrom: 1,
-        tableBase: 10_000
-      })
-    ).toThrow(/account row 1 contains a control character/)
-  })
-})
-
-describe('a username this router already dials', () => {
-  const CARRIER_ANSWER = (command: string): ModuleExecResult =>
-    command === 'sh -s' ? ok('===CARRIER===1\n===NETWORK===\n') : ok()
-
-  it('warns when the pasted list repeats an account already configured', async () => {
-    // Checking the list against itself was half the test: two batches made from
-    // two exports of one customer list dial the same account twice, and the
-    // access concentrator answers by dropping one of the two.
-    const { manager } = standalone({
-      answer: CARRIER_ANSWER,
-      service: { pppoeUsers: () => ({ pd00001: 'alice', pd00002: 'bob' }) }
-    })
-
-    const report = await manager.check({
-      name: 'Second',
-      carrier: 'eth1',
-      prefix: 'pd',
-      listText: ['alice,other-password', 'carol,secret'].join('\n')
-    })
-
-    // A warning, like the in-list duplicate it extends: the operator may be
-    // deliberately replacing a session.
-    expect(report.ok).toBe(true)
-    const reported = text(report)
-    expect(reported).toContain('1 username(s) are already configured on this router')
-    expect(reported).toContain('alice')
-    expect(reported).not.toContain('carol')
-  })
-
-  it('says nothing when no account overlaps', async () => {
-    const { manager } = standalone({
-      answer: CARRIER_ANSWER,
-      service: { pppoeUsers: () => ({ pd00001: 'alice' }) }
-    })
-
-    const report = await manager.check({
-      name: 'Fresh',
-      carrier: 'eth1',
-      prefix: 'pd',
-      listText: 'carol,secret'
-    })
-
-    expect(text(report)).not.toContain('already configured on this router')
-  })
-})
-
-// ---------------------------------------------------------------- watchdog
-
-describe('the automatic redial watchdog', () => {
-  const RULES = { autoRedialAfterMin: 1 }
-  const NOW = 1_700_000_000_000
-
-  it('leaves a batch that is being deleted alone', async () => {
-    // Delete stops its sections wave by wave, and every `ifdown` makes the next
-    // slow tick see another error row. The watchdog was the one action path
-    // with no `deleting` guard, so it redialed exactly the sessions the delete
-    // had just taken down, against UCI being removed under it.
-    const { manager, started } = standalone({
-      batches: [BATCH],
-      rules: RULES,
-      service: { model: () => modelWith([failedIface('pd00001'), failedIface('pd00002')]) }
-    })
-
-    expect(manager.batchDelete('b1')).toMatchObject({ ok: true })
-    expect(started.map((spec) => spec.kind)).toEqual(['pppoe-delete'])
-
-    manager.watchdog(NOW)
-    expect(manager.watchdog(NOW + 120_000)).toBeNull()
-    expect(started.filter((spec) => spec.kind === 'pppoe-watchdog')).toEqual([])
-  })
-
-  it('still redials a batch nothing is doing anything else to', async () => {
-    const { manager, started } = standalone({
-      batches: [BATCH],
-      rules: RULES,
-      service: { model: () => modelWith([failedIface('pd00001'), failedIface('pd00002')]) }
-    })
-
-    manager.watchdog(NOW)
-    expect(manager.watchdog(NOW + 120_000)).toBe('job_1')
-    expect(started.map((spec) => spec.kind)).toEqual(['pppoe-watchdog'])
-  })
-})
-
-// ------------------------------------------------------------ status clocks
-
-describe('what a session reads as before the router has answered', () => {
-  it('says unknown rather than stopped when no interface list was ever fetched', () => {
-    // `stopped` is a claim: it says somebody took these sessions down. Said of
-    // a router nothing has read yet, a freshly connected pool of live sessions
-    // read as a pool somebody had stopped.
-    const harness = moduleHarness('openwrt', () => ok(), {
-      hostData: { version: 1, nextSeq: 3, batches: [BATCH] },
-      config: sharedModuleConfig(null)
-    })
-    const runtime = activate(harness.ctx)
-
-    const rows = harness.handlers.get('pppoeRows')?.('b1') as Array<{ status: string }>
-    expect(rows.map((row) => row.status)).toEqual(['unknown', 'unknown'])
-    const [batch] = harness.handlers.get('pppoeBatches')?.() as Array<{
-      stopped: number
-      unknown: number
-      missing: number
-    }>
-    expect(batch).toMatchObject({ stopped: 0, unknown: 2, missing: 0 })
-    runtime.dispose?.()
-  })
-})
-
-describe('a session that never finishes dialing', () => {
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  function dialingHarness(): ReturnType<typeof moduleHarness> {
-    // Listed by netifd, not up, nothing pending, no error code: the catch-all
-    // that `statusFor` calls `dialing`.
-    const dump = JSON.stringify({
-      interface: [
-        { interface: 'pd00001', up: false, pending: false, proto: 'pppoe', device: 'pppoe-pd00001' },
-        { interface: 'pd00002', up: false, pending: false, proto: 'pppoe', device: 'pppoe-pd00002' }
+    expect(run.payloads[0]).toMatchObject({
+      mode: 'single',
+      mac_mode: 'inherit',
+      members: [
+        { vlan: 201, user: 'a@isp', pass: 'p1' },
+        { vlan: 202, user: 'b@isp', pass: 'p2' }
       ]
     })
-    const harness = moduleHarness('openwrt', () => ok(), {
-      hostData: { version: 1, nextSeq: 3, batches: [BATCH] },
-      config: sharedModuleConfig(null)
-    })
-    harness.exec.mockImplementation(async (command) => {
-      if (command.includes("echo '===REL==='")) return ok(probeOutput())
-      if (command.includes("echo '===SYS==='")) return ok(sweepOutput(dump))
-      return ok()
-    })
-    return harness
-  }
-
-  it('turns into an error once the dial has had long enough', async () => {
-    const clock = vi.spyOn(Date, 'now')
-    const started = 1_700_000_000_000
-    clock.mockReturnValue(started)
-    const harness = dialingHarness()
-    const runtime = activate(harness.ctx)
-    runtime.applyPollers?.()
-    expect(await harness.handlers.get('sweepNow')?.()).toMatchObject({ ok: true })
-    await settle()
-
-    const status = (): string[] =>
-      (harness.handlers.get('pppoeRows')?.('b1') as Array<{ status: string }>).map(
-        (row) => row.status
-      )
-    expect(status()).toEqual(['dialing', 'dialing'])
-
-    // Four minutes in it is still a session that might yet come up.
-    clock.mockReturnValue(started + 4 * 60_000)
-    expect(status()).toEqual(['dialing', 'dialing'])
-
-    clock.mockReturnValue(started + 6 * 60_000)
-    expect(status()).toEqual(['error', 'error'])
-    const rows = harness.handlers.get('pppoeRows')?.('b1') as Array<{ errorCode: string }>
-    expect(rows[0].errorCode).toBe('DIAL_TIMEOUT')
-    const [batch] = harness.handlers.get('pppoeBatches')?.() as Array<{
-      dialing: number
-      error: number
-    }>
-    expect(batch).toMatchObject({ dialing: 0, error: 2 })
-    // The point of the clock: these rows are now what the attention table and
-    // the watchdog look at, instead of a green chip nothing ever revisits.
-    expect(harness.handlers.get('pppoeAttentionRows')?.()).toHaveLength(2)
-    runtime.dispose?.()
-  })
-
-  it('starts the clock again when a session drops back into dialing', async () => {
-    const clock = vi.spyOn(Date, 'now')
-    const started = 1_700_000_000_000
-    clock.mockReturnValue(started)
-    const harness = dialingHarness()
-    const runtime = activate(harness.ctx)
-    runtime.applyPollers?.()
-    expect(await harness.handlers.get('sweepNow')?.()).toMatchObject({ ok: true })
-    await settle()
-
-    const status = (): string =>
-      (harness.handlers.get('pppoeRows')?.('b1') as Array<{ status: string }>)[0].status
-    expect(status()).toBe('dialing')
-
-    // A stop and a start inside the window: the second attempt gets the whole
-    // window rather than inheriting the age of the first.
-    clock.mockReturnValue(started + 4 * 60_000)
-    expect(harness.handlers.get('pppoeConnAction')?.(['pd00001'], 'stop')).toMatchObject({
-      ok: true
-    })
-    await settle()
-    expect(status()).toBe('stopped')
-    expect(harness.handlers.get('pppoeConnAction')?.(['pd00001'], 'start')).toMatchObject({
-      ok: true
-    })
-    await settle()
-
-    clock.mockReturnValue(started + 8 * 60_000)
-    expect(status()).toBe('dialing')
-    clock.mockReturnValue(started + 14 * 60_000)
-    expect(status()).toBe('error')
-    runtime.dispose?.()
   })
 })
 
-// ------------------------------------------------------------ zone teardown
-
-describe('the shared firewall zone when the last batch goes', () => {
-  function deleteHarness(batches: unknown[]): {
-    harness: ReturnType<typeof moduleHarness>
-    uciBatches: string[]
-  } {
-    const uciBatches: string[] = []
-    const harness = moduleHarness('openwrt', () => ok(), {
-      hostData: { version: 1, nextSeq: 9, batches },
-      config: sharedModuleConfig(null)
-    })
-    harness.exec.mockImplementation(async (command, options) => {
-      const stdin = options?.stdin ?? ''
-      if (command === 'sh -s' && stdin.startsWith('uci -q show network')) {
-        return ok(
-          [
-            'network.pd00001=interface',
-            'network.pd00002=interface',
-            'network.is00001=interface',
-            'firewall.bmwanpool=zone',
-            'firewall.bmfwd=forwarding'
-          ].join('\n')
-        )
-      }
-      if (command === 'uci batch') {
-        uciBatches.push(stdin)
-        return ok()
-      }
-      return ok()
-    })
-    return { harness, uciBatches }
+describe('the apply after the check', () => {
+  async function checked(run: Router): Promise<ModuleCheckReport> {
+    const report = await run.manager.createCheck(MULTI_FORM)
+    expect(report.ok).toBe(true)
+    return report
   }
 
-  const OTHER = { ...BATCH, id: 'b2', name: 'Other', prefix: 'is', count: 1, seqFrom: 1, seqTo: 1 }
+  it('creates from the frozen spec and verifies against the router', async () => {
+    const run = router((method) => {
+      if (method === 'pool_check') return checkReply(true)
+      if (method === 'pool_create') return { ok: true, id: 'fpt1', created: 3 }
+      if (method === 'info') {
+        return {
+          name: 'bm-pppoe-pool',
+          release: '2.0.0',
+          apiVersion: 2,
+          settings: { enabled: true, counter_interval: 5, redial_after: 120, redial_batch: 20 },
+          started: 1,
+          uptime: 1,
+          pools: [{ ...POOL_TOLD, members: 3, memberList: [] }],
+          legacy: []
+        }
+      }
+      if (method === 'sessions') return { sessions: [], limit: 500 }
+      return { ok: true }
+    })
+    const report = await checked(run)
 
-  it('removes the zone and the LAN forwarding instead of rebuilding them empty', async () => {
-    // The zone exists to carry this module's sessions. Rebuilt with none left,
-    // it kept masquerading, kept being forwarded to from the LAN, and in
-    // wildcard mode kept claiming `pppoe-pd+` for a prefix nothing uses.
-    const { harness, uciBatches } = deleteHarness([BATCH])
-    const runtime = activate(harness.ctx)
+    // The renderer blanks the omitOnApply fields when it applies - exactly
+    // the fields this form carries, so no more and no fewer keys than the
+    // check saw.
+    const applied = await run.manager.createApply({
+      token: report.token,
+      values: { ...MULTI_FORM, password: '' }
+    })
+    await settle()
 
-    expect(harness.handlers.get('pppoeBatchDelete')?.('b1')).toMatchObject({ ok: true })
-    await settle(40)
+    expect(applied.ok).toBe(true)
+    // The check, the create, then the verify step's read-back; the completion
+    // hook refreshes once more, which is one extra info/sessions pair at most.
+    expect(run.methods.slice(0, 4)).toEqual(['pool_check', 'pool_create', 'info', 'sessions'])
+    // A fresh payload file for the create: the check consumed the first.
+    expect(run.payloads).toHaveLength(2)
+    expect(run.payloads[1]).toMatchObject({ username: 'u@isp', password: 'pw' })
+    expect(run.jobs[0]?.state).toBe('done')
+    // Nothing the module keeps carries the password.
+    expect(JSON.stringify(run.events)).not.toContain('pw')
+    expect(run.jobs[0]?.label).not.toContain('pw')
+  })
 
-    const written = uciBatches.join('\n')
-    expect(written).toContain('delete firewall.bmfwd')
-    expect(written).toContain('delete firewall.bmwanpool')
-    // The forwarding names the zone as its destination, and fw4 refuses to load
-    // one whose destination does not exist.
-    expect(written.indexOf('delete firewall.bmfwd')).toBeLessThan(
-      written.indexOf('delete firewall.bmwanpool')
+  it('refuses a token whose values were edited after the check', async () => {
+    const run = router((method) =>
+      method === 'pool_check' ? checkReply(true) : { ok: true }
     )
-    expect(written).not.toContain('set firewall.bmwanpool=zone')
-    expect(harness.handlers.get('pppoeBatches')?.()).toEqual([])
-    runtime.dispose?.()
-  })
+    const report = await checked(run)
 
-  it('rebuilds the zone while any other batch still needs it', async () => {
-    const { harness, uciBatches } = deleteHarness([BATCH, OTHER])
-    const runtime = activate(harness.ctx)
-
-    expect(harness.handlers.get('pppoeBatchDelete')?.('b1')).toMatchObject({ ok: true })
-    await settle(40)
-
-    const written = uciBatches.join('\n')
-    expect(written).toContain('set firewall.bmwanpool=zone')
-    expect(written).toContain("add_list firewall.bmwanpool.device='pppoe-is+'")
-    expect(written).not.toContain("add_list firewall.bmwanpool.device='pppoe-pd+'")
-    expect(written).not.toContain('delete firewall.bmwanpool\n')
-    runtime.dispose?.()
-  })
-
-  it('leaves a zone the router does not have alone', async () => {
-    // A create that failed before it wrote the zone leaves a record and no
-    // zone; `uci delete` on a section that is not there fails the whole batch.
-    const uciBatches: string[] = []
-    const harness = moduleHarness('openwrt', () => ok(), {
-      hostData: { version: 1, nextSeq: 9, batches: [BATCH] },
-      config: sharedModuleConfig(null)
+    const applied = await run.manager.createApply({
+      token: report.token,
+      values: { ...MULTI_FORM, password: '', vlans: '999' }
     })
-    harness.exec.mockImplementation(async (command, options) => {
-      const stdin = options?.stdin ?? ''
-      if (command === 'sh -s' && stdin.startsWith('uci -q show network')) {
-        return ok('network.pd00001=interface')
-      }
-      if (command === 'uci batch') {
-        uciBatches.push(stdin)
-        return ok()
-      }
-      return ok()
-    })
-    const runtime = activate(harness.ctx)
 
-    expect(harness.handlers.get('pppoeBatchDelete')?.('b1')).toMatchObject({ ok: true })
-    await settle(40)
-
-    const written = uciBatches.join('\n')
-    expect(written).not.toContain('delete firewall.')
-    expect(harness.handlers.get('pppoeBatches')?.()).toEqual([])
-    runtime.dispose?.()
+    expect(applied.ok).toBe(false)
+    expect(applied.error).toContain('check again')
+    expect(run.methods).toEqual(['pool_check'])
   })
 })
+
+describe('editing a pool', () => {
+  it('sends only the keys the form carried', async () => {
+    const run = router((method) => {
+      if (method === 'info') {
+        return {
+          name: 'bm-pppoe-pool',
+          release: '2.0.0',
+          apiVersion: 2,
+          settings: { enabled: true, counter_interval: 5, redial_after: 120, redial_batch: 20 },
+          started: 1,
+          uptime: 1,
+          pools: [POOL_TOLD],
+          legacy: []
+        }
+      }
+      if (method === 'sessions') return { sessions: [], limit: 500 }
+      if (method === 'pool_check') return checkReply(true)
+      if (method === 'pool_set') {
+        return { ok: true, id: 'fpt1', changed: { added: [], removed: [], rewritten: 2 } }
+      }
+      return { ok: true }
+    })
+    await run.manager.refresh()
+
+    const report = await run.manager.setCheck('fpt1', { label: 'Renamed', service: '' })
+    expect(report.ok).toBe(true)
+
+    const spec = run.payloads.at(-1) as Record<string, unknown>
+    expect(spec).toEqual({ label: 'Renamed', service: '' })
+
+    const applied = await run.manager.setApply('fpt1', {
+      token: report.token,
+      values: { label: 'Renamed', service: '' }
+    })
+    expect(applied.ok).toBe(true)
+    expect(applied.data).toContain('2 rewritten')
+  })
+})
+
+describe('deleting a pool', () => {
+  it('refuses while a binding instance is running on the pool carrier', async () => {
+    const run = router(
+      (method) => {
+        if (method === 'info') {
+          return {
+            name: 'bm-pppoe-pool',
+            release: '2.0.0',
+            apiVersion: 2,
+            settings: { enabled: true, counter_interval: 5, redial_after: 120, redial_batch: 20 },
+            started: 1,
+            uptime: 1,
+            pools: [POOL_TOLD],
+            legacy: []
+          }
+        }
+        if (method === 'sessions') return { sessions: [], limit: 500 }
+        return { ok: true }
+      },
+      {
+        bindingCarriers: [{ id: 'b1', name: 'Office', carrier: 'eth1.835', running: true }]
+      }
+    )
+    await run.manager.refresh()
+
+    const refused = await run.manager.delete('fpt1')
+
+    expect(refused.ok).toBe(false)
+    expect(refused.error).toContain('Office')
+    expect(refused.error).toContain('Stop it first')
+    expect(run.methods).not.toContain('pool_delete')
+  })
+
+  it('deletes through the daemon and verifies it is gone', async () => {
+    let deleted = false
+    const run = router((method) => {
+      if (method === 'pool_delete') {
+        deleted = true
+        return { ok: true, id: 'fpt1', removed: 2 }
+      }
+      if (method === 'info') {
+        return {
+          name: 'bm-pppoe-pool',
+          release: '2.0.0',
+          apiVersion: 2,
+          settings: { enabled: true, counter_interval: 5, redial_after: 120, redial_batch: 20 },
+          started: 1,
+          uptime: 1,
+          pools: deleted ? [] : [POOL_TOLD],
+          legacy: []
+        }
+      }
+      if (method === 'sessions') return { sessions: [], limit: 500 }
+      return { ok: true }
+    })
+    await run.manager.refresh()
+
+    const outcome = await run.manager.delete('fpt1')
+    await settle()
+
+    expect(outcome.ok).toBe(true)
+    expect(run.methods).toContain('pool_delete')
+    expect(run.jobs[0]?.state).toBe('done')
+  })
+})
+
+describe('the member actions', () => {
+  it('refuses an action the daemon does not have', async () => {
+    const run = router(() => ({ ok: true }))
+
+    const outcome = await run.manager.connAction(['fpt101'], 'reboot')
+
+    expect(outcome.ok).toBe(false)
+    expect(outcome.error).toContain('up, down, redial, enable or disable')
+    expect(run.methods).toEqual([])
+  })
+
+  it('sends rows and bulk selections through the same call', async () => {
+    const run = router((method) =>
+      method === 'action'
+        ? { ok: true, action: 'disable', sections: ['fpt101'] }
+        : method === 'info'
+          ? {
+              name: 'bm-pppoe-pool',
+              release: '2.0.0',
+              apiVersion: 2,
+              settings: { enabled: true, counter_interval: 5, redial_after: 120, redial_batch: 20 },
+              started: 1,
+              uptime: 1,
+              pools: [],
+              legacy: []
+            }
+          : { sessions: [], limit: 500 }
+    )
+
+    const outcome = await run.manager.connAction('fpt101', 'disable')
+
+    expect(outcome.ok).toBe(true)
+    expect(run.methods[0]).toBe('action')
+  })
+})
+
+/** The flat pool entry `info` answers with, reused by several scripts. */
+const POOL_TOLD = {
+  id: 'fpt1',
+  mode: 'multi',
+  label: '',
+  prefix: 'fpt',
+  carrier: 'eth1.835',
+  mac_mode: 'auto',
+  username: 'u@isp',
+  hasPassword: true,
+  table_base: 10_000,
+  service: '',
+  ac: '',
+  ac_mac: '',
+  mtu: 0,
+  keepalive: '',
+  ipv6: '0',
+  peerdns: false,
+  dns: [],
+  defaultroute: true,
+  host_uniq: '',
+  demand: 0,
+  padi_attempts: 0,
+  padi_timeout: 0,
+  pppd_options: '',
+  zone: 'bmwanpool',
+  masq: true,
+  mtu_fix: true,
+  lan_forward: true,
+  created: 1_700_000_000,
+  memberList: [
+    { vlan: 101, username: '' },
+    { vlan: 102, username: '' }
+  ],
+  members: 2,
+  up: 2,
+  dialing: 0,
+  down: 0,
+  error: 0,
+  stopped: 0,
+  unwritten: 0,
+  createdAt: 1_700_000_000,
+  rate: { rxBps: 0, txBps: 0 }
+}

@@ -1,8 +1,8 @@
 {
 	"name": "bm-pppoe-pool",
-	"version": "1.4.1",
+	"version": "2.0.0",
 	"ubus": "bm.pppoe",
-	"apiVersion": 1,
+	"apiVersion": 2,
 	"provides": [ "pppoe" ],
-	"description": "Pools of PPPoE sessions, dialled and watched on the router"
+	"description": "Pools of PPPoE sessions - one interface per VLAN, firewall included"
 }

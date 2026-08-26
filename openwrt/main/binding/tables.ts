@@ -11,7 +11,6 @@
  */
 import { shQuote } from '@shared/shell'
 import type { OwrtRules } from '../config'
-import { recordLayout } from '../records'
 import type { OwrtHostData } from '../store'
 import type { RouterModel } from '../types'
 import { poolIfaces } from './pool'
@@ -64,23 +63,16 @@ export function tableSourceEntries(
 export function buildWanTableIndex(
   model: RouterModel,
   data: OwrtHostData,
-  rules: OwrtRules,
+  // Kept in the signature for its callers; the per-batch numbering that read
+  // it is gone, and nothing else here needs a rule.
+  _rules: OwrtRules,
   source?: WanTableSource
 ): WanTableIndex {
   const candidates = new Map<string, number>()
 
-  // The naming convention is a fallback. Persisted and router-observed values
-  // below override it.
-  for (const batch of data.batches) {
-    // Each batch numbers from the table base it was created under, not the one
-    // configured now: a base changed after the fact would rename every table
-    // this convention claims and make the reconciler write rules pointing at
-    // tables no interface has.
-    const base = recordLayout(batch, rules).tableBase
-    for (let seq = batch.seqFrom; seq <= batch.seqTo; seq++) {
-      candidates.set(`${batch.prefix}${String(seq).padStart(5, '0')}`, base + seq)
-    }
-  }
+  // Pool members used to be derived here by naming convention; their tables
+  // now arrive with the dump below (`iface.ip4Table`), written and owned by
+  // bm-pppoe-pool. Persisted and router-observed values override the rest.
   for (const [wan, table] of data.extraTables) candidates.set(wan, table)
   for (const iface of model.ifaces) {
     if (iface.ip4Table != null && iface.ip4Table > 0) {
@@ -145,12 +137,6 @@ export async function reconcileWanTables(
     const rules = runtime.options.rules()
     const observed = new Map(tableSourceEntries(source))
     const expected = new Map<string, number>()
-    for (const batch of data.batches) {
-      const base = recordLayout(batch, rules).tableBase
-      for (let seq = batch.seqFrom; seq <= batch.seqTo; seq++) {
-        expected.set(`${batch.prefix}${String(seq).padStart(5, '0')}`, base + seq)
-      }
-    }
     for (const [wan, table] of data.extraTables) expected.set(wan, table)
     for (const iface of model.ifaces) {
       if (iface.ip4Table != null && !expected.has(iface.name)) {
@@ -235,8 +221,9 @@ export async function reconcileWanTables(
     runtime.tableRepairAttempts += 1
 
     await runtime.store.withNetwork(async () => {
-      for (let index = 0; index < entries.length; index += rules.uciChunkSize) {
-        const chunk = entries.slice(index, index + rules.uciChunkSize)
+      const REPAIR_CHUNK = 100
+      for (let index = 0; index < entries.length; index += REPAIR_CHUNK) {
+        const chunk = entries.slice(index, index + REPAIR_CHUNK)
         await uciWrite(
           runtime,
           'repair WAN routing tables',

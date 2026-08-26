@@ -22,7 +22,9 @@
 				"bm.pppoe": [
 					"info",
 					"stats",
-					"sessions"
+					"sessions",
+					"carriers",
+					"settings_get"
 				]
 			},
 			"uci": [
@@ -55,9 +57,11 @@
 				"bm.pppoe": [
 					"action",
 					"reconcile",
+					"pool_check",
 					"pool_add",
-					"pool_append",
-					"pool_delete"
+					"pool_set",
+					"pool_delete",
+					"settings_set"
 				]
 			},
 			"uci": [

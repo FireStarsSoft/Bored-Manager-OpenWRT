@@ -356,7 +356,11 @@ describe('openwrt readiness: five states instead of one sentence', () => {
           installed: true,
           running: true,
           ...AGENT,
-          provides: ['binding', 'pppoe']
+          provides: ['binding', 'pppoe'],
+          features: [
+            { name: 'bm-wanbind', version: '2.0.0', apiVersion: 1, provides: ['binding'] },
+            { name: 'bm-pppoe-pool', version: '2.0.0', apiVersion: 2, provides: ['pppoe'] }
+          ]
         }
       })
     )
@@ -365,6 +369,29 @@ describe('openwrt readiness: five states instead of one sentence', () => {
     // Still not a failure anywhere: these rows never make a router unusable.
     expect(full.checks.some((entry) => entry.key.startsWith('feature-') && entry.status === 'bad'))
       .toBe(false)
+  })
+
+  it('says a 1.x pool package is an update, not a pool daemon', () => {
+    // The capability name alone cannot tell the generations apart, and the
+    // 1.x contract - numbered session runs - is one this module no longer
+    // drives. The row says what to do rather than reading as installed.
+    const stale = buildReadiness(
+      facts({
+        agent: {
+          ...emptyAgentFacts(),
+          installed: true,
+          running: true,
+          ...AGENT,
+          provides: ['pppoe'],
+          features: [
+            { name: 'bm-pppoe-pool', version: '1.4.1', apiVersion: 1, provides: ['pppoe'] }
+          ]
+        }
+      })
+    )
+    expect(check(stale, 'feature-pppoe').status).toBe('warn')
+    expect(check(stale, 'feature-pppoe').detail).toContain('Update the router packages')
+    expect(check(stale, 'feature-pppoe').detail).toContain('keep dialling')
   })
 
   it('is ready when everything answered, and asks for nothing', () => {

@@ -315,61 +315,7 @@ describe('a router that becomes usable without reconnecting', () => {
   })
 })
 
-describe('PPPoE connections the router does not have', () => {
-  it('separates a half-created batch from one somebody stopped', async () => {
-    const harness = moduleHarness(
-      'openwrt',
-      (command) =>
-        command.includes('===SYS===')
-          ? ok(
-              sweepOutput({
-                dump: JSON.stringify({
-                  interface: [
-                    { interface: 'lan', up: true, proto: 'static' },
-                    { interface: 'pd00001', up: true, proto: 'pppoe', device: 'pppoe-pd00001' }
-                  ]
-                })
-              })
-            )
-          : ok(''),
-      {
-        hostData: {
-          version: 1,
-          nextSeq: 4,
-          batches: [
-            {
-              id: 'b1',
-              name: 'Home',
-              prefix: 'pd',
-              carrier: 'eth1',
-              createdAt: 1,
-              count: 3,
-              seqFrom: 1,
-              seqTo: 3
-            }
-          ]
-        },
-        config: sharedModuleConfig(null)
-      }
-    )
-    const runtime = activate(harness.ctx)
-
-    await harness.ticks[0]()
-
-    const [batch] = harness.handlers.get('pppoeBatches')?.() as Array<{
-      up: number
-      dialing: number
-      stopped: number
-      missing: number
-    }>
-    // pd00001 is dialing (up, no address yet); pd00002/pd00003 were never
-    // written to UCI, which used to read as "stopped" - the same thing a
-    // deliberate Stop looks like.
-    expect(batch).toMatchObject({ dialing: 1, stopped: 0, missing: 2 })
-    const rows = harness.handlers.get('pppoeRows')?.('b1') as Array<{ status: string }>
-    expect(rows.map((row) => row.status)).toEqual(['dialing', 'missing', 'missing'])
-    runtime.dispose?.()
-    harness.revoke()
-    expect(harness.afterStopCalls).toEqual([])
-  })
-})
+// A member the record carries and the router does not is the daemon's own
+// `unwritten` status now - the row list is built from the pool record on the
+// router, and its separation from a deliberate stop is proved in the ucode
+// probes and in openwrt-hot-path.test.ts.

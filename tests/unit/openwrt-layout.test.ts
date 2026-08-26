@@ -35,8 +35,7 @@ const STAMPED: ManagedLayout = {
   rulePrefBase: DEFAULT_RULES.rulePrefBase,
   catchAllPrefBase: DEFAULT_RULES.catchAllPrefBase,
   catchAllTable: DEFAULT_RULES.catchAllTable,
-  zoneName: DEFAULT_RULES.zoneName,
-  zoneMode: DEFAULT_RULES.zoneMode
+  zoneName: DEFAULT_RULES.zoneName
 }
 
 const MODEL: RouterModel = {
@@ -151,44 +150,17 @@ describe('a rule change under a running router', () => {
     expect(written).not.toContain('lookup 25500')
   })
 
-  it('still names a batch session from the table base the batch recorded', () => {
-    // The table base was edited to 12000 after the batch was created at
-    // 10000. `pd00001` still owns table 10001, and the device table's only
-    // way to name it is the naming convention. Read live, `10001 - 12000` is
-    // negative, the WAN resolves to nothing at all, and a bound client is
-    // reported as unmanaged on a router where nothing changed.
+  it('names a pool session from the table the dump reports, whatever the rules say', () => {
+    // The table base rule was edited to 12000 after this pool member was
+    // created against 10000. Its table arrives with the dump (`ip4Table`),
+    // written and owned by bm-pppoe-pool, so the device table still names it
+    // - there is no module-side naming convention left to go stale.
     const harness = moduleHarness('openwrt', () => ok(), {
-      hostData: {
-        version: 1,
-        nextSeq: 2,
-        batches: [
-          {
-            id: 'b1',
-            name: 'Home',
-            prefix: 'pd',
-            carrier: 'eth1',
-            createdAt: 1,
-            count: 1,
-            seqFrom: 1,
-            seqTo: 1,
-            layout: { ...STAMPED }
-          }
-        ],
-        instances: [],
-        extraTables: [],
-        stickyMap: [],
-        events: [],
-        moduleEvents: [],
-        jobs: []
-      },
       config: sharedModuleConfig({ version: 1, rules: { tableBase: 12_000 }, ui: {} })
     })
     const config = new ConfigStore(harness.ctx)
     const store = new HostStore(harness.ctx, () => config.effectiveRules())
     const model = structuredClone(MODEL)
-    // The pool WAN carries no `option ip4table`, so the convention is the only
-    // thing that can say which session table 10001 belongs to.
-    delete model.ifaces[1]!.ip4Table
     model.rules = [{ pref: DEFAULT_RULES.rulePrefBase, from: '192.168.1.20/32', table: 10_001 }]
     const queries = new Queries(() => model, () => ({}), config, store)
 
@@ -212,27 +184,28 @@ describe('a rule change under a running router', () => {
       hostData: {
         version: 1,
         nextSeq: 2,
-        batches: [
+        instances: [
           {
-            id: 'b1',
-            name: 'Home',
-            prefix: 'pd',
+            id: 'bind1',
+            name: 'Office LAN',
+            lan: 'lan',
             carrier: 'eth1',
+            running: false,
+            sticky: true,
+            remap: true,
             createdAt: 1,
-            count: 1,
-            seqFrom: 1,
-            seqTo: 1,
+            slot: 0,
             layout: {
               tableBase: 9_000,
               rulePrefBase: 19_000,
               catchAllPrefBase: 28_000,
               catchAllTable: 28_999,
               zoneName: 'oldpool',
+              // Written by an earlier build; ignored on the way back in.
               zoneMode: 'networks'
             }
           }
         ],
-        instances: [],
         extraTables: [],
         stickyMap: [],
         events: [],
@@ -240,15 +213,14 @@ describe('a rule change under a running router', () => {
         jobs: []
       }
     })
-    const batch = new HostStore(harness.ctx, () => DEFAULT_RULES).read().batches[0]
+    const instance = new HostStore(harness.ctx, () => DEFAULT_RULES).read().instances[0]
 
-    expect(recordLayout(batch, DEFAULT_RULES)).toEqual({
+    expect(recordLayout(instance, DEFAULT_RULES)).toEqual({
       tableBase: 9_000,
       rulePrefBase: 19_000,
       catchAllPrefBase: 28_000,
       catchAllTable: 28_999,
-      zoneName: 'oldpool',
-      zoneMode: 'networks'
+      zoneName: 'oldpool'
     })
   })
 })

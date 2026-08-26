@@ -9,6 +9,133 @@ guessing, so it moves only when the shape of a call changes. `configSchema` is
 the shape of what is written to `/etc`, and it is what a downgrade is refused
 on. All three are in [`version.json`](version.json).
 
+## 2.0.0
+
+`bm-pppoe-pool` is rewritten around what a pool actually is, and the daemon now
+owns a pool end to end: the record, the network sections, the tagged devices,
+the firewall zone, the MACs. Nothing else writes any of it any more - not the
+module over SSH, not a LuCI page - which is why this is 2.0.0 and why
+`configSchema` moves to **2**. `bm.agent`'s own contract did not change shape,
+so `apiVersion` stays 3; the pool daemon's feature descriptor carries its own
+`apiVersion: 2`, and a module that only knows 1.x sees that number and says so
+instead of guessing.
+
+Pools written by 1.x are not migrated, because there is nothing to migrate them
+*to*: the old model recorded a sequence range and the new one records members.
+They are listed as **legacy** - visible, counted, delete-only - and
+`pool_delete` still knows how to take one apart completely: the five-digit
+sections, the shared `bmv<vid>` devices by refcount, the zone memberships. The
+schema step exists so a 1.x router is stamped forward exactly once and a 1.x
+build refuses to start over 2.x data rather than misreading it.
+
+### One VLAN, one session
+
+The old model was a prefix and a block of sequence numbers - `ppp00001` to
+`ppp05000` - because it was written for an ISP that hands out five thousand
+accounts. The ISPs these routers actually sit behind hand out something else: a
+handful of VLANs on one uplink, each VLAN carrying one PPPoE session, often all
+of them on **one shared account** that the BRAS tells apart by MAC.
+
+So a v2 pool is a carrier and a list of VLAN members, at most 500 of them, and
+everything else is derived: VLAN 101 on prefix `fpt` is section `fpt101`,
+device `pppoe-fpt101`, tagged device `eth1.101` (VLAN 0 means untagged, straight
+over the carrier), routing table `table_base + 101`. One spelling per rule, in
+`config.uc`, quoted by both reconcilers, the status machine, the counters and
+the delete - two spellings of one rule is how a delete misses a section.
+
+Two modes, declared at creation and immutable afterwards. `multi` carries one
+account at pool level and every member dials with it; `single` carries one
+account per member. That distinction used to be five thousand pasted lines;
+now it is the shape of the pool.
+
+### The MAC is arithmetic, not luck
+
+A shared account only works if every session presents its own MAC, and an
+invented MAC only works until the pool is created again after a reboot and
+invents different ones - at which point the BRAS drops every session and the
+operator learns what "random" costs. So `mac_mode auto` derives them:
+`02:` (locally administered, unicast), three octets of FNV-1a over the
+carrier's own MAC and the pool id, and the VLAN in the last two. Two pools on
+one carrier differ, the same pool re-created lands on the same MACs, and
+nothing is stored - the reconciler recomputes and always gets the same answer.
+
+The formula is pinned by a probe against fixed inputs, because moving it - by
+accident, by refactor - redials every pool in the field on the next reconcile.
+
+### Editing exists now
+
+`pool_set` folds a partial spec over the stored record. A member kept by its
+VLAN keeps its password, so relabelling a pool never means retyping five
+hundred credentials; the prefix and the mode are refused outright (every
+interface is named by the first, the account shape is the second); and the
+changes that redial sessions - carrier, table base, zone, MAC mode, a `multi`
+password - are warned about with the count of sessions they take down.
+`pool_check` runs the same gate with the same sentences, so the preview a form
+shows is the refusal the apply would have given.
+
+### The firewall is the pool's own
+
+Each pool names its zone (default `bmwanpool`), and the daemon reconciles it:
+the zone section, its `network` list built from the members, masquerading, MTU
+fix, and one forwarding from the LAN zone - found from the router's own
+firewall configuration, not assumed to be `lan`. Deleting the pool takes the
+memberships off and removes the zone when nothing else still uses it,
+including a `bm-wanbind` that names it. `fw4 reload` is coalesced the same way
+netifd reloads are: one reload per settled change, not one per section.
+
+### The API is five verbs and a status machine
+
+On `bm.pppoe`: `pool_check`, `pool_create`, `pool_add`, `pool_set`,
+`pool_delete`, plus `action` (up, down, redial, enable, disable - the last two
+persist `option auto`, so a disabled member stays down across reboots),
+`sessions`, `carriers`, `info`, `stats`, `settings_get`, `settings_set` and
+`reconcile`. A member's state is one of six: `up`, `dialing`, `down`, `error`,
+`stopped`, and `unwritten` - recorded but not yet on the router, which is the
+state a create that died half way leaves behind and the state every other
+surface used to have no word for.
+
+`pool_append` is gone. It existed because a 5,000-account pool did not fit in
+one message; a 500-member pool does, so the whole spec travels in one call and
+a pool is never half-created by a browser that went away.
+
+The two credential paths survive unchanged in shape: `pool_create` reads and
+unlinks a `0600` file for callers that have a filesystem (the module over SSH,
+`bmpppoe` at a console), and `pool_add` takes the spec inline for callers that
+do not (a LuCI page, where the call is a binary message on a unix socket and
+never a command line). `pool_create` stays out of the LuCI ACL for the same
+reason as before: reading and unlinking a caller-named file as root is an
+arbitrary delete in `/tmp`, and the browser gets the capability without the
+primitive.
+
+The daemon's own knobs - counter interval, the redial watchdog's patience and
+batch size - are `settings_get`/`settings_set` now, stored in `bm_pppoe` where
+they always were, editable from every surface instead of from none.
+
+### The probes grew a filesystem
+
+`packages/ci/probes/lib/` gained an in-memory `fs` beside its storing `uci`, so
+a probe can seed `/sys/class/net/eth1/address` and the daemon under test reads
+a carrier MAC the same way it does on a router. `pool-lifecycle.uc` drives the
+real daemon through create, check-refusals, edit and delete and reads every
+section back; `pool-legacy.uc` seeds an old-model pool and proves it is listed
+as legacy, refused for editing, and deleted cleanly. The golden MAC vectors
+live there too, which is what makes the formula pinned rather than described.
+
+### Also
+
+- `bmpppoe` is rewritten around the new verbs: `status`, `list`, `carriers`,
+  `stats`, `reconcile`, `up`/`down`/`redial`/`enable`/`disable`,
+  `check`/`create`/`set` from a spec file, `delete`, `settings`.
+- The LuCI PPPoE tab is rewritten against the same calls: pools with their
+  members and states, create and edit forms that run `pool_check` while you
+  type, the legacy list, and the daemon settings.
+- `/etc/config/bm_pppoe` is `chmod 600` on install: it can carry account
+  passwords, and it always could.
+- `bm-agent`, `bm-wanbind` and `luci-app-bm` move to 2.0.0 with it - the
+  release number is one number across the tree. `bm-agent` carries the schema
+  step and `luci-app-bm` the rewritten tab; `bm-wanbind` changes nothing but
+  its version.
+
 ## 1.4.1
 
 The one that matters was found on a real router: every LuCI page answered "There

@@ -14,7 +14,6 @@ import { isRecord, textField } from '../util'
 import {
   BOOLEAN_KEYS,
   DEFAULT_RULES,
-  IFACE_PREFIX,
   MIN_PREF_SPAN,
   NUMERIC_KEYS,
   RULE_BOUNDS,
@@ -40,14 +39,15 @@ export type RulesTopology = 'none' | 'present' | 'unknown'
 const UNKNOWN_TOPOLOGY =
   'Numbering and firewall-layout rules cannot change while no router is connected'
 
-/** The six values that describe where this module's objects live on a router. */
+/**
+ * The values a binding instance's records depend on. PPPoE keys are gone from
+ * this list with the pools themselves: a pool records its own numbering and
+ * zone on the router, so no module rule describes where one lives any more.
+ */
 const LOCKED_KEYS: ReadonlyArray<keyof OwrtRules> = [
-  'tableBase',
   'rulePrefBase',
   'catchAllPrefBase',
-  'catchAllTable',
-  'zoneName',
-  'zoneMode'
+  'catchAllTable'
 ]
 
 export class RulesEditor {
@@ -107,17 +107,6 @@ export class RulesEditor {
       }
     }
 
-    const prefix = textField(values, 'ifacePrefix')
-    if (prefix) {
-      if (!IFACE_PREFIX.test(prefix)) {
-        findings.push({
-          level: 'error',
-          label: 'Interface prefix must be 1-4 lowercase letters or digits and start with a letter'
-        })
-      } else {
-        entered.ifacePrefix = prefix
-      }
-    }
     const zoneName = textField(values, 'zoneName')
     if (zoneName) {
       if (!UCI_NAME.test(zoneName)) {
@@ -127,14 +116,6 @@ export class RulesEditor {
         })
       } else {
         entered.zoneName = zoneName
-      }
-    }
-    const zoneMode = textField(values, 'zoneMode')
-    if (zoneMode) {
-      if (zoneMode !== 'wildcard' && zoneMode !== 'networks') {
-        findings.push({ level: 'error', label: 'Firewall zone mode must be wildcard or networks' })
-      } else {
-        entered.zoneMode = zoneMode
       }
     }
     const leaseFile = textField(values, 'leaseFile')
@@ -153,13 +134,6 @@ export class RulesEditor {
 
     const candidate: OwrtRules = { ...current, ...entered }
     findings.push(...this.blockers(candidate, current))
-    if (candidate.zoneMode === 'networks') {
-      findings.push({
-        level: 'info',
-        label: 'Firewall membership will be written per network',
-        detail: 'This is the compatibility fallback when fw4 does not expand the wildcard netdev.'
-      })
-    }
 
     const kept: Partial<OwrtRules> = {}
     for (const key of Object.keys(DEFAULT_RULES) as Array<keyof OwrtRules>) {
@@ -224,11 +198,11 @@ export class RulesEditor {
    * Put every rule back to its default except the ones that are locked, and say
    * which ones were kept.
    *
-   * It used to refuse wholesale: one batch on the router and "Reset every rule"
-   * did nothing at all, so the chunk size, the grace periods and the lease file
-   * - none of which describe where anything lives - could no longer be reset
-   * without deleting the pool first. The locked six are the only values a
-   * running router's records depend on, and they are the only ones held back.
+   * It used to refuse wholesale: one record on the router and "Reset every
+   * rule" did nothing at all, so the grace periods and the lease file - none of
+   * which describe where anything lives - could no longer be reset without
+   * deleting the instance first. The locked three are the only values a running
+   * router's records depend on, and they are the only ones held back.
    */
   reset(): OkResult {
     const current = this.store.effectiveRules()
@@ -252,7 +226,7 @@ export class RulesEditor {
         `Every rule is back to its default except ${held.join(', ')}, kept because ` +
         (topology === 'unknown'
           ? 'no router is connected to say whether records exist that depend on them. Connect the router these rules apply to, then reset again.'
-          : 'batches or binding instances describe where their objects live on the router. Delete those records first, then reset again.')
+          : 'binding instances describe where their rules live on the router. Delete those instances first, then reset again.')
     }
   }
 
@@ -269,25 +243,10 @@ export class RulesEditor {
         label: 'Assignment rule priorities must end before the catch-all priority range'
       })
     }
-    // The bases alone are checked above; this is the range each of them spans.
-    // One client ip rule per WAN and one routing table per WAN, so a batch of
-    // `maxBatchRows` sessions needs that many of both before the catch-all
-    // numbering starts. Only the tables were ever checked, so a priority base
-    // set close under the catch-all range saved cleanly and then silently ran
-    // out of preferences: every device past the gap stayed queued behind a
-    // fail-closed catch-all with no internet and no setting saying why.
-    if (candidate.rulePrefBase + candidate.maxBatchRows >= candidate.catchAllPrefBase) {
-      findings.push({
-        level: 'error',
-        label: 'The client rule priority range overlaps the catch-all priority range',
-        detail: `Each bound device takes one ip rule priority from ${candidate.rulePrefBase} upwards and a batch can hold ${candidate.maxBatchRows}, so the catch-all base has to sit at least that far above it. Raise the catch-all priority base or lower the rule priority base / maximum batch size.`
-      })
-    }
-    // A floor as well as a gap, because the router half has one. A narrow range
-    // passes every test above when the batch size is small, and `bm-wanbind`
-    // then refuses the instance by omitting it from its own list - so the
-    // binding table shows nothing bound, nothing waiting and no error, and the
-    // only explanation is a line in the router's syslog.
+    // A floor as well as an ordering, because the router half has one. A
+    // narrow range would make `bm-wanbind` refuse the instance by omitting it
+    // from its own list - so the binding table shows nothing bound, nothing
+    // waiting and no error, and the only explanation is a line in syslog.
     if (candidate.catchAllPrefBase - candidate.rulePrefBase < MIN_PREF_SPAN) {
       findings.push({
         level: 'error',
@@ -295,11 +254,13 @@ export class RulesEditor {
         detail: `There are ${candidate.catchAllPrefBase - candidate.rulePrefBase} priorities between the two bases, and at least ${MIN_PREF_SPAN} are needed. The router's own binding service refuses an instance narrower than that, and it refuses it silently.`
       })
     }
-    if (candidate.tableBase + candidate.maxBatchRows >= candidate.catchAllTable) {
+    // WAN tables are numbered upward from the base, so the catch-all table
+    // has to leave room for at least a pool's worth of them.
+    if (candidate.tableBase + MIN_PREF_SPAN >= candidate.catchAllTable) {
       findings.push({
         level: 'error',
-        label: 'The PPPoE routing-table range overlaps the catch-all routing table',
-        detail: 'Raise the catch-all table or lower the table base / maximum batch size.'
+        label: 'The WAN routing-table range overlaps the catch-all routing table',
+        detail: 'Raise the catch-all table or lower the table base.'
       })
     }
     const changed = LOCKED_KEYS.filter((key) => candidate[key] !== current[key])
@@ -314,8 +275,8 @@ export class RulesEditor {
     } else if (topology === 'present') {
       findings.push({
         level: 'error',
-        label: 'Numbering and firewall-layout rules cannot change while batches or binding instances exist',
-        detail: `Delete those router-managed records first before changing ${changed.join(', ')}.`
+        label: 'Numbering rules cannot change while binding instances exist',
+        detail: `Delete those instances first before changing ${changed.join(', ')}.`
       })
     }
     return findings

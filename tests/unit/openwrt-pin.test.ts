@@ -177,6 +177,9 @@ function poolIface(seq: number, up = true): RouterModel['ifaces'][number] {
     pending: false,
     autostart: true,
     uptimeSec: 3_000,
+    // The dump carries each pool member's table - written by bm-pppoe-pool -
+    // which is where the binding half's WAN-to-table map reads it from.
+    ip4Table: 10_000 + seq,
     ...(up ? { ipv4: { addr: `198.51.100.${seq}`, mask: 32 } } : {})
   }
 }
@@ -212,20 +215,7 @@ function fixture(options: { sticky?: boolean } = {}): Fixture {
   let failing = false
   const harness = moduleHarness('openwrt', () => ok(), {
     hostData: {
-      version: 1,
-      nextSeq: 4,
-      batches: [
-        {
-          id: 'b1',
-          name: 'Home',
-          prefix: 'pd',
-          carrier: 'eth1',
-          createdAt: 1,
-          count: 3,
-          seqFrom: 1,
-          seqTo: 3
-        }
-      ],
+      version: 2,
       instances: [
         {
           id: 'bind1',

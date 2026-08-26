@@ -47,6 +47,21 @@ function declare(object, method, params) {
 	});
 }
 
+/*
+ * Every key a pool spec may carry, in one place. Credentials travel inline
+ * here and that is safe for the reason the app's 0600 file is safe on its
+ * path: a ubus call from this page crosses a unix socket as a parsed object,
+ * so no part of it is ever a command line on the router.
+ */
+const POOL_SPEC = {
+	id: '', mode: '', label: '', prefix: '', carrier: '', mac_mode: '',
+	username: '', password: '', members: [], table_base: 0,
+	service: '', ac: '', ac_mac: '', mtu: 0, keepalive: '', ipv6: '',
+	peerdns: false, dns: [], defaultroute: true, host_uniq: '', demand: 0,
+	padi_attempts: 0, padi_timeout: 0, pppd_options: '', zone: '',
+	masq: true, mtu_fix: true, lan_forward: true
+};
+
 const calls = {
 	agentInfo: declare(AGENT, 'info'),
 	agentStats: declare(AGENT, 'stats'),
@@ -84,11 +99,18 @@ const calls = {
 	poolStats: declare(PPPOE, 'stats'),
 	poolSessions: declare(PPPOE, 'sessions', { id: '', scope: '' }),
 	poolAction: declare(PPPOE, 'action', { action: '', sections: [] }),
-	poolAdd: declare(PPPOE, 'pool_add', {
-		id: '', prefix: '', carrier: '', seq_from: 0, table_base: 0, vlan: 0, accounts: []
+	poolCarriers: declare(PPPOE, 'carriers'),
+	// The full spec shape, shared by check, create and set. Only the keys a
+	// form actually sends travel - rpc.declare with an object filters by
+	// presence - which is what makes pool_set a partial edit.
+	poolCheck: declare(PPPOE, 'pool_check', POOL_SPEC),
+	poolAdd: declare(PPPOE, 'pool_add', POOL_SPEC),
+	poolSet: declare(PPPOE, 'pool_set', POOL_SPEC),
+	poolDelete: declare(PPPOE, 'pool_delete', { id: '', force: false }),
+	poolSettingsGet: declare(PPPOE, 'settings_get'),
+	poolSettingsSet: declare(PPPOE, 'settings_set', {
+		enabled: false, counter_interval: 0, redial_after: 0, redial_batch: 0
 	}),
-	poolAppend: declare(PPPOE, 'pool_append', { id: '', accounts: [] }),
-	poolDelete: declare(PPPOE, 'pool_delete', { id: '' }),
 	poolReconcile: declare(PPPOE, 'reconcile')
 };
 

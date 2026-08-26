@@ -10,11 +10,6 @@ import {
   uciQuote
 } from '../../openwrt/main/parse'
 import {
-  buildFirewallPlan,
-  buildPppoeUci,
-  effectivePppoeChunkSize
-} from '../../openwrt/main/uci'
-import {
   planBindingReconciliation,
   tokenizeUciValues,
   type BindingPlannerMemory,
@@ -22,7 +17,7 @@ import {
   type BindingPlannerWan,
   type BindingReconcileInput
 } from '../../openwrt/main/binding'
-import { findSequenceRange } from '../../openwrt/main/pppoe'
+import { parseMemberLines, parseVlanList } from '../../openwrt/main/pppoe'
 import { buildFastSweepCommand } from '../../openwrt/main/service'
 import { selectOptions } from '../../openwrt/main/options'
 import { DEFAULT_RULES } from '../../openwrt/main/config'
@@ -76,58 +71,58 @@ describe('OpenWRT parsers', () => {
     expect(parsed.errors[1]?.reason).toContain('VLAN')
   })
 
-  it('quotes UCI values and produces deterministic PPPoE UCI', () => {
+  it('quotes UCI values for the shell', () => {
     expect(uciQuote("a'b")).toBe("'a'\\''b'")
-    expect(
-      buildPppoeUci(
-        [{ user: 'account', pass: "pa'ss" }],
-        { prefix: 'pd', carrier: 'eth1', seqFrom: 1, tableBase: 10_000 }
-      )
-    ).toBe(
+  })
+
+  it('parses VLAN lists: ranges, singles, untagged, and the mistakes', () => {
+    expect(parseVlanList('101-103,200, 0')).toEqual({
+      vlans: [101, 102, 103, 200, 0],
+      errors: []
+    })
+
+    const twice = parseVlanList('101,101')
+    expect(twice.errors.some((line) => line.includes('twice'))).toBe(true)
+
+    const junk = parseVlanList('101-x,5000')
+    expect(junk.vlans).toEqual([])
+    expect(junk.errors).toHaveLength(2)
+  })
+
+  it('parses member lines with every separator, and keeps short forms for edits', () => {
+    const parsed = parseMemberLines(
       [
-        'set network.pd00001=interface',
-        "set network.pd00001.proto='pppoe'",
-        "set network.pd00001.device='eth1'",
-        "set network.pd00001.username='account'",
-        "set network.pd00001.password='pa'\\''ss'",
-        "set network.pd00001.ipv6='0'",
-        "set network.pd00001.peerdns='0'",
-        "set network.pd00001.defaultroute='1'",
-        "set network.pd00001.ip4table='10001'",
-        "set network.pd00001.metric='10001'",
-        ''
+        '# per-VLAN accounts',
+        '101\tline101@isp\tsecret',
+        '102,line102@isp',
+        '103'
       ].join('\n')
     )
+
+    expect(parsed.errors).toEqual([])
+    expect(parsed.members).toEqual([
+      { vlan: 101, user: 'line101@isp', pass: 'secret' },
+      { vlan: 102, user: 'line102@isp' },
+      { vlan: 103 }
+    ])
+
+    const bad = parseMemberLines('4095,user,pass\n101,u,p\n101,v,q')
+    expect(bad.errors[0]).toContain('0 to 4094')
+    expect(bad.errors[1]).toContain('twice')
   })
 
-  it('keeps large PPPoE work bounded and builds fw4 wildcard membership', () => {
-    expect(effectivePppoeChunkSize(5_000, 100)).toBe(100)
-    expect(effectivePppoeChunkSize(5_000, 1)).toBe(50)
-    const firewall = buildFirewallPlan({
-      zoneName: 'bmwanpool',
-      prefix: 'pd',
-      prefixes: ['pd', 'isp'],
-      mode: 'wildcard',
-      networkSections: [],
-      chunkSize: 100,
-      lanZone: 'lan'
-    })
-    expect(firewall.membershipChunks).toEqual([])
-    expect(firewall.setupLines).toContain(
-      "add_list firewall.bmwanpool.device='pppoe-pd+'"
-    )
-    expect(firewall.setupLines).toContain(
-      "add_list firewall.bmwanpool.device='pppoe-isp+'"
-    )
-  })
-
-  it('scopes router-side rate aggregation to exact managed sequence ranges', () => {
+  it('scopes router-side rate aggregation to the managed name ranges', () => {
     const command = buildFastSweepCommand(
       DEFAULT_RULES,
-      [{ prefix: 'pd', seqFrom: 101, seqTo: 1100 }],
+      [
+        // A v2 pool covers its prefix over the whole VLAN space; a legacy one
+        // still carries the sequence range it was created with.
+        { prefix: 'fpt', seqFrom: 0, seqTo: 4094 },
+        { prefix: 'pd', seqFrom: 101, seqTo: 1100 }
+      ],
       true
     )
-    expect(command).toContain("-v R='pd:101-1100'")
+    expect(command).toContain("-v R='fpt:0-4094;pd:101-1100'")
     expect(command).toContain("echo '===DUMP==='")
     expect(
       buildFastSweepCommand(DEFAULT_RULES, [], false)
@@ -198,9 +193,7 @@ describe('OpenWRT parsers', () => {
     }
     expect(
       selectOptions('carriers', model, {
-        version: 1,
-        nextSeq: 1,
-        batches: [],
+        version: 2,
         instances: [],
         extraTables: [],
         stickyMap: [],
@@ -646,17 +639,5 @@ describe('OpenWRT safety helpers', () => {
     expect(tokenizeUciValues("'lan' 'guest'")).toEqual(['lan', 'guest'])
     expect(tokenizeUciValues("'lan'")).toEqual(['lan'])
     expect(tokenizeUciValues("lan")).toEqual(['lan'])
-  })
-
-  it('reuses freed PPPoE sequence ranges after nextSeq is exhausted', () => {
-    const limit = DEFAULT_RULES.catchAllTable - DEFAULT_RULES.tableBase - 1
-    const range = findSequenceRange(
-      2,
-      'pd',
-      DEFAULT_RULES,
-      { nextSeq: limit, batches: [] },
-      { carrierExists: true, sections: new Set(), tables: new Set(), vlanDevices: new Map() }
-    )
-    expect(range).toEqual({ from: 1, to: 2 })
   })
 })

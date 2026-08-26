@@ -50,6 +50,11 @@ if (!bus) {
 
 service.attach(bus);
 
+// The firewall reload is an init script, not a ubus call. The runner is
+// injected so that everything below the entry point can be driven by the CI
+// probes without a single command ever running on the machine checking it.
+service.attachSystem((command, timeout) => system(command, timeout));
+
 if (!bus.publish('bm.pppoe', service.methods)) {
 	// Almost always a second copy already holding the name. procd will restart
 	// this one in five seconds, which is the right answer if the other copy is

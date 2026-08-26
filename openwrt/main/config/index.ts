@@ -10,8 +10,7 @@ export {
   DEFAULT_RULES,
   RULE_BOUNDS,
   type OwrtConfig,
-  type OwrtRules,
-  type ZoneMode
+  type OwrtRules
 } from './rules'
 export { ConfigStore } from './store'
 export { RulesEditor, type RulesTopology } from './editor'

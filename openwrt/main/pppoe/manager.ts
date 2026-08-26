@@ -1,87 +1,115 @@
 /**
- * The object the rest of the module holds: one runtime, and a method per thing
- * a page or a handler can ask for.
- *
- * Nothing is decided here. Every method hands the runtime to the free function
- * that owns that behaviour, which is what keeps the surface stable while the
- * files behind it move. The `batch*` aliases are the names the UI specs call
- * and the short ones are what the module's own code uses; both are kept because
- * both are in use.
+ * The object the rest of the module holds: one runtime, and a method per
+ * thing a page or a handler can ask for. Nothing is decided here - every
+ * method hands the runtime to the free function that owns that behaviour.
  */
 import type { ModuleCheckReport } from '@shared/check'
 import type { ModuleContext } from '@shared/modules'
-import type { AgentCapability } from '../probe'
+import type { FormFieldOption } from '@shared/module-ui'
 import type { OkResult } from '@shared/types'
-import type { RouterModel } from '../types'
-import { batchAction, connAction, watchdog } from './actions'
-import { applyPppoe } from './create'
-import { batchDelete } from './lifecycle'
-import { checkPppoe } from './plan'
+import type { PoolSettings } from '../agent'
+import { bulkPoolAction, carrierOptions, connAction, sweepPools } from './actions'
+import { applyPool } from './create'
+import { applyPoolSet } from './edit'
+import { deletePool } from './lifecycle'
+import { checkPool, checkPoolEdit } from './plan'
 import { createPppoeRuntime, resetRuntime, type PppoeRuntime } from './runtime'
+import { settingsApply, settingsCheck, settingsGet } from './settings'
 import type {
-  PppoeBatchSummary,
+  PppoeAgentReader,
   PppoeConfigStore,
   PppoeDisplayRow,
-  PppoeHostStore,
   PppoeJobs,
+  PppoeLegacyRow,
+  PppoePoolRow,
   PppoeService,
-  PppoeSnapshot,
-  PppoeStoreData
+  PppoeSnapshot
 } from './types'
-import { attentionRows, batches, onSample, rows, snapshot } from './view'
+import {
+  legacyRows,
+  managedRanges,
+  onSample,
+  pools,
+  refreshCache,
+  rows,
+  snapshot
+} from './view'
 
-export class PppoeManager<TData extends PppoeStoreData = PppoeStoreData> {
+export class PppoeManager {
   private runtime: PppoeRuntime
 
   constructor(
     ctx: ModuleContext,
     config: PppoeConfigStore,
-    store: PppoeHostStore<TData>,
     jobs: PppoeJobs,
     service: PppoeService,
-    /**
-     * The router-side capability verdict. When it says this router provides
-     * `pppoe`, a create writes its sections through `bm-pppoe-pool` in one call
-     * instead of one round trip per chunk - and the credentials never become
-     * arguments to anything on either side.
-     */
-    agent?: () => AgentCapability
+    /** The router-side capability verdict, read per operation, never captured. */
+    agent?: PppoeAgentReader
   ) {
-    this.runtime = createPppoeRuntime(ctx, config, store, jobs, service, agent)
+    this.runtime = createPppoeRuntime(ctx, config, jobs, service, agent)
   }
 
-  // ------------------------------------------------------------- check/apply
+  // ------------------------------------------------------------ check/apply
 
-  check(raw: unknown): Promise<ModuleCheckReport> {
-    return checkPppoe(this.runtime, raw)
+  createCheck(values: unknown): Promise<ModuleCheckReport> {
+    return checkPool(this.runtime, values)
   }
 
-  apply(raw: unknown): Promise<OkResult> {
-    return applyPppoe(this.runtime, raw)
+  createApply(payload: unknown): Promise<OkResult> {
+    return applyPool(this.runtime, payload)
   }
 
-  // UI-handler-friendly aliases.
-  batchCheck(raw: unknown): Promise<ModuleCheckReport> {
-    return this.check(raw)
+  setCheck(id: unknown, values: unknown): Promise<ModuleCheckReport> {
+    return checkPoolEdit(this.runtime, id, values)
   }
 
-  batchApply(raw: unknown): Promise<OkResult> {
-    return this.apply(raw)
+  setApply(id: unknown, payload: unknown): Promise<OkResult> {
+    return applyPoolSet(this.runtime, id, payload)
+  }
+
+  settingsGet(): PoolSettings {
+    return settingsGet(this.runtime)
+  }
+
+  settingsCheck(values: unknown): ModuleCheckReport {
+    return settingsCheck(this.runtime, values)
+  }
+
+  settingsApply(payload: unknown): Promise<OkResult> {
+    return settingsApply(this.runtime, payload)
   }
 
   // ---------------------------------------------------------------- queries
 
-  batches(): PppoeBatchSummary[] {
-    return batches(this.runtime)
+  pools(): PppoePoolRow[] {
+    return pools(this.runtime)
   }
 
-  /** `scopeRaw` is the batch drawer's open tab; see `rows` in `view.ts`. */
-  rows(batchIdRaw: unknown, scopeRaw?: unknown): PppoeDisplayRow[] {
-    return rows(this.runtime, batchIdRaw, scopeRaw)
+  rows(poolId: unknown, scope?: unknown): PppoeDisplayRow[] {
+    return rows(this.runtime, poolId, scope)
   }
 
-  attentionRows(): PppoeDisplayRow[] {
-    return attentionRows(this.runtime)
+  legacyRows(): PppoeLegacyRow[] {
+    return legacyRows(this.runtime)
+  }
+
+  carrierOptions(): Promise<FormFieldOption[]> {
+    return carrierOptions(this.runtime)
+  }
+
+  /** The pool names the uninstall gate reports as blockers. */
+  poolNames(): string[] {
+    return (this.runtime.cache.info?.pools ?? []).map((pool) => pool.label || pool.id)
+  }
+
+  poolCount(): number {
+    const info = this.runtime.cache.info
+    return info ? info.pools.length + info.legacy.length : 0
+  }
+
+  /** The name ranges the fast sweep's awk counts as the managed pool. */
+  managedRanges(): Array<{ prefix: string; seqFrom: number; seqTo: number }> {
+    return managedRanges(this.runtime)
   }
 
   snapshot(): PppoeSnapshot {
@@ -94,31 +122,32 @@ export class PppoeManager<TData extends PppoeStoreData = PppoeStoreData> {
 
   // ---------------------------------------------------------------- actions
 
-  batchAction(idRaw: unknown, actionRaw: unknown): OkResult {
-    return batchAction(this.runtime, idRaw, actionRaw)
+  connAction(names: unknown, action: unknown): Promise<OkResult> {
+    return connAction(this.runtime, names, action)
   }
 
-  connAction(namesRaw: unknown, actionRaw: unknown): OkResult {
-    return connAction(this.runtime, namesRaw, actionRaw)
+  poolAction(id: unknown, action: unknown): Promise<OkResult> {
+    return bulkPoolAction(this.runtime, id, action)
   }
 
-  batchDelete(idRaw: unknown): OkResult {
-    return batchDelete(this.runtime, idRaw)
+  delete(id: unknown, force?: unknown): Promise<OkResult> {
+    return deletePool(this.runtime, id, force)
   }
 
-  // --------------------------------------------------------------- lifecycle
+  sweep(): Promise<OkResult> {
+    return sweepPools(this.runtime)
+  }
+
+  // -------------------------------------------------------------- lifecycle
 
   /** Called after FastSweep has replaced its model cache. */
-  onSample(model?: RouterModel): void {
-    onSample(this.runtime, model)
+  onSample(): void {
+    onSample(this.runtime)
   }
 
-  watchdog(now = Date.now()): string | null {
-    return watchdog(this.runtime, now)
-  }
-
-  slowTick(now = Date.now()): string | null {
-    return this.watchdog(now)
+  /** One forced fetch, for the paths that just changed the router. */
+  refresh(): Promise<void> {
+    return refreshCache(this.runtime, true)
   }
 
   reset(): void {

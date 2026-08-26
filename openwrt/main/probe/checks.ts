@@ -13,6 +13,7 @@
  */
 import { IP_FULL_PATH } from './command'
 import { APK_REQUIRED, FW4_MISSING, SPACE_BAD_KB, SPACE_WARN_KB } from './text'
+import { featureApi, PPPOE_POOL_API } from './types'
 import type {
   AgentCapability,
   PackageManager,
@@ -206,7 +207,9 @@ function featureCheck(
   title: string,
   packageName: string,
   present: string,
-  absent: string
+  absent: string,
+  /** The oldest contract this module still drives; omit to accept any. */
+  minApi?: number
 ): CheckSeed {
   if (!agent.usable) {
     return {
@@ -221,6 +224,21 @@ function featureCheck(
   }
 
   const installed = agent.provides.includes(feature)
+  if (installed && minApi !== undefined && featureApi(agent, feature) < minApi) {
+    const found = agent.features.find((entry) => entry.provides.includes(feature))
+    return {
+      key: `feature-${feature}`,
+      title,
+      status: 'warn',
+      detail:
+        `${packageName} ${found?.version || ''} speaks version ${featureApi(agent, feature)} of its contract and this module drives ${minApi}. ` +
+        'Update the router packages from Router packages, in Module settings - the pools it holds keep dialling meanwhile, but nothing here can read or change them.',
+      required: false,
+      install: null,
+      card: 'agent'
+    }
+  }
+
   return {
     key: `feature-${feature}`,
     title,
@@ -487,8 +505,9 @@ export function observedChecks(input: CheckInput): CheckSeed[] {
       'pppoe',
       'PPPoE pools',
       'bm-pppoe-pool',
-      'Pools are written on the router in one call, and sessions are watched through netifd events rather than polled.',
-      'Pools are written over SSH, a chunk per round trip. It works, and a pool of thousands takes proportionally longer to create.'
+      'The router owns its pools end to end: interfaces, per-VLAN MACs, routing tables and the firewall zone are all derived and reconciled on the router itself.',
+      'PPPoE pools need it: this module composes and reads pools through the daemon and writes none of it over SSH.',
+      PPPOE_POOL_API
     ),
     {
       key: 'guard',

@@ -14,16 +14,18 @@
  */
 
 /**
- * Where this module's objects live on a router: the routing tables it numbers
- * from, the two `ip rule` preference ranges it claims, and the firewall zone it
- * owns.
+ * Where this module's objects live on a router: the routing tables the
+ * binding half numbers from, the two `ip rule` preference ranges it claims,
+ * and the firewall zone it masquerades bound WANs through.
  *
- * These six are stamped onto every batch and every binding instance at
- * creation, and read back from the record afterwards. Read live from config
- * instead, the lock in `RulesEditor` was the only thing between a running pool
- * and a config edit: change `tableBase` while sessions are up and the next
- * delete looks for its tables somewhere else entirely, leaving the real ones on
- * the router with nothing pointing at them.
+ * These five are stamped onto every binding instance at creation, and read
+ * back from the record afterwards. Read live from config instead, the lock in
+ * `RulesEditor` was the only thing between a running instance and a config
+ * edit: change `tableBase` while assignments are live and the next reconcile
+ * looks for its tables somewhere else entirely.
+ *
+ * PPPoE pools used to stamp this too. Their layout is the router's own now -
+ * a pool records its `table_base` and its zone in `/etc/config/bm_pppoe`.
  */
 export interface ManagedLayout {
   tableBase: number
@@ -31,7 +33,6 @@ export interface ManagedLayout {
   catchAllPrefBase: number
   catchAllTable: number
   zoneName: string
-  zoneMode: 'wildcard' | 'networks'
 }
 
 export const MANAGED_LAYOUT_KEYS = [
@@ -39,19 +40,17 @@ export const MANAGED_LAYOUT_KEYS = [
   'rulePrefBase',
   'catchAllPrefBase',
   'catchAllTable',
-  'zoneName',
-  'zoneMode'
+  'zoneName'
 ] as const satisfies ReadonlyArray<keyof ManagedLayout>
 
-/** Copy exactly the six, so a record never carries a snapshot of every rule. */
+/** Copy exactly the five, so a record never carries a snapshot of every rule. */
 export function managedLayout(rules: ManagedLayout): ManagedLayout {
   return {
     tableBase: rules.tableBase,
     rulePrefBase: rules.rulePrefBase,
     catchAllPrefBase: rules.catchAllPrefBase,
     catchAllTable: rules.catchAllTable,
-    zoneName: rules.zoneName,
-    zoneMode: rules.zoneMode
+    zoneName: rules.zoneName
   }
 }
 
@@ -67,20 +66,6 @@ export function recordLayout(
   live: ManagedLayout
 ): ManagedLayout {
   return record?.layout ?? managedLayout(live)
-}
-
-export interface PppoeBatchRecord {
-  id: string
-  name: string
-  prefix: string
-  carrier: string
-  vlan?: number
-  createdAt: number
-  count: number
-  seqFrom: number
-  seqTo: number
-  /** Absent on records written before this was stamped; see `recordLayout`. */
-  layout?: ManagedLayout
 }
 
 /** What a job can still be once it is no longer running. */

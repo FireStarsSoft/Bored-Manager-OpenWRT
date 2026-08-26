@@ -125,13 +125,15 @@ export function registerHandlers(runtime: OpenWrtRuntime): void {
     selectOptions(kind, service.latest, store.read())
   )
   handle('deviceRows', () => queries.deviceRows())
-  handle('pppoeBatches', () => pppoe.batches())
-  // The second argument is the drawer's open tab. Without it the drawer pushed
-  // every row in the batch on every fast tick whether or not anybody was
-  // reading them; what each tab means is decided by the folder that owns the
-  // rows, not here.
-  handle('pppoeRows', (batchId: unknown, scope: unknown) => pppoe.rows(batchId, scope))
-  handle('pppoeAttentionRows', () => pppoe.attentionRows())
+  handle('pppoePools', () => pppoe.pools())
+  // The second argument narrows the rows - `attention`, `up`, `down` - and is
+  // decided by the folder that owns them, not here.
+  handle('pppoeRows', (poolId: unknown, scope: unknown) => pppoe.rows(poolId, scope))
+  handle('pppoeLegacyRows', () => pppoe.legacyRows())
+  // Async on purpose: the carrier list is one ubus call, made when a create
+  // form opens rather than on every tick.
+  handle('pppoeCarriers', () => pppoe.carrierOptions())
+  handle('pppoeSettingsGet', () => pppoe.settingsGet())
   handle('bindingRows', (id: unknown, scope: unknown) => binding.rows(id, scope))
   handle('bindingWaitingRows', (id: unknown) => {
     const wanted = String(id ?? '').trim()
@@ -172,6 +174,9 @@ export function registerHandlers(runtime: OpenWrtRuntime): void {
     startPollers(latch, available)
     service.forceDumpNextTick()
     await Promise.all([service.run(), service.runSlow()])
+    // The pool cache too, past its TTL: this is the button a person presses
+    // when they want the page to reflect the router right now.
+    await pppoe.refresh()
     return { ok: true }
   })
   handle('hintsSet', (payload: unknown): OkResult => {
@@ -201,19 +206,22 @@ export function registerHandlers(runtime: OpenWrtRuntime): void {
   handle('agentUninstallCheck', (values: unknown) => agent.uninstallCheck(values))
   handle('agentUninstallApply', (payload: unknown) => agent.uninstallApply(payload))
 
-  // Both create gates used to spell their capability checks out here, in two
-  // hand-written `if` chains that no apply or action shared. They are entries
-  // in `requirements.ts` now, so the same conditions stop `pppoeBatchApply` and
-  // `bindingStart` too - which is the whole point of the change.
-  handle('pppoeBatchCheck', (values: unknown) => pppoe.batchCheck(values))
-  handle('pppoeBatchApply', (payload: unknown) => pppoe.batchApply(payload))
-  handle('pppoeBatchAction', (id: unknown, action: unknown) =>
-    pppoe.batchAction(id, action)
-  )
-  handle('pppoeBatchDelete', (id: unknown) => pppoe.batchDelete(id))
+  // Every gate lives in `requirements.ts`, so the same conditions stop the
+  // applies and the actions that the checks are stopped by - which is the
+  // whole point of routing everything through `handle`.
+  handle('poolCreateCheck', (values: unknown) => pppoe.createCheck(values))
+  handle('poolCreateApply', (payload: unknown) => pppoe.createApply(payload))
+  // The row's edit forms: `poolSetCheck(id, values)`, values last, the way
+  // every other form-backed method on this list takes them.
+  handle('poolSetCheck', (id: unknown, values: unknown) => pppoe.setCheck(id, values))
+  handle('poolSetApply', (id: unknown, payload: unknown) => pppoe.setApply(id, payload))
+  handle('poolDelete', (id: unknown) => pppoe.delete(id))
+  handle('pppoePoolAction', (id: unknown, action: unknown) => pppoe.poolAction(id, action))
   handle('pppoeConnAction', (names: unknown, action: unknown) =>
     pppoe.connAction(names, action)
   )
+  handle('pppoeSettingsCheck', (values: unknown) => pppoe.settingsCheck(values))
+  handle('pppoeSettingsApply', (payload: unknown) => pppoe.settingsApply(payload))
 
   // `dnsmasq` is in this one's requirements for a reason worth keeping written
   // down: without that gate a missing package reached binding.check() and came

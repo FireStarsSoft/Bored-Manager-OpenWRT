@@ -31,8 +31,7 @@ const STAMPED = {
   rulePrefBase: DEFAULT_RULES.rulePrefBase,
   catchAllPrefBase: DEFAULT_RULES.catchAllPrefBase,
   catchAllTable: DEFAULT_RULES.catchAllTable,
-  zoneName: DEFAULT_RULES.zoneName,
-  zoneMode: DEFAULT_RULES.zoneMode
+  zoneName: DEFAULT_RULES.zoneName
 }
 
 const MODEL: RouterModel = {

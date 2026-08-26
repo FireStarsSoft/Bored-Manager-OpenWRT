@@ -4,51 +4,69 @@
 # credentials that only exist on one router, so there is nothing to guess and
 # nothing this file could usefully contain before somebody creates one.
 #
-# Pools are added from LuCI (Services -> Bored Manager -> PPPoE Pools), with
-# `bmpppoe create ID --from FILE` at a console, or from the app - all three end
-# up in the same daemon call and produce the same sections. `bmpppoe append`
-# and the Add sessions button widen an existing pool, which is what to reach for
-# instead of creating a second pool with the same prefix.
+# Pools are added from the app, from LuCI (Services -> Bored Manager -> PPPoE
+# Pools), or with `bmpppoe create ID --from FILE` at a console - all three end
+# up in the same daemon call and produce the same sections.
 #
-# Each pool appears below as a `config pool` section. The sections that actually
-# dial live in /etc/config/network, where netifd reads them - this file is the
-# record of which of them belong to which pool, so that "delete this pool" means
-# something more precise than "delete every PPPoE interface on the router".
+# This file is the record and the record is the truth. The interfaces live in
+# /etc/config/network and the zone in /etc/config/firewall, but both are
+# derived from what is written here: the daemon can rebuild them from this
+# file, and "delete this pool" removes exactly what this file says the pool
+# is. It also carries the pool credentials, which is why the file is 0600.
 #
-# Nothing here is edited by hand in practice: the seq range and the table base
-# are what the interfaces were written against, so changing them makes the
-# record describe interfaces that are not there. Delete the pool and make it
-# again instead.
+# Nothing here is edited by hand in practice. Change a pool from the app,
+# LuCI, or `bmpppoe set` - the daemon rewrites the derived sections in the
+# same breath. An edit made here directly is picked up when the service
+# restarts, but the derived sections stay stale until the next change.
 #
 # Everything here is a conffile, so an update leaves it alone.
 
 config pppoe 'main'
-	# Off means the daemon starts, watches nothing and answers questions, which
-	# is a more useful "off" than a service that is not there to ask.
+	# Off means the daemon starts, watches nothing and answers questions,
+	# which is a more useful "off" than a service that is not there to ask.
 	option enabled '1'
 
 	# Seconds between counter passes. Reading /proc/net/dev and summing by
-	# prefix is cheap - it is one file, whatever the number of sessions - but it
-	# is not free, and nothing anybody watches changes faster than this.
+	# member is cheap - it is one file, whatever the number of sessions.
 	option counter_interval '5'
 
 	# Seconds a session may stay down before it is redialled. 0 turns the
-	# watchdog off entirely and leaves every session to netifd, which does its
-	# own retrying; this is for the sessions netifd has given up on.
+	# watchdog off entirely and leaves every session to netifd, which does
+	# its own retrying; this is for the sessions netifd has given up on.
 	option redial_after '120'
 
-	# The most redials to start in one watchdog pass. A provider that has just
-	# dropped four thousand sessions does not want four thousand simultaneous
-	# reconnects from one router, and neither does the router.
+	# The most redials to start in one watchdog pass. A provider that has
+	# just dropped four hundred sessions does not want four hundred
+	# simultaneous reconnects from one router, and neither does the router.
 	option redial_batch '20'
 
-# One pool. Written by whoever created it; the fields are the record of what it
-# was created as, so that deleting it removes exactly what it added.
+# One pool, written by the daemon. `mode multi` shares one account across
+# every VLAN (and requires mac_mode auto, so each session presents its own
+# MAC); `mode single` carries one account per member section instead.
 #
-#config pool 'ppp'
-#	option prefix 'ppp'
-#	option carrier 'eth1'
-#	option seq_from '1'
-#	option seq_to '500'
-#	option table_base '1000'
-#	option created '1750000000'
+#config pool 'fpt1'
+#	option mode 'multi'
+#	option label 'FPT line 1'
+#	option prefix 'fpt'
+#	option carrier 'eth4'
+#	option mac_mode 'auto'
+#	option username 'user@isp'
+#	option password 'secret'
+#	option table_base '10000'
+#	option ipv6 '0'
+#	option peerdns '0'
+#	option defaultroute '1'
+#	option zone 'bmwanpool'
+#	option masq '1'
+#	option mtu_fix '1'
+#	option lan_forward '1'
+#	option created '1756000000'
+#
+# One member per VLAN. The section name is <pool>_<vlan>, but the options are
+# what the daemon reads. VLAN 0 means untagged, straight over the carrier;
+# at most one of those per pool. In mode single each member carries its own
+# username and password here.
+#
+#config member 'fpt1_101'
+#	option pool 'fpt1'
+#	option vlan '101'

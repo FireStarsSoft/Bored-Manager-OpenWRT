@@ -8,7 +8,7 @@ themselves independently.
 | Package | ubus object | Config | What it is for |
 |---|---|---|---|
 | `bm-agent` | `bm.agent` | `/etc/config/bm_agent` | The common ground: a version handshake, readiness in one ubus call, the `bmctl` CLI, snapshots, the commit-confirm guard, schema migrations and the update engine |
-| `bm-pppoe-pool` | `bm.pppoe` | `/etc/config/bm_pppoe` | Pools of PPPoE sessions, dialled and watched on the router: the `bmpppoe` CLI, netifd event tracking, counters and the redial watchdog |
+| `bm-pppoe-pool` | `bm.pppoe` | `/etc/config/bm_pppoe` | Pools of PPPoE sessions - one member per VLAN - owned end to end on the router: the record, the network sections, the firewall zone, the derived MACs, the `bmpppoe` CLI, counters and the redial watchdog |
 | `bm-wanbind` | `bm.wanbind` | `/etc/config/bm_wanbind` | One DHCP client, one WAN, decided on the router: the `bmwan` CLI, the lease hotplug hook and the 30-second reconcile |
 | `luci-app-bm` | — | — | The router's own pages: five tabs under Services in LuCI, calling the same three objects above |
 
@@ -41,7 +41,8 @@ packages/
   CHANGELOG.md         what each package release changed
   ci/stubs/            empty stand-ins for the C modules, so every module loads
   ci/probes/           programs that drive the daemons and read the answers back
-    lib/               a uci that stores things - deliberately not a stub
+    lib/               a uci that stores and an fs that serves seeded files -
+                       deliberately not stubs
   bm-agent/
     Makefile           the OpenWrt package recipe
     files/             installed verbatim onto the router
@@ -49,7 +50,7 @@ packages/
       etc/init.d/bm-agent      procd service
       usr/sbin/bmctl           the CLI
       usr/share/bm/            entry points, run by ucode rather than executed
-        migrations/            one file per schema step; empty at schema 1
+        migrations/            one file per schema step; 001 carries 1 -> 2
         keys/                  public keys a release manifest is verified against
       usr/share/ucode/bm/      library modules, imported as `bm.<name>`
   luci-app-bm/
@@ -101,8 +102,8 @@ end at the same daemon call.
 | | LuCI | console | app |
 |---|---|---|---|
 | Create a PPPoE pool, credentials and all | Create a pool | `bmpppoe create ID --from F` | yes |
-| Add sessions to one | Add sessions | `bmpppoe append ID --from F` | - |
-| Delete a pool, start/stop/redial sessions | yes | `bmpppoe delete` / `up` / `down` / `redial` | yes |
+| Edit one - members, label, everything but prefix and mode | Edit | `bmpppoe set ID --from F` | yes |
+| Delete a pool, start/stop/redial/enable/disable sessions | yes | `bmpppoe delete` / `up` / `down` / `redial` / `enable` / `disable` | yes |
 | Add, edit, delete a binding instance | yes | `uci` + `bmwan instance delete` | yes |
 | See why an instance was refused | on the row | `bmwan check` | yes |
 | Pin, move, hold, release a client | yes | `bmwan pin` / `reassign` / `unassign` / `release` | yes |
@@ -137,7 +138,7 @@ why `bmpppoe create` does the same.
 A ubus call from a LuCI page is not a command line. It travels over a unix
 socket as a binary message and reaches the daemon as a parsed object, so
 credentials sent that way are never an argument to anything either. `pool_add`
-and `pool_append` take them inline for exactly that reason.
+takes the whole spec inline for exactly that reason.
 
 What the LuCI ACL does *not* grant is `pool_create`, and that is the interesting
 half. It names a file for the daemon to read **and unlink** as root - a
@@ -145,12 +146,10 @@ narrow-looking primitive that in a web session is an arbitrary delete for any
 file directly in `/tmp`. Two methods rather than one is what lets the browser
 have the capability without the primitive.
 
-The inline calls are capped at 200 accounts, so a pool of five thousand is one
-`pool_add` and twenty-four `pool_append`s. That is not only about message size:
-one call writing five thousand sections would hold the daemon's event loop for
-the whole of it. The pool record is written before the first section and widened
-before each chunk, so a browser that goes away half way leaves a smaller pool
-that Delete removes and Add sessions continues.
+A pool is at most 500 members - one per VLAN - so the whole of it fits in one
+message and one call, and a browser that goes away mid-create leaves either a
+pool or nothing. The chunked `pool_append` the old five-thousand-account model
+needed is gone with the model.
 
 ### The shortest ACL that works
 
@@ -296,11 +295,14 @@ which is how the regex above got as far as it did. Entry points are compiled and
 not run, because running one connects to ubus and enters uloop.
 
 Then it runs the probes in [`ci/probes/`](ci/probes), which are the other half:
-a build says a file is well formed, a probe says it is right. They create a
-pool, extend it, refuse an overlapping one, delete it and read every section
-back out of an in-memory uci - because a pool created one sequence number too
-low silently rewrites another pool's credentials, and no compiler will ever see
-that. On Debian or Ubuntu it needs:
+a build says a file is well formed, a probe says it is right - which for this
+tree means the derivations. They drive the real pool daemon against a storing
+uci and a seeded in-memory filesystem: create a pool, read every section it
+wrote back out, refuse the edits that must be refused, edit it and check
+exactly the difference was rewritten, delete it and check nothing is left. The
+MAC formula is held to golden values, because a formula that drifts redials
+every pool in the field, and no compiler will ever see that. On Debian or
+Ubuntu it needs:
 
 ```bash
 sudo apt-get install -y git cmake build-essential pkg-config libjson-c-dev

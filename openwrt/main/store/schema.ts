@@ -12,7 +12,6 @@ import {
   MAX_FINISHED_JOB_ITEMS,
   type FinishedJob,
   type ManagedLayout,
-  type PppoeBatchRecord,
   type StoredJobItem,
   type StoredJobItemState,
   type StoredJobState
@@ -32,10 +31,15 @@ export interface BindingInstanceRecord {
   layout?: ManagedLayout
 }
 
+/**
+ * Version 2: the PPPoE batch records and their sequence counter are gone.
+ * Pools live on the router - `/etc/config/bm_pppoe` is the record, the daemon
+ * owns it - so a per-router document that also described them would only ever
+ * drift from the truth. A version-1 document loads fine: its `batches` and
+ * `nextSeq` are simply not read, and everything binding needs survives.
+ */
 export interface OwrtHostData {
-  version: 1
-  nextSeq: number
-  batches: PppoeBatchRecord[]
+  version: 2
   instances: BindingInstanceRecord[]
   /**
    * WAN-to-table assignments a binding preparation wrote to the router, with
@@ -74,9 +78,7 @@ export type PersistedHostData = Omit<OwrtHostData, 'stickyMap'> & {
 
 export function emptyData(): OwrtHostData {
   return {
-    version: 1,
-    nextSeq: 1,
-    batches: [],
+    version: 2,
     instances: [],
     extraTables: [],
     stickyMap: [],
@@ -115,9 +117,7 @@ function unpackSticky(value: unknown): OwrtHostData['stickyMap'][number] | null 
 
 export function serializeHostData(data: OwrtHostData): PersistedHostData {
   return {
-    version: 1,
-    nextSeq: data.nextSeq,
-    batches: data.batches,
+    version: 2,
     instances: data.instances,
     extraTables: data.extraTables,
     stickyPacked: data.stickyMap.map(packSticky),
@@ -161,15 +161,15 @@ function layout(raw: unknown): ManagedLayout | undefined {
     values[key] = value
   }
   const zoneName = string(raw.zoneName)
-  const zoneMode = raw.zoneMode
-  if (!zoneName || (zoneMode !== 'wildcard' && zoneMode !== 'networks')) return undefined
+  if (!zoneName) return undefined
+  // Older records also carried a `zoneMode`; it described the PPPoE zone the
+  // module no longer writes, so it is simply not read back.
   return {
     tableBase: values.tableBase!,
     rulePrefBase: values.rulePrefBase!,
     catchAllPrefBase: values.catchAllPrefBase!,
     catchAllTable: values.catchAllTable!,
-    zoneName,
-    zoneMode
+    zoneName
   }
 }
 
@@ -227,40 +227,16 @@ function normalizeJob(raw: unknown): FinishedJob | null {
   }
 }
 
-/** Load only bounded, valid records from the per-router JSON document. */
+/**
+ * Load only bounded, valid records from the per-router JSON document.
+ *
+ * A version-1 document's `batches` and `nextSeq` are deliberately not read:
+ * the pools they described live on the router now, and the daemon lists them
+ * itself. Dropping the fields on the next write is the whole migration.
+ */
 export function normalize(raw: unknown): OwrtHostData {
   if (!isRecord(raw)) return emptyData()
   const data = emptyData()
-  data.nextSeq = Math.max(1, integer(raw.nextSeq, 1))
-
-  const batchIds = new Set<string>()
-  for (const value of Array.isArray(raw.batches) ? raw.batches : []) {
-    if (!isRecord(value)) continue
-    const id = string(value.id)
-    const prefix = string(value.prefix)
-    const carrier = string(value.carrier)
-    const seqFrom = Math.max(1, integer(value.seqFrom))
-    const seqTo = Math.max(seqFrom, integer(value.seqTo, seqFrom))
-    if (!id || batchIds.has(id) || !/^[a-z][a-z0-9]{0,3}$/.test(prefix) || !carrier) {
-      continue
-    }
-    batchIds.add(id)
-    const vlan = integer(value.vlan)
-    const stamped = layout(value.layout)
-    data.batches.push({
-      id,
-      name: string(value.name) || id,
-      prefix,
-      carrier,
-      vlan: vlan >= 1 && vlan <= 4094 ? vlan : undefined,
-      createdAt: finite(value.createdAt),
-      count: Math.max(0, integer(value.count, seqTo - seqFrom + 1)),
-      seqFrom,
-      seqTo,
-      ...(stamped ? { layout: stamped } : {})
-    })
-    if (data.batches.length >= 1_000) break
-  }
 
   const instanceIds = new Set<string>()
   for (const value of Array.isArray(raw.instances) ? raw.instances : []) {

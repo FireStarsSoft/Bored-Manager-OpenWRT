@@ -296,11 +296,11 @@
                       "blocks": [
                         {
                           "type": "subnav",
-                          "initial": "sessions",
+                          "initial": "pools",
                           "items": [
                             {
-                              "id": "sessions",
-                              "label": "Sessions",
+                              "id": "pools",
+                              "label": "Pools",
                               "icon": "Activity",
                               "blocks": [
                                 {
@@ -317,20 +317,19 @@
                                   "blocks": [
                                     {
                                       "type": "note",
-                                      "title": "How dialing behaves",
+                                      "title": "How pools behave",
                                       "lines": [
-                                        "Interfaces are committed and dialled in bounded chunks with a delay between them, to avoid a PADI burst. Budget about 2 MiB of router RAM per session.",
-                                        "Netifd retries failed sessions on its own. Stop is the operation that deliberately keeps a session down; deleting a batch removes its router configuration.",
-                                        "Missing means this module still holds a record the router has no interface for - a create that stopped part way, or a section removed by hand. It is not the same as stopped, and Delete is what clears it.",
-                                        "Unknown means no interface list has been read yet, so nothing is claimed about the session either way.",
-                                        "New batches are created under Create a batch on this tab."
+                                        "A pool is one carrier and a list of VLANs; each VLAN dials its own PPPoE session with its own routing table and, in shared-account mode, its own derived MAC. The router owns all of it: bm-pppoe-pool derives the interfaces, the tagged devices and the firewall zone from the pool record and reconciles them on every change.",
+                                        "Every member always has a row. Unwritten means the record names a member whose interface section is missing on the router - a create that stopped part way, or a section removed by hand. Applying any edit to the pool writes exactly the difference and repairs it.",
+                                        "Disable stops a session and keeps it stopped across reboots; Stop is the one-off. The router's own watchdog redials sessions that stay down - its timing is under Daemon settings.",
+                                        "Editing a pool applies to every interface in it in one pass. The check runs on the router and its findings are the same sentences LuCI and bmpppoe show."
                                       ]
                                     }
                                   ]
                                 },
                                 {
                                   "type": "section",
-                                  "title": "PPPoE sessions",
+                                  "title": "PPPoE pools",
                                   "columns": 4,
                                   "slowTarget": "openwrt",
                                   "slowAt": {
@@ -341,21 +340,21 @@
                                   "blocks": [
                                     {
                                       "type": "stat",
-                                      "label": "Batches",
+                                      "label": "Pools",
                                       "source": {
                                         "kind": "stream",
                                         "event": "pppoe",
-                                        "path": "batchCount"
+                                        "path": "pools"
                                       },
                                       "format": "number"
                                     },
                                     {
                                       "type": "stat",
-                                      "label": "Sessions",
+                                      "label": "Interfaces",
                                       "source": {
                                         "kind": "stream",
                                         "event": "pppoe",
-                                        "path": "total"
+                                        "path": "interfaces"
                                       },
                                       "format": "number"
                                     },
@@ -381,6 +380,16 @@
                                     },
                                     {
                                       "type": "stat",
+                                      "label": "Down",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "pppoe",
+                                        "path": "down"
+                                      },
+                                      "format": "number"
+                                    },
+                                    {
+                                      "type": "stat",
                                       "label": "Error",
                                       "source": {
                                         "kind": "stream",
@@ -401,21 +410,11 @@
                                     },
                                     {
                                       "type": "stat",
-                                      "label": "Missing",
+                                      "label": "Unwritten",
                                       "source": {
                                         "kind": "stream",
                                         "event": "pppoe",
-                                        "path": "missing"
-                                      },
-                                      "format": "number"
-                                    },
-                                    {
-                                      "type": "stat",
-                                      "label": "Not read yet",
-                                      "source": {
-                                        "kind": "stream",
-                                        "event": "pppoe",
-                                        "path": "unknown"
+                                        "path": "unwritten"
                                       },
                                       "format": "number"
                                     }
@@ -426,8 +425,8 @@
                                   "when": {
                                     "source": {
                                       "kind": "stream",
-                                      "event": "ui",
-                                      "path": "hintsOn"
+                                      "event": "pppoe",
+                                      "path": "stale"
                                     },
                                     "op": "eq",
                                     "value": true
@@ -435,8 +434,10 @@
                                   "blocks": [
                                     {
                                       "type": "note",
+                                      "title": "The router stopped answering",
+                                      "tone": "warning",
                                       "lines": [
-                                        "Up, Dialing, Error, Stopped, Missing and Not read yet add up to Sessions. Stopping a batch moves its sessions into Stopped rather than out of the count."
+                                        "Everything below is the last answer the pool daemon gave. Nothing has been forgotten - the pools live on the router - but nothing here is live until it answers again. Refresh now retries immediately."
                                       ]
                                     }
                                   ]
@@ -456,7 +457,7 @@
                                     "source": {
                                       "kind": "stream",
                                       "event": "pppoe",
-                                      "path": "attention"
+                                      "path": "legacyCount"
                                     },
                                     "op": "gt",
                                     "value": 0
@@ -464,536 +465,812 @@
                                   "blocks": [
                                     {
                                       "type": "section",
-                                      "title": "Sessions needing attention",
-                                      "slowTarget": "openwrt",
-                                      "slowAt": {
-                                        "kind": "stream",
-                                        "event": "pppoe",
-                                        "path": "t"
-                                      },
+                                      "title": "Pools from the old model",
                                       "blocks": [
                                         {
-                                          "type": "conditional",
-                                          "when": {
-                                            "source": {
-                                              "kind": "stream",
-                                              "event": "ui",
-                                              "path": "hintsOn"
-                                            },
-                                            "op": "eq",
-                                            "value": true
-                                          },
-                                          "blocks": [
-                                            {
-                                              "type": "note",
-                                              "lines": [
-                                                "Two different faults share this table. A row in error has an interface on the router, so Redial is what retries it and Stop is what keeps it down until you want it back.",
-                                                "A row marked missing has no interface at all - Redial and Stop have nothing to act on and will say so. Start recreates nothing either; what a missing row needs is Delete on its batch, in Batches below, and a fresh create."
-                                              ]
-                                            }
+                                          "type": "note",
+                                          "tone": "warning",
+                                          "lines": [
+                                            "These were created by an earlier release as numbered session runs. This release neither edits nor watches them: delete each one and create it again as a pool of VLANs. Deleting removes its interfaces exactly as the release that made them would have."
                                           ]
                                         },
                                         {
                                           "type": "table",
                                           "source": {
                                             "kind": "invoke",
-                                            "method": "pppoeAttentionRows",
+                                            "method": "pppoeLegacyRows",
                                             "intervalKey": "openwrt"
                                           },
-                                          "rowKey": "name",
-                                          "selectable": true,
+                                          "rowKey": "id",
                                           "columns": [
                                             {
-                                              "key": "name",
-                                              "label": "Interface"
+                                              "key": "id",
+                                              "label": "Pool"
                                             },
                                             {
-                                              "key": "batch",
-                                              "label": "Batch"
+                                              "key": "prefix",
+                                              "label": "Prefix"
                                             },
                                             {
-                                              "key": "username",
-                                              "label": "Username"
+                                              "key": "carrier",
+                                              "label": "Carrier"
                                             },
                                             {
-                                              "key": "statusBadges",
-                                              "label": "State",
-                                              "format": "badges",
-                                              "sortable": false
-                                            },
-                                            {
-                                              "key": "status",
-                                              "label": "Fault"
-                                            },
-                                            {
-                                              "key": "errorCode",
-                                              "label": "Error"
-                                            }
-                                          ],
-                                          "sortDefault": {
-                                            "key": "name",
-                                            "dir": "asc"
-                                          },
-                                          "filterKeys": [
-                                            "name",
-                                            "batch",
-                                            "username",
-                                            "status",
-                                            "errorCode"
-                                          ],
-                                          "groupModes": [
-                                            {
-                                              "id": "fault",
-                                              "label": "By fault",
-                                              "key": "status"
-                                            },
-                                            {
-                                              "id": "batch",
-                                              "label": "By batch",
-                                              "key": "batch"
+                                              "key": "count",
+                                              "label": "Sessions",
+                                              "format": "number",
+                                              "align": "right"
                                             }
                                           ],
                                           "rowActions": [
                                             {
-                                              "label": "Start",
-                                              "method": "pppoeConnAction",
+                                              "label": "Delete",
+                                              "method": "poolDelete",
                                               "argsFromRow": [
-                                                "name"
+                                                "id"
                                               ],
-                                              "args": [
-                                                "start"
-                                              ]
-                                            },
-                                            {
-                                              "label": "Stop",
-                                              "method": "pppoeConnAction",
-                                              "argsFromRow": [
-                                                "name"
-                                              ],
-                                              "args": [
-                                                "stop"
-                                              ],
-                                              "confirm": "Stop this session and keep it down until it is started again?"
-                                            },
-                                            {
-                                              "label": "Redial",
-                                              "method": "pppoeConnAction",
-                                              "argsFromRow": [
-                                                "name"
-                                              ],
-                                              "args": [
-                                                "redial"
-                                              ],
-                                              "confirm": "Disconnect and redial this session?"
+                                              "kind": "danger",
+                                              "confirm": "Delete this old-model pool and every numbered session it created? Anybody using them loses their connection."
                                             }
                                           ],
-                                          "bulkActions": [
-                                            {
-                                              "label": "Start",
-                                              "method": "pppoeConnAction",
-                                              "args": [
-                                                "start"
-                                              ]
-                                            },
-                                            {
-                                              "label": "Stop",
-                                              "method": "pppoeConnAction",
-                                              "args": [
-                                                "stop"
-                                              ],
-                                              "confirm": "Stop the selected sessions and keep them down?"
-                                            },
-                                            {
-                                              "label": "Redial",
-                                              "method": "pppoeConnAction",
-                                              "args": [
-                                                "redial"
-                                              ],
-                                              "confirm": "Disconnect and redial the selected sessions?"
-                                            }
-                                          ],
-                                          "emptyText": "No PPPoE session is failing or missing"
+                                          "emptyText": "No old-model pools remain."
                                         }
                                       ]
                                     }
                                   ]
                                 },
                                 {
-                                  "type": "section",
-                                  "title": "Batches",
-                                  "slowTarget": "openwrt",
-                                  "slowAt": {
-                                    "kind": "stream",
-                                    "event": "pppoe",
-                                    "path": "t"
+                                  "type": "table",
+                                  "source": {
+                                    "kind": "invoke",
+                                    "method": "pppoePools",
+                                    "intervalKey": "openwrt"
                                   },
-                                  "blocks": [
+                                  "rowKey": "id",
+                                  "sortDefault": {
+                                    "key": "title",
+                                    "dir": "asc"
+                                  },
+                                  "filterKeys": [
+                                    "title",
+                                    "carrier",
+                                    "account",
+                                    "mode"
+                                  ],
+                                  "columns": [
                                     {
-                                      "type": "table",
-                                      "source": {
-                                        "kind": "invoke",
-                                        "method": "pppoeBatches",
-                                        "intervalKey": "openwrt"
-                                      },
-                                      "rowKey": "id",
-                                      "columns": [
-                                        {
-                                          "key": "name",
-                                          "label": "Batch"
-                                        },
-                                        {
-                                          "key": "carrier",
-                                          "label": "Carrier"
-                                        },
-                                        {
-                                          "key": "prefix",
-                                          "label": "Prefix"
-                                        },
-                                        {
-                                          "key": "stateBadges",
-                                          "label": "State",
-                                          "format": "badges",
-                                          "sortable": false
-                                        },
-                                        {
-                                          "key": "count",
-                                          "label": "Total",
-                                          "format": "number",
-                                          "align": "right"
-                                        },
-                                        {
-                                          "key": "up",
-                                          "label": "Up",
-                                          "format": "number",
-                                          "align": "right"
-                                        },
-                                        {
-                                          "key": "error",
-                                          "label": "Error",
-                                          "format": "number",
-                                          "align": "right"
-                                        },
-                                        {
-                                          "key": "stopped",
-                                          "label": "Stopped",
-                                          "format": "number",
-                                          "align": "right"
-                                        },
-                                        {
-                                          "key": "missing",
-                                          "label": "Missing",
-                                          "format": "number",
-                                          "align": "right"
-                                        },
-                                        {
-                                          "key": "createdAt",
-                                          "label": "Created",
-                                          "format": "datetime",
-                                          "align": "right"
-                                        }
+                                      "key": "title",
+                                      "label": "Pool"
+                                    },
+                                    {
+                                      "key": "mode",
+                                      "label": "Mode"
+                                    },
+                                    {
+                                      "key": "carrier",
+                                      "label": "Carrier"
+                                    },
+                                    {
+                                      "key": "account",
+                                      "label": "Account"
+                                    },
+                                    {
+                                      "key": "members",
+                                      "label": "Members",
+                                      "format": "number",
+                                      "align": "right"
+                                    },
+                                    {
+                                      "key": "stateBadges",
+                                      "label": "State",
+                                      "format": "badges",
+                                      "sortable": false
+                                    },
+                                    {
+                                      "key": "rxBps",
+                                      "label": "RX",
+                                      "format": "rate",
+                                      "align": "right"
+                                    },
+                                    {
+                                      "key": "txBps",
+                                      "label": "TX",
+                                      "format": "rate",
+                                      "align": "right"
+                                    },
+                                    {
+                                      "key": "createdAt",
+                                      "label": "Created",
+                                      "format": "datetime"
+                                    }
+                                  ],
+                                  "rowActions": [
+                                    {
+                                      "label": "Start all",
+                                      "method": "pppoePoolAction",
+                                      "argsFromRow": [
+                                        "id"
                                       ],
-                                      "sortDefault": {
-                                        "key": "name",
-                                        "dir": "asc"
-                                      },
-                                      "filterKeys": [
-                                        "name",
-                                        "carrier",
-                                        "prefix"
+                                      "args": [
+                                        "up"
+                                      ]
+                                    },
+                                    {
+                                      "label": "Stop all",
+                                      "method": "pppoePoolAction",
+                                      "argsFromRow": [
+                                        "id"
                                       ],
-                                      "emptyText": "No PPPoE batch has been created - the form is under Create a batch on this tab",
-                                      "rowActions": [
-                                        {
-                                          "label": "Start",
-                                          "method": "pppoeBatchAction",
-                                          "argsFromRow": [
-                                            "id"
-                                          ],
-                                          "args": [
-                                            "start"
-                                          ]
-                                        },
-                                        {
-                                          "label": "Stop",
-                                          "method": "pppoeBatchAction",
-                                          "argsFromRow": [
-                                            "id"
-                                          ],
-                                          "args": [
-                                            "stop"
-                                          ],
-                                          "confirm": "Stop every connection in this batch?"
-                                        },
-                                        {
-                                          "label": "Redial",
-                                          "method": "pppoeBatchAction",
-                                          "argsFromRow": [
-                                            "id"
-                                          ],
-                                          "args": [
-                                            "redial"
-                                          ],
-                                          "confirm": "Disconnect and redial every connection in this batch?"
-                                        },
-                                        {
-                                          "label": "Delete",
-                                          "method": "pppoeBatchDelete",
-                                          "argsFromRow": [
-                                            "id"
-                                          ],
-                                          "kind": "danger",
-                                          "confirm": "Delete this batch and remove all of its PPPoE configuration from the router?"
-                                        }
+                                      "args": [
+                                        "down"
                                       ],
-                                      "rowDetail": [
+                                      "confirm": "Stop every interface in this pool? Anybody using them loses their connection."
+                                    },
+                                    {
+                                      "label": "Redial all",
+                                      "method": "pppoePoolAction",
+                                      "argsFromRow": [
+                                        "id"
+                                      ],
+                                      "args": [
+                                        "redial"
+                                      ],
+                                      "confirm": "Redial every interface in this pool? Each one drops and dials again."
+                                    }
+                                  ],
+                                  "emptyText": "This router has no pools yet. Create one under Create a pool.",
+                                  "rowDetail": [
+                                    {
+                                      "type": "subnav",
+                                      "initial": "interfaces",
+                                      "items": [
                                         {
-                                          "type": "subnav",
-                                          "initial": "attention",
-                                          "items": [
+                                          "id": "interfaces",
+                                          "label": "Interfaces",
+                                          "icon": "Activity",
+                                          "blocks": [
                                             {
-                                              "id": "attention",
-                                              "label": "Needs attention",
-                                              "icon": "Activity",
-                                              "blocks": [
+                                              "type": "table",
+                                              "source": {
+                                                "kind": "invoke",
+                                                "method": "pppoeRows",
+                                                "args": [
+                                                  "$row.id"
+                                                ],
+                                                "intervalKey": "openwrt"
+                                              },
+                                              "rowKey": "name",
+                                              "selectable": true,
+                                              "sortDefault": {
+                                                "key": "vlan",
+                                                "dir": "asc"
+                                              },
+                                              "filterKeys": [
+                                                "name",
+                                                "username",
+                                                "ip"
+                                              ],
+                                              "columns": [
                                                 {
-                                                  "type": "conditional",
-                                                  "when": {
-                                                    "source": {
-                                                      "kind": "stream",
-                                                      "event": "ui",
-                                                      "path": "hintsOn"
-                                                    },
-                                                    "op": "eq",
-                                                    "value": true
-                                                  },
-                                                  "blocks": [
-                                                    {
-                                                      "type": "note",
-                                                      "lines": [
-                                                        "Only the connections in this batch that are failing or missing. This tab is open by default because the other one re-reads every connection in the batch on each update - about a megabyte a tick on a five-thousand-account pool - and only the tab you are looking at is fetched."
-                                                      ]
-                                                    }
+                                                  "key": "name",
+                                                  "label": "Interface"
+                                                },
+                                                {
+                                                  "key": "vlan",
+                                                  "label": "VLAN",
+                                                  "format": "number",
+                                                  "align": "right"
+                                                },
+                                                {
+                                                  "key": "device",
+                                                  "label": "Device"
+                                                },
+                                                {
+                                                  "key": "username",
+                                                  "label": "Username"
+                                                },
+                                                {
+                                                  "key": "mac",
+                                                  "label": "MAC"
+                                                },
+                                                {
+                                                  "key": "ip",
+                                                  "label": "IPv4"
+                                                },
+                                                {
+                                                  "key": "table",
+                                                  "label": "Table",
+                                                  "format": "number",
+                                                  "align": "right"
+                                                },
+                                                {
+                                                  "key": "statusBadges",
+                                                  "label": "State",
+                                                  "format": "badges",
+                                                  "sortable": false
+                                                },
+                                                {
+                                                  "key": "errorCode",
+                                                  "label": "Error"
+                                                },
+                                                {
+                                                  "key": "upSince",
+                                                  "label": "Up for",
+                                                  "format": "duration"
+                                                },
+                                                {
+                                                  "key": "redials",
+                                                  "label": "Redials",
+                                                  "format": "number",
+                                                  "align": "right"
+                                                }
+                                              ],
+                                              "rowActions": [
+                                                {
+                                                  "label": "Up",
+                                                  "method": "pppoeConnAction",
+                                                  "argsFromRow": [
+                                                    "name"
+                                                  ],
+                                                  "args": [
+                                                    "up"
                                                   ]
                                                 },
                                                 {
-                                                  "type": "table",
-                                                  "source": {
-                                                    "kind": "invoke",
-                                                    "method": "pppoeRows",
-                                                    "args": [
-                                                      "$row.id",
-                                                      "attention"
-                                                    ],
-                                                    "intervalKey": "openwrt"
-                                                  },
-                                                  "rowKey": "name",
-                                                  "selectable": true,
-                                                  "columns": [
-                                                    {
-                                                      "key": "name",
-                                                      "label": "Interface"
-                                                    },
-                                                    {
-                                                      "key": "username",
-                                                      "label": "Username"
-                                                    },
-                                                    {
-                                                      "key": "statusBadges",
-                                                      "label": "State",
-                                                      "format": "badges",
-                                                      "sortable": false
-                                                    },
-                                                    {
-                                                      "key": "errorCode",
-                                                      "label": "Error"
-                                                    },
-                                                    {
-                                                      "key": "ip",
-                                                      "label": "IPv4"
-                                                    }
+                                                  "label": "Down",
+                                                  "method": "pppoeConnAction",
+                                                  "argsFromRow": [
+                                                    "name"
                                                   ],
-                                                  "sortDefault": {
-                                                    "key": "name",
-                                                    "dir": "asc"
-                                                  },
-                                                  "filterKeys": [
-                                                    "name",
-                                                    "username",
-                                                    "errorCode",
-                                                    "ip"
+                                                  "args": [
+                                                    "down"
                                                   ],
-                                                  "rowActions": [
-                                                    {
-                                                      "label": "Start",
-                                                      "method": "pppoeConnAction",
-                                                      "argsFromRow": [
-                                                        "name"
-                                                      ],
-                                                      "args": [
-                                                        "start"
-                                                      ]
-                                                    },
-                                                    {
-                                                      "label": "Stop",
-                                                      "method": "pppoeConnAction",
-                                                      "argsFromRow": [
-                                                        "name"
-                                                      ],
-                                                      "args": [
-                                                        "stop"
-                                                      ],
-                                                      "confirm": "Stop this connection and keep it down?"
-                                                    },
-                                                    {
-                                                      "label": "Redial",
-                                                      "method": "pppoeConnAction",
-                                                      "argsFromRow": [
-                                                        "name"
-                                                      ],
-                                                      "args": [
-                                                        "redial"
-                                                      ],
-                                                      "confirm": "Disconnect and redial this connection?"
-                                                    }
+                                                  "confirm": "Take this session down? Anybody using it loses their connection."
+                                                },
+                                                {
+                                                  "label": "Redial",
+                                                  "method": "pppoeConnAction",
+                                                  "argsFromRow": [
+                                                    "name"
                                                   ],
-                                                  "bulkActions": [
-                                                    {
-                                                      "label": "Start",
-                                                      "method": "pppoeConnAction",
-                                                      "args": [
-                                                        "start"
-                                                      ]
-                                                    },
-                                                    {
-                                                      "label": "Redial",
-                                                      "method": "pppoeConnAction",
-                                                      "args": [
-                                                        "redial"
-                                                      ],
-                                                      "confirm": "Disconnect and redial the selected connections?"
-                                                    }
+                                                  "args": [
+                                                    "redial"
                                                   ],
-                                                  "emptyText": "Every connection in this batch is up, dialing or deliberately stopped"
+                                                  "confirm": "Redial this session? It drops and dials again."
+                                                },
+                                                {
+                                                  "label": "Enable",
+                                                  "method": "pppoeConnAction",
+                                                  "argsFromRow": [
+                                                    "name"
+                                                  ],
+                                                  "args": [
+                                                    "enable"
+                                                  ]
+                                                },
+                                                {
+                                                  "label": "Disable",
+                                                  "method": "pppoeConnAction",
+                                                  "argsFromRow": [
+                                                    "name"
+                                                  ],
+                                                  "args": [
+                                                    "disable"
+                                                  ],
+                                                  "kind": "danger",
+                                                  "confirm": "Disable this session? It stops now and stays stopped across reboots until enabled again."
+                                                }
+                                              ],
+                                              "bulkActions": [
+                                                {
+                                                  "label": "Start",
+                                                  "method": "pppoeConnAction",
+                                                  "args": [
+                                                    "up"
+                                                  ]
+                                                },
+                                                {
+                                                  "label": "Stop",
+                                                  "method": "pppoeConnAction",
+                                                  "args": [
+                                                    "down"
+                                                  ],
+                                                  "confirm": "Stop the ticked sessions? Anybody using them loses their connection."
+                                                },
+                                                {
+                                                  "label": "Redial",
+                                                  "method": "pppoeConnAction",
+                                                  "args": [
+                                                    "redial"
+                                                  ],
+                                                  "confirm": "Redial the ticked sessions? Each one drops and dials again."
+                                                },
+                                                {
+                                                  "label": "Enable",
+                                                  "method": "pppoeConnAction",
+                                                  "args": [
+                                                    "enable"
+                                                  ]
+                                                },
+                                                {
+                                                  "label": "Disable",
+                                                  "method": "pppoeConnAction",
+                                                  "args": [
+                                                    "disable"
+                                                  ],
+                                                  "kind": "danger",
+                                                  "confirm": "Disable the ticked sessions? They stop now and stay stopped across reboots."
+                                                }
+                                              ],
+                                              "emptyText": "No rows have arrived from the router yet."
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "id": "general",
+                                          "label": "General",
+                                          "icon": "Info",
+                                          "blocks": [
+                                            {
+                                              "type": "keyValue",
+                                              "source": {
+                                                "kind": "stream",
+                                                "event": "pppoe",
+                                                "path": "$row"
+                                              },
+                                              "rows": [
+                                                {
+                                                  "key": "id",
+                                                  "label": "Pool id (fixed)"
+                                                },
+                                                {
+                                                  "key": "modeLabel",
+                                                  "label": "Mode (fixed)"
+                                                },
+                                                {
+                                                  "key": "prefix",
+                                                  "label": "Prefix (fixed)"
+                                                },
+                                                {
+                                                  "key": "table_base",
+                                                  "label": "Table base",
+                                                  "format": "number"
+                                                },
+                                                {
+                                                  "key": "zone",
+                                                  "label": "Firewall zone"
+                                                },
+                                                {
+                                                  "key": "mac_mode",
+                                                  "label": "MAC mode"
                                                 }
                                               ]
                                             },
                                             {
-                                              "id": "all",
-                                              "label": "All connections",
-                                              "icon": "ListTree",
+                                              "type": "note",
+                                              "title": "Derived, read-only",
+                                              "lines": [
+                                                "Interface names derive from the prefix and the VLAN: prefix fpt, VLAN 101 is section fpt101 on kernel device pppoe-fpt101, dialling over carrier.101. Its routing table and metric are table base + VLAN.",
+                                                "With MAC mode auto, each tagged member is assigned 02:xx:xx:xx:VV:VV - hashed from the carrier MAC and the pool id, with the VLAN in the last two octets - stable across reboots and reconciles. The untagged member (VLAN 0) always keeps the carrier's own MAC.",
+                                                "The id, the mode and the prefix cannot change: every derived name embeds them. Delete the pool and create a new one to change them."
+                                              ]
+                                            },
+                                            {
+                                              "type": "checkForm",
+                                              "title": "Label and account",
+                                              "checkMethod": "poolSetCheck",
+                                              "applyMethod": "poolSetApply",
+                                              "argsFromScope": [
+                                                "id"
+                                              ],
+                                              "checkLabel": "Check",
+                                              "applyLabel": "Apply to the whole pool",
+                                              "fields": [
+                                                {
+                                                  "key": "label",
+                                                  "label": "Label",
+                                                  "input": "text",
+                                                  "initialFromScope": "label"
+                                                },
+                                                {
+                                                  "key": "service",
+                                                  "label": "Service name",
+                                                  "input": "text",
+                                                  "initialFromScope": "service",
+                                                  "placeholder": "auto"
+                                                },
+                                                {
+                                                  "key": "ac",
+                                                  "label": "Access concentrator",
+                                                  "input": "text",
+                                                  "initialFromScope": "ac",
+                                                  "placeholder": "auto"
+                                                },
+                                                {
+                                                  "key": "ac_mac",
+                                                  "label": "AC MAC address",
+                                                  "input": "text",
+                                                  "initialFromScope": "ac_mac",
+                                                  "placeholder": "auto"
+                                                },
+                                                {
+                                                  "key": "username",
+                                                  "label": "Username",
+                                                  "input": "text",
+                                                  "initialFromScope": "username"
+                                                },
+                                                {
+                                                  "key": "password",
+                                                  "label": "Password",
+                                                  "input": "password",
+                                                  "omitOnApply": true,
+                                                  "placeholder": "unchanged if left empty"
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "type": "conditional",
+                                              "when": {
+                                                "source": {
+                                                  "kind": "stream",
+                                                  "event": "ui",
+                                                  "path": "hintsOn"
+                                                },
+                                                "op": "eq",
+                                                "value": true
+                                              },
                                               "blocks": [
                                                 {
-                                                  "type": "table",
-                                                  "source": {
+                                                  "type": "note",
+                                                  "title": "What each field means",
+                                                  "lines": [
+                                                    "Label - Only for people; shown wherever the pool is.",
+                                                    "Service name / Access concentrator / AC MAC address - PPPoE discovery filters. Empty means autodetect, which is right for almost every ISP.",
+                                                    "Username and Password - The shared account. Only used by shared-account pools; per-VLAN pools carry accounts on the Members tab. An empty password keeps the stored one; changing it redials every session."
+                                                  ]
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "id": "members",
+                                          "label": "Members",
+                                          "icon": "ListTree",
+                                          "blocks": [
+                                            {
+                                              "type": "checkForm",
+                                              "checkMethod": "poolSetCheck",
+                                              "applyMethod": "poolSetApply",
+                                              "argsFromScope": [
+                                                "id"
+                                              ],
+                                              "checkLabel": "Check the new list",
+                                              "applyLabel": "Apply to the whole pool",
+                                              "kind": "danger",
+                                              "fields": [
+                                                {
+                                                  "key": "listText",
+                                                  "label": "Members",
+                                                  "input": "textarea",
+                                                  "initialFromScope": "listText",
+                                                  "omitOnApply": true
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "type": "conditional",
+                                              "when": {
+                                                "source": {
+                                                  "kind": "stream",
+                                                  "event": "ui",
+                                                  "path": "hintsOn"
+                                                },
+                                                "op": "eq",
+                                                "value": true
+                                              },
+                                              "blocks": [
+                                                {
+                                                  "type": "note",
+                                                  "title": "What each field means",
+                                                  "lines": [
+                                                    "Members - The pool's whole member list; applying replaces it. A VLAN missing from the list is removed - its session taken down and its interface deleted - and a new one is added with its firewall membership in the same pass.",
+                                                    "Shared-account pools list VLANs: ranges and numbers, like 101-150,200,0. VLAN 0 means untagged on the bare carrier, at most once per pool.",
+                                                    "Per-VLAN pools list one member per line: VLAN, username, password - separated by a comma, tab, semicolon, pipe or spaces. A kept VLAN may leave the username or password empty to keep what is stored; a new VLAN needs all three. Lines starting with # are ignored."
+                                                  ]
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "id": "advanced",
+                                          "label": "Advanced",
+                                          "icon": "Settings2",
+                                          "blocks": [
+                                            {
+                                              "type": "checkForm",
+                                              "title": "PPP options",
+                                              "checkMethod": "poolSetCheck",
+                                              "applyMethod": "poolSetApply",
+                                              "argsFromScope": [
+                                                "id"
+                                              ],
+                                              "checkLabel": "Check",
+                                              "applyLabel": "Apply to the whole pool",
+                                              "fields": [
+                                                {
+                                                  "key": "mtu",
+                                                  "label": "MTU",
+                                                  "input": "number",
+                                                  "initialFromScope": "mtu",
+                                                  "placeholder": "1492"
+                                                },
+                                                {
+                                                  "key": "keepalive_failure",
+                                                  "label": "LCP echo failures",
+                                                  "input": "number",
+                                                  "initialFromScope": "keepalive_failure",
+                                                  "placeholder": "5"
+                                                },
+                                                {
+                                                  "key": "keepalive_interval",
+                                                  "label": "LCP echo interval (s)",
+                                                  "input": "number",
+                                                  "initialFromScope": "keepalive_interval",
+                                                  "placeholder": "1"
+                                                },
+                                                {
+                                                  "key": "ipv6",
+                                                  "label": "IPv6",
+                                                  "input": "select",
+                                                  "options": [
+                                                    {
+                                                      "value": "0",
+                                                      "label": "Disabled"
+                                                    },
+                                                    {
+                                                      "value": "auto",
+                                                      "label": "Automatic"
+                                                    },
+                                                    {
+                                                      "value": "1",
+                                                      "label": "Manual"
+                                                    }
+                                                  ],
+                                                  "initialFromScope": "ipv6"
+                                                },
+                                                {
+                                                  "key": "peerdns",
+                                                  "label": "Use ISP DNS servers",
+                                                  "input": "checkbox",
+                                                  "initialFromScope": "peerdns"
+                                                },
+                                                {
+                                                  "key": "dns",
+                                                  "label": "DNS servers",
+                                                  "input": "text",
+                                                  "initialFromScope": "dns",
+                                                  "placeholder": "1.1.1.1 8.8.8.8"
+                                                },
+                                                {
+                                                  "key": "defaultroute",
+                                                  "label": "Default route",
+                                                  "input": "checkbox",
+                                                  "initialFromScope": "defaultroute"
+                                                },
+                                                {
+                                                  "key": "host_uniq",
+                                                  "label": "Host-Uniq",
+                                                  "input": "text",
+                                                  "initialFromScope": "host_uniq"
+                                                },
+                                                {
+                                                  "key": "demand",
+                                                  "label": "Inactivity timeout (s)",
+                                                  "input": "number",
+                                                  "initialFromScope": "demand",
+                                                  "placeholder": "0"
+                                                },
+                                                {
+                                                  "key": "padi_attempts",
+                                                  "label": "PADI attempts",
+                                                  "input": "number",
+                                                  "initialFromScope": "padi_attempts",
+                                                  "placeholder": "default"
+                                                },
+                                                {
+                                                  "key": "padi_timeout",
+                                                  "label": "PADI timeout (s)",
+                                                  "input": "number",
+                                                  "initialFromScope": "padi_timeout",
+                                                  "placeholder": "default"
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "type": "note",
+                                              "title": "High-risk fields",
+                                              "tone": "warning",
+                                              "lines": [
+                                                "Everything below redials the pool or moves what it owns. Changing the carrier redials every session on the new uplink. Changing the table base moves every routing table - binding rules pointing at the old ones go stray until bm-wanbind's next pass. Changing the MAC mode presents changed MACs to the BRAS. Extra pppd options are passed verbatim: a wrong word fails every session.",
+                                                "The check names the exact impact before anything is written."
+                                              ]
+                                            },
+                                            {
+                                              "type": "checkForm",
+                                              "title": "High-risk",
+                                              "checkMethod": "poolSetCheck",
+                                              "applyMethod": "poolSetApply",
+                                              "argsFromScope": [
+                                                "id"
+                                              ],
+                                              "checkLabel": "Check",
+                                              "applyLabel": "Apply to the whole pool",
+                                              "kind": "danger",
+                                              "fields": [
+                                                {
+                                                  "key": "carrier",
+                                                  "label": "Carrier",
+                                                  "input": "select",
+                                                  "optionsFrom": {
                                                     "kind": "invoke",
-                                                    "method": "pppoeRows",
-                                                    "args": [
-                                                      "$row.id"
-                                                    ],
-                                                    "intervalKey": "openwrt"
+                                                    "method": "pppoeCarriers"
                                                   },
-                                                  "rowKey": "name",
-                                                  "selectable": true,
-                                                  "columns": [
+                                                  "initialFromScope": "carrier"
+                                                },
+                                                {
+                                                  "key": "mac_mode",
+                                                  "label": "MAC mode",
+                                                  "input": "select",
+                                                  "options": [
                                                     {
-                                                      "key": "name",
-                                                      "label": "Interface"
+                                                      "value": "auto",
+                                                      "label": "auto - one derived MAC per VLAN"
                                                     },
                                                     {
-                                                      "key": "username",
-                                                      "label": "Username"
-                                                    },
-                                                    {
-                                                      "key": "statusBadges",
-                                                      "label": "State",
-                                                      "format": "badges",
-                                                      "sortable": false
-                                                    },
-                                                    {
-                                                      "key": "errorCode",
-                                                      "label": "Error"
-                                                    },
-                                                    {
-                                                      "key": "ip",
-                                                      "label": "IPv4"
-                                                    },
-                                                    {
-                                                      "key": "upSince",
-                                                      "label": "Up for",
-                                                      "format": "duration",
-                                                      "align": "right"
+                                                      "value": "inherit",
+                                                      "label": "inherit - every VLAN keeps the carrier MAC"
                                                     }
                                                   ],
-                                                  "sortDefault": {
-                                                    "key": "name",
-                                                    "dir": "asc"
-                                                  },
-                                                  "filterKeys": [
-                                                    "name",
-                                                    "username",
-                                                    "errorCode",
-                                                    "ip"
+                                                  "initialFromScope": "mac_mode"
+                                                },
+                                                {
+                                                  "key": "table_base",
+                                                  "label": "Table base",
+                                                  "input": "number",
+                                                  "initialFromScope": "table_base"
+                                                },
+                                                {
+                                                  "key": "pppd_options",
+                                                  "label": "Extra pppd options",
+                                                  "input": "text",
+                                                  "initialFromScope": "pppd_options"
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "type": "conditional",
+                                              "when": {
+                                                "source": {
+                                                  "kind": "stream",
+                                                  "event": "ui",
+                                                  "path": "hintsOn"
+                                                },
+                                                "op": "eq",
+                                                "value": true
+                                              },
+                                              "blocks": [
+                                                {
+                                                  "type": "note",
+                                                  "title": "What each field means",
+                                                  "lines": [
+                                                    "MTU - Empty uses the pppd default of 1492. Above 1492 needs an ISP that supports RFC 4638.",
+                                                    "LCP echo failures / interval - Presume the peer dead after this many missed echoes sent this many seconds apart. Empty leaves pppd's default of 5 and 1.",
+                                                    "IPv6 - Disabled is the pool default; Automatic negotiates when the ISP offers it.",
+                                                    "Use ISP DNS servers - Off means the DNS servers field is written per member instead; it is ignored while this is on.",
+                                                    "Default route - Each session installs its default route into its own routing table, which is what a binding rule points a client at.",
+                                                    "Host-Uniq - Raw hex bytes; leave empty unless the ISP requires it. Inactivity timeout - seconds of idle before hangup, 0 keeps sessions up. PADI attempts and timeout - discovery retries; empty leaves pppd's defaults.",
+                                                    "Carrier - The physical uplink every member dials over. MAC mode - auto derives 02:... per VLAN from the carrier MAC, the pool id and the VLAN, stable across reboots; shared-account pools require it. Table base - each member routes in base + VLAN. Extra pppd options - passed to pppd verbatim, for the options this form does not carry."
+                                                  ]
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "id": "firewall",
+                                          "label": "Firewall",
+                                          "icon": "Layers",
+                                          "blocks": [
+                                            {
+                                              "type": "checkForm",
+                                              "checkMethod": "poolSetCheck",
+                                              "applyMethod": "poolSetApply",
+                                              "argsFromScope": [
+                                                "id"
+                                              ],
+                                              "checkLabel": "Check",
+                                              "applyLabel": "Apply to the whole pool",
+                                              "kind": "danger",
+                                              "fields": [
+                                                {
+                                                  "key": "zone",
+                                                  "label": "Zone",
+                                                  "input": "text",
+                                                  "initialFromScope": "zone"
+                                                },
+                                                {
+                                                  "key": "masq",
+                                                  "label": "Masquerade",
+                                                  "input": "checkbox",
+                                                  "initialFromScope": "masq"
+                                                },
+                                                {
+                                                  "key": "mtu_fix",
+                                                  "label": "MTU fix (MSS clamping)",
+                                                  "input": "checkbox",
+                                                  "initialFromScope": "mtu_fix"
+                                                },
+                                                {
+                                                  "key": "lan_forward",
+                                                  "label": "Allow LAN to reach this zone",
+                                                  "input": "checkbox",
+                                                  "initialFromScope": "lan_forward"
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "type": "conditional",
+                                              "when": {
+                                                "source": {
+                                                  "kind": "stream",
+                                                  "event": "ui",
+                                                  "path": "hintsOn"
+                                                },
+                                                "op": "eq",
+                                                "value": true
+                                              },
+                                              "blocks": [
+                                                {
+                                                  "type": "note",
+                                                  "title": "What each field means",
+                                                  "lines": [
+                                                    "Zone - 1-11 letters, digits or underscores. The pool's members sit in it by explicit membership, written and reconciled by the router's pool daemon; pools may share one zone, and changing it moves every membership - the old zone is removed when nothing else uses it.",
+                                                    "Masquerade and MTU fix - What a WAN zone needs: SNAT and MSS clamping. On a shared zone the union of what its pools ask wins.",
+                                                    "Allow LAN to reach this zone - Writes one forwarding from the LAN zone, so clients can actually use the sessions."
+                                                  ]
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "id": "delete",
+                                          "label": "Delete",
+                                          "icon": "Zap",
+                                          "blocks": [
+                                            {
+                                              "type": "note",
+                                              "title": "What deleting removes",
+                                              "tone": "warning",
+                                              "lines": [
+                                                "Every interface in the pool is taken down and its section removed, with its tagged VLAN device and derived MAC. Every routing table the members used stops being written. The pool's zone memberships are removed, and the zone itself goes when no other pool uses it and WAN Binding is not installed. The record is removed last, so an interrupted delete can simply be run again.",
+                                                "The router refuses while a bm-wanbind instance hands clients to this carrier, and this page refuses while a binding instance is running on it - stop the instance first, on the WAN Binding tab.",
+                                                "The accounts themselves are not touched; they live wherever the list came from."
+                                              ]
+                                            },
+                                            {
+                                              "type": "actions",
+                                              "actions": [
+                                                {
+                                                  "label": "Delete this pool",
+                                                  "method": "poolDelete",
+                                                  "argsFromRow": [
+                                                    "id"
                                                   ],
-                                                  "rowActions": [
-                                                    {
-                                                      "label": "Start",
-                                                      "method": "pppoeConnAction",
-                                                      "argsFromRow": [
-                                                        "name"
-                                                      ],
-                                                      "args": [
-                                                        "start"
-                                                      ]
-                                                    },
-                                                    {
-                                                      "label": "Stop",
-                                                      "method": "pppoeConnAction",
-                                                      "argsFromRow": [
-                                                        "name"
-                                                      ],
-                                                      "args": [
-                                                        "stop"
-                                                      ],
-                                                      "confirm": "Stop this connection and keep it down?"
-                                                    },
-                                                    {
-                                                      "label": "Redial",
-                                                      "method": "pppoeConnAction",
-                                                      "argsFromRow": [
-                                                        "name"
-                                                      ],
-                                                      "args": [
-                                                        "redial"
-                                                      ],
-                                                      "confirm": "Disconnect and redial this connection?"
-                                                    }
-                                                  ],
-                                                  "bulkActions": [
-                                                    {
-                                                      "label": "Start",
-                                                      "method": "pppoeConnAction",
-                                                      "args": [
-                                                        "start"
-                                                      ]
-                                                    },
-                                                    {
-                                                      "label": "Stop",
-                                                      "method": "pppoeConnAction",
-                                                      "args": [
-                                                        "stop"
-                                                      ],
-                                                      "confirm": "Stop the selected connections?"
-                                                    },
-                                                    {
-                                                      "label": "Redial",
-                                                      "method": "pppoeConnAction",
-                                                      "args": [
-                                                        "redial"
-                                                      ],
-                                                      "confirm": "Disconnect and redial the selected connections?"
-                                                    }
-                                                  ],
-                                                  "emptyText": "No connection in this batch has been sampled yet"
+                                                  "kind": "danger",
+                                                  "confirm": "Delete the whole pool - every interface, VLAN device, routing table and firewall membership it owns? Anybody dialling through it loses their connection."
                                                 }
                                               ]
                                             }
@@ -1007,7 +1284,7 @@
                             },
                             {
                               "id": "create",
-                              "label": "Create a batch",
+                              "label": "Create a pool",
                               "icon": "Sparkles",
                               "blocks": [
                                 {
@@ -1075,6 +1352,255 @@
                                           ]
                                         },
                                         {
+                                          "type": "note",
+                                          "title": "The pool daemon comes from Router packages",
+                                          "lines": [
+                                            "Pools are owned by bm-pppoe-pool 2.x on the router. If the check below says the pool daemon is missing or too old, install or update the router packages from Module settings, Router packages - the form unlocks when the router answers with it."
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "conditional",
+                                  "when": {
+                                    "source": {
+                                      "kind": "stream",
+                                      "event": "ui",
+                                      "path": "hintsOn"
+                                    },
+                                    "op": "eq",
+                                    "value": true
+                                  },
+                                  "blocks": [
+                                    {
+                                      "type": "note",
+                                      "title": "Tagged, untagged, and shared accounts",
+                                      "lines": [
+                                        "VLAN 0 dials untagged on the bare carrier; VLANs 1-4094 add an 802.1Q tag, and the upstream must answer on that exact VLAN - a wrong tag looks like a PADO timeout.",
+                                        "A shared account carries as many sessions as the ISP allows. Each VLAN presents its own derived MAC so the BRAS can tell them apart; try two or three VLANs before pasting the full list.",
+                                        "One account per VLAN is the safe mode: each line has its own login, and MACs may inherit from the carrier or derive per VLAN.",
+                                        "Nothing is written until the check passes and you apply. The check runs on the router itself and names every derived interface, table and MAC decision it would make."
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "subnav",
+                                  "initial": "multi",
+                                  "items": [
+                                    {
+                                      "id": "multi",
+                                      "label": "Shared account",
+                                      "icon": "Cable",
+                                      "blocks": [
+                                        {
+                                          "type": "checkForm",
+                                          "title": "One account, many VLANs",
+                                          "checkMethod": "poolCreateCheck",
+                                          "applyMethod": "poolCreateApply",
+                                          "checkLabel": "Check the pool",
+                                          "applyLabel": "Create it",
+                                          "fields": [
+                                            {
+                                              "key": "mode",
+                                              "label": "Mode",
+                                              "input": "select",
+                                              "options": [
+                                                {
+                                                  "value": "multi",
+                                                  "label": "Shared account (multi-session)"
+                                                }
+                                              ],
+                                              "initial": "multi"
+                                            },
+                                            {
+                                              "key": "id",
+                                              "label": "Pool id",
+                                              "input": "text",
+                                              "placeholder": "fpt1"
+                                            },
+                                            {
+                                              "key": "label",
+                                              "label": "Label",
+                                              "input": "text",
+                                              "placeholder": "optional"
+                                            },
+                                            {
+                                              "key": "carrier",
+                                              "label": "Carrier",
+                                              "input": "select",
+                                              "optionsFrom": {
+                                                "kind": "invoke",
+                                                "method": "pppoeCarriers"
+                                              }
+                                            },
+                                            {
+                                              "key": "prefix",
+                                              "label": "Prefix",
+                                              "input": "text",
+                                              "placeholder": "fpt"
+                                            },
+                                            {
+                                              "key": "vlans",
+                                              "label": "VLANs",
+                                              "input": "textarea",
+                                              "placeholder": "101-150,200,0"
+                                            },
+                                            {
+                                              "key": "username",
+                                              "label": "Username",
+                                              "input": "text",
+                                              "placeholder": "user@isp"
+                                            },
+                                            {
+                                              "key": "password",
+                                              "label": "Password",
+                                              "input": "password",
+                                              "omitOnApply": true
+                                            },
+                                            {
+                                              "key": "table_base",
+                                              "label": "Table base",
+                                              "input": "number",
+                                              "placeholder": "10000",
+                                              "initialFrom": {
+                                                "kind": "invoke",
+                                                "method": "rulesEffective",
+                                                "path": "tableBase"
+                                              }
+                                            },
+                                            {
+                                              "key": "service",
+                                              "label": "Service name",
+                                              "input": "text",
+                                              "placeholder": "auto"
+                                            },
+                                            {
+                                              "key": "ac",
+                                              "label": "Access concentrator",
+                                              "input": "text",
+                                              "placeholder": "auto"
+                                            },
+                                            {
+                                              "key": "ac_mac",
+                                              "label": "AC MAC address",
+                                              "input": "text",
+                                              "placeholder": "auto"
+                                            },
+                                            {
+                                              "key": "mtu",
+                                              "label": "MTU",
+                                              "input": "number",
+                                              "placeholder": "1492"
+                                            },
+                                            {
+                                              "key": "keepalive_failure",
+                                              "label": "LCP echo failures",
+                                              "input": "number",
+                                              "placeholder": "5"
+                                            },
+                                            {
+                                              "key": "keepalive_interval",
+                                              "label": "LCP echo interval (s)",
+                                              "input": "number",
+                                              "placeholder": "1"
+                                            },
+                                            {
+                                              "key": "ipv6",
+                                              "label": "IPv6",
+                                              "input": "select",
+                                              "options": [
+                                                {
+                                                  "value": "0",
+                                                  "label": "Disabled"
+                                                },
+                                                {
+                                                  "value": "auto",
+                                                  "label": "Automatic"
+                                                },
+                                                {
+                                                  "value": "1",
+                                                  "label": "Manual"
+                                                }
+                                              ],
+                                              "initial": "0"
+                                            },
+                                            {
+                                              "key": "peerdns",
+                                              "label": "Use ISP DNS servers",
+                                              "input": "checkbox",
+                                              "initial": false
+                                            },
+                                            {
+                                              "key": "dns",
+                                              "label": "DNS servers",
+                                              "input": "text",
+                                              "placeholder": "1.1.1.1 8.8.8.8"
+                                            },
+                                            {
+                                              "key": "defaultroute",
+                                              "label": "Default route",
+                                              "input": "checkbox",
+                                              "initial": true
+                                            },
+                                            {
+                                              "key": "host_uniq",
+                                              "label": "Host-Uniq",
+                                              "input": "text"
+                                            },
+                                            {
+                                              "key": "demand",
+                                              "label": "Inactivity timeout (s)",
+                                              "input": "number",
+                                              "placeholder": "0"
+                                            },
+                                            {
+                                              "key": "padi_attempts",
+                                              "label": "PADI attempts",
+                                              "input": "number",
+                                              "placeholder": "default"
+                                            },
+                                            {
+                                              "key": "padi_timeout",
+                                              "label": "PADI timeout (s)",
+                                              "input": "number",
+                                              "placeholder": "default"
+                                            },
+                                            {
+                                              "key": "pppd_options",
+                                              "label": "Extra pppd options",
+                                              "input": "text"
+                                            },
+                                            {
+                                              "key": "zone",
+                                              "label": "Firewall zone",
+                                              "input": "text",
+                                              "placeholder": "bmwanpool",
+                                              "initial": "bmwanpool"
+                                            },
+                                            {
+                                              "key": "masq",
+                                              "label": "Masquerade",
+                                              "input": "checkbox",
+                                              "initial": true
+                                            },
+                                            {
+                                              "key": "mtu_fix",
+                                              "label": "MTU fix (MSS clamping)",
+                                              "input": "checkbox",
+                                              "initial": true
+                                            },
+                                            {
+                                              "key": "lan_forward",
+                                              "label": "Allow LAN to reach this zone",
+                                              "input": "checkbox",
+                                              "initial": true
+                                            }
+                                          ]
+                                        },
+                                        {
                                           "type": "conditional",
                                           "when": {
                                             "source": {
@@ -1088,21 +1614,264 @@
                                           "blocks": [
                                             {
                                               "type": "note",
-                                              "title": "Why this is offered here",
-                                              "tone": "warning",
+                                              "title": "What each field means",
                                               "lines": [
-                                                "This router is missing a package this automation depends on. The form below checks before it writes, so a create here would refuse and name it - and naming it, then sending you to another page, is a longer way round than doing it.",
-                                                "It is the same flow as Module settings: the check reads free space and whether the router has a route to the internet and changes nothing, and only names from this module's own fixed list ever reach a command line.",
-                                                "Applying runs a job and then re-reads the router. What that re-read finds is what unlocks the form."
+                                                "Mode - Fixed for the life of the pool; delete and recreate to change it.",
+                                                "Pool id - 1-31 lowercase letters, digits or underscores. This is what you delete it by. Label - only for people.",
+                                                "Carrier - The physical uplink; the router lists what qualifies. Prefix - 1-4 characters, fixed after create; interface names derive from it: prefix fpt, VLAN 101 dials as fpt101 on pppoe-fpt101.",
+                                                "VLANs - Ranges and numbers, like 101-150,200. VLAN 0 means untagged, at most once. Username and Password - the one account every VLAN dials with.",
+                                                "Table base - Each member routes in table base + VLAN; the pool records its own base on the router.",
+                                                "Service name, Access concentrator, AC MAC - PPPoE discovery filters; empty means autodetect.",
+                                                "MTU - Empty uses the pppd default of 1492; above 1492 needs RFC 4638. LCP echo failures/interval - dead-peer detection; empty leaves pppd's defaults. IPv6, ISP DNS, DNS servers, Default route, Host-Uniq, Inactivity timeout, PADI attempts/timeout, Extra pppd options - the same options LuCI's PPPoE form carries, applied to every member.",
+                                                "Firewall zone - Created and owned by the router's pool daemon; pools may share one. Masquerade and MTU fix shape it; Allow LAN writes one forwarding from the LAN zone."
                                               ]
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "id": "single",
+                                      "label": "One account per VLAN",
+                                      "icon": "ListTree",
+                                      "blocks": [
+                                        {
+                                          "type": "checkForm",
+                                          "title": "One account per VLAN",
+                                          "checkMethod": "poolCreateCheck",
+                                          "applyMethod": "poolCreateApply",
+                                          "checkLabel": "Check the pool",
+                                          "applyLabel": "Create it",
+                                          "fields": [
+                                            {
+                                              "key": "mode",
+                                              "label": "Mode",
+                                              "input": "select",
+                                              "options": [
+                                                {
+                                                  "value": "single",
+                                                  "label": "One account per VLAN"
+                                                }
+                                              ],
+                                              "initial": "single"
                                             },
+                                            {
+                                              "key": "id",
+                                              "label": "Pool id",
+                                              "input": "text",
+                                              "placeholder": "vnpt1"
+                                            },
+                                            {
+                                              "key": "label",
+                                              "label": "Label",
+                                              "input": "text",
+                                              "placeholder": "optional"
+                                            },
+                                            {
+                                              "key": "carrier",
+                                              "label": "Carrier",
+                                              "input": "select",
+                                              "optionsFrom": {
+                                                "kind": "invoke",
+                                                "method": "pppoeCarriers"
+                                              }
+                                            },
+                                            {
+                                              "key": "prefix",
+                                              "label": "Prefix",
+                                              "input": "text",
+                                              "placeholder": "vnp"
+                                            },
+                                            {
+                                              "key": "mac_mode",
+                                              "label": "MAC mode",
+                                              "input": "select",
+                                              "options": [
+                                                {
+                                                  "value": "inherit",
+                                                  "label": "inherit - every VLAN keeps the carrier MAC"
+                                                },
+                                                {
+                                                  "value": "auto",
+                                                  "label": "auto - one derived MAC per VLAN"
+                                                }
+                                              ],
+                                              "initial": "inherit"
+                                            },
+                                            {
+                                              "key": "listFile",
+                                              "label": "Member list file",
+                                              "input": "file",
+                                              "accept": ".txt,.csv",
+                                              "omitOnApply": true
+                                            },
+                                            {
+                                              "key": "listText",
+                                              "label": "Members",
+                                              "input": "textarea",
+                                              "omitOnApply": true,
+                                              "placeholder": "101,line101@isp,secret\n102,line102@isp,secret2"
+                                            },
+                                            {
+                                              "key": "table_base",
+                                              "label": "Table base",
+                                              "input": "number",
+                                              "placeholder": "10000",
+                                              "initialFrom": {
+                                                "kind": "invoke",
+                                                "method": "rulesEffective",
+                                                "path": "tableBase"
+                                              }
+                                            },
+                                            {
+                                              "key": "service",
+                                              "label": "Service name",
+                                              "input": "text",
+                                              "placeholder": "auto"
+                                            },
+                                            {
+                                              "key": "ac",
+                                              "label": "Access concentrator",
+                                              "input": "text",
+                                              "placeholder": "auto"
+                                            },
+                                            {
+                                              "key": "ac_mac",
+                                              "label": "AC MAC address",
+                                              "input": "text",
+                                              "placeholder": "auto"
+                                            },
+                                            {
+                                              "key": "mtu",
+                                              "label": "MTU",
+                                              "input": "number",
+                                              "placeholder": "1492"
+                                            },
+                                            {
+                                              "key": "keepalive_failure",
+                                              "label": "LCP echo failures",
+                                              "input": "number",
+                                              "placeholder": "5"
+                                            },
+                                            {
+                                              "key": "keepalive_interval",
+                                              "label": "LCP echo interval (s)",
+                                              "input": "number",
+                                              "placeholder": "1"
+                                            },
+                                            {
+                                              "key": "ipv6",
+                                              "label": "IPv6",
+                                              "input": "select",
+                                              "options": [
+                                                {
+                                                  "value": "0",
+                                                  "label": "Disabled"
+                                                },
+                                                {
+                                                  "value": "auto",
+                                                  "label": "Automatic"
+                                                },
+                                                {
+                                                  "value": "1",
+                                                  "label": "Manual"
+                                                }
+                                              ],
+                                              "initial": "0"
+                                            },
+                                            {
+                                              "key": "peerdns",
+                                              "label": "Use ISP DNS servers",
+                                              "input": "checkbox",
+                                              "initial": false
+                                            },
+                                            {
+                                              "key": "dns",
+                                              "label": "DNS servers",
+                                              "input": "text",
+                                              "placeholder": "1.1.1.1 8.8.8.8"
+                                            },
+                                            {
+                                              "key": "defaultroute",
+                                              "label": "Default route",
+                                              "input": "checkbox",
+                                              "initial": true
+                                            },
+                                            {
+                                              "key": "host_uniq",
+                                              "label": "Host-Uniq",
+                                              "input": "text"
+                                            },
+                                            {
+                                              "key": "demand",
+                                              "label": "Inactivity timeout (s)",
+                                              "input": "number",
+                                              "placeholder": "0"
+                                            },
+                                            {
+                                              "key": "padi_attempts",
+                                              "label": "PADI attempts",
+                                              "input": "number",
+                                              "placeholder": "default"
+                                            },
+                                            {
+                                              "key": "padi_timeout",
+                                              "label": "PADI timeout (s)",
+                                              "input": "number",
+                                              "placeholder": "default"
+                                            },
+                                            {
+                                              "key": "pppd_options",
+                                              "label": "Extra pppd options",
+                                              "input": "text"
+                                            },
+                                            {
+                                              "key": "zone",
+                                              "label": "Firewall zone",
+                                              "input": "text",
+                                              "placeholder": "bmwanpool",
+                                              "initial": "bmwanpool"
+                                            },
+                                            {
+                                              "key": "masq",
+                                              "label": "Masquerade",
+                                              "input": "checkbox",
+                                              "initial": true
+                                            },
+                                            {
+                                              "key": "mtu_fix",
+                                              "label": "MTU fix (MSS clamping)",
+                                              "input": "checkbox",
+                                              "initial": true
+                                            },
+                                            {
+                                              "key": "lan_forward",
+                                              "label": "Allow LAN to reach this zone",
+                                              "input": "checkbox",
+                                              "initial": true
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "type": "conditional",
+                                          "when": {
+                                            "source": {
+                                              "kind": "stream",
+                                              "event": "ui",
+                                              "path": "hintsOn"
+                                            },
+                                            "op": "eq",
+                                            "value": true
+                                          },
+                                          "blocks": [
                                             {
                                               "type": "note",
                                               "title": "What each field means",
                                               "lines": [
-                                                "PPPoE support (ppp, ppp-mod-pppoe, kmod-pppoe) - What the PPPoE batch form below needs. A group already present is skipped.",
-                                                "Policy routing (ip-full) - What the WAN Binding form below needs. Some targets ship the BusyBox applet, which has no ip rule subcommand at all.",
-                                                "DHCP leases (dnsmasq) - Where WAN Binding finds the devices it assigns. Without it the device table stays empty."
+                                                "Mode - Fixed for the life of the pool. Pool id, Label, Carrier, Prefix - as on the shared-account tab; the prefix is fixed after create.",
+                                                "MAC mode - inherit keeps the carrier's MAC on every VLAN; auto derives a stable per-VLAN MAC from the carrier MAC, the pool id and the VLAN.",
+                                                "Member list file / Members - One member per line: VLAN, username, password - separated by a comma, tab, semicolon, pipe or spaces; # starts a comment. The file wins over the pasted text.",
+                                                "Everything below the member list is the same set of options as the shared-account tab, applied to every member."
                                               ]
                                             }
                                           ]
@@ -1110,211 +1879,79 @@
                                       ]
                                     }
                                   ]
-                                },
-                                {
-                                  "type": "section",
-                                  "title": "Create a PPPoE batch",
-                                  "blocks": [
-                                    {
-                                      "type": "conditional",
-                                      "when": {
-                                        "source": {
-                                          "kind": "stream",
-                                          "event": "ui",
-                                          "path": "hintsOn"
-                                        },
-                                        "op": "eq",
-                                        "value": true
-                                      },
-                                      "blocks": [
-                                        {
-                                          "type": "note",
-                                          "title": "Account-list format",
-                                          "lines": [
-                                            "One account per line: username, password, and an optional VLAN. Separate the fields with a tab, comma, semicolon, pipe, or repeated spaces; lines beginning with # are comments.",
-                                            "The prefix is at most four lowercase letters or digits, because the Linux device name pppoe-<section> cannot exceed 15 characters.",
-                                            "OpenWRT stores these passwords in clear text in /etc/config/network. This module keeps them only long enough to write them there."
-                                          ]
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "checkForm",
-                                      "checkMethod": "pppoeBatchCheck",
-                                      "applyMethod": "pppoeBatchApply",
-                                      "checkLabel": "Check the batch",
-                                      "applyLabel": "Create and dial",
-                                      "fields": [
-                                        {
-                                          "key": "name",
-                                          "label": "Batch name",
-                                          "input": "text",
-                                          "placeholder": "ISP accounts 01"
-                                        },
-                                        {
-                                          "key": "carrier",
-                                          "label": "Physical WAN carrier",
-                                          "input": "select",
-                                          "optionsFrom": {
-                                            "kind": "invoke",
-                                            "method": "selectOptions",
-                                            "args": [
-                                              "carriers"
-                                            ]
-                                          }
-                                        },
-                                        {
-                                          "key": "prefix",
-                                          "label": "Interface prefix",
-                                          "input": "text",
-                                          "placeholder": "pd",
-                                          "initialFrom": {
-                                            "kind": "invoke",
-                                            "method": "rulesEffective",
-                                            "path": "ifacePrefix"
-                                          }
-                                        },
-                                        {
-                                          "key": "vlan",
-                                          "label": "Default VLAN",
-                                          "input": "number",
-                                          "placeholder": "35"
-                                        },
-                                        {
-                                          "key": "listFile",
-                                          "label": "Account-list file",
-                                          "input": "file",
-                                          "accept": ".txt,text/plain",
-                                          "maxKb": 1024,
-                                          "omitOnApply": true
-                                        },
-                                        {
-                                          "key": "listText",
-                                          "label": "Paste account list",
-                                          "input": "textarea",
-                                          "omitOnApply": true,
-                                          "placeholder": "account-001 password-001\naccount-002,password-002,35"
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "conditional",
-                                      "when": {
-                                        "source": {
-                                          "kind": "stream",
-                                          "event": "ui",
-                                          "path": "hintsOn"
-                                        },
-                                        "op": "eq",
-                                        "value": true
-                                      },
-                                      "blocks": [
-                                        {
-                                          "type": "note",
-                                          "title": "Both forms check before they write",
-                                          "lines": [
-                                            "Check reads the router and changes nothing. It reports what apply would do and refuses outright when the router cannot support it; only then does the apply button unlock.",
-                                            "A check result is single-use and expires after ten minutes, and it is tied to the exact values that were checked - editing a field means checking again.",
-                                            "Applying starts a job. It writes to the router in bounded chunks and can be cancelled between them - whatever was already written stays on the router, and the module keeps only the part that committed."
-                                          ]
-                                        },
-                                        {
-                                          "type": "note",
-                                          "title": "The two select lists are read once, when this tab opens",
-                                          "lines": [
-                                            "Physical WAN carrier, DHCP LAN interface and WAN carrier are all built from the last router sample. Before the first sweep lands they are empty, and an interface added since this tab was opened is not in them.",
-                                            "Refresh the router sample below, then leave this tab and come back: the lists are rebuilt each time the tab becomes visible."
-                                          ]
-                                        },
-                                        {
-                                          "type": "note",
-                                          "title": "What each field means",
-                                          "lines": [
-                                            "Batch name - A display label only. It must be non-empty and unique on this router.",
-                                            "Physical WAN carrier - The Ethernet device that reaches the PPPoE access concentrator. Every row in this batch uses it, unless a row supplies a VLAN.",
-                                            "Interface prefix - One to four lowercase letters or digits, beginning with a letter. This opens on the default PPPoE prefix set in Module settings, Rules; change it here to override that for this batch only. A prefix of pd produces sections such as pd00001 and devices such as pppoe-pd00001.",
-                                            "Default VLAN - Optional VLAN ID from 1 to 4094. A VLAN in an individual input row overrides this value; zero or empty means the carrier itself.",
-                                            "Account-list file - Optional UTF-8 text file, up to 1 MiB. Its content wins over pasted text when both are supplied.",
-                                            "Paste account list - Use this when no file is selected. Tab, comma, semicolon, pipe, or repeated whitespace can separate the fields."
-                                          ]
-                                        }
-                                      ]
-                                    }
-                                  ],
-                                  "columns": 2
                                 }
                               ]
                             },
                             {
-                              "id": "tuning",
-                              "label": "Pacing and limits",
+                              "id": "daemon",
+                              "label": "Daemon settings",
                               "icon": "Settings2",
                               "blocks": [
                                 {
+                                  "type": "conditional",
+                                  "when": {
+                                    "source": {
+                                      "kind": "stream",
+                                      "event": "ui",
+                                      "path": "hintsOn"
+                                    },
+                                    "op": "eq",
+                                    "value": true
+                                  },
+                                  "blocks": [
+                                    {
+                                      "type": "note",
+                                      "title": "The router's own watchdog",
+                                      "lines": [
+                                        "netifd retries a failing PPPoE session by itself, and it is better at it than anything polling from outside. The watchdog on the router is for the sessions netifd has given up on: anything down longer than the redial delay is taken down and dialled again, longest-down first, at most one batch per pass.",
+                                        "These numbers live on the router, in /etc/config/bm_pppoe, and apply immediately: the counter timer is re-armed and the next watchdog pass uses them."
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
                                   "type": "section",
-                                  "title": "Batch pacing and limits",
+                                  "title": "Watchdog and counters",
                                   "columns": 2,
                                   "blocks": [
                                     {
                                       "type": "checkForm",
-                                      "checkMethod": "rulesCheck",
-                                      "applyMethod": "rulesApply",
-                                      "checkLabel": "Check this group",
-                                      "applyLabel": "Save this group",
+                                      "checkMethod": "pppoeSettingsCheck",
+                                      "applyMethod": "pppoeSettingsApply",
+                                      "checkLabel": "Check",
+                                      "applyLabel": "Apply on the router",
                                       "fields": [
                                         {
-                                          "key": "uciChunkSize",
-                                          "label": "Interfaces per UCI chunk",
+                                          "key": "counter_interval",
+                                          "label": "Counter interval (s)",
                                           "input": "number",
-                                          "placeholder": "100",
+                                          "placeholder": "5",
                                           "initialFrom": {
                                             "kind": "invoke",
-                                            "method": "rulesEffective",
-                                            "path": "uciChunkSize"
+                                            "method": "pppoeSettingsGet",
+                                            "path": "counter_interval"
                                           }
                                         },
                                         {
-                                          "key": "chunkDelayMs",
-                                          "label": "Delay between chunks (ms)",
+                                          "key": "redial_after",
+                                          "label": "Redial after (s)",
                                           "input": "number",
-                                          "placeholder": "1000",
+                                          "placeholder": "120",
                                           "initialFrom": {
                                             "kind": "invoke",
-                                            "method": "rulesEffective",
-                                            "path": "chunkDelayMs"
+                                            "method": "pppoeSettingsGet",
+                                            "path": "redial_after"
                                           }
                                         },
                                         {
-                                          "key": "ruleChunkLines",
-                                          "label": "IP-rule lines per command",
+                                          "key": "redial_batch",
+                                          "label": "Redial batch",
                                           "input": "number",
-                                          "placeholder": "500",
+                                          "placeholder": "20",
                                           "initialFrom": {
                                             "kind": "invoke",
-                                            "method": "rulesEffective",
-                                            "path": "ruleChunkLines"
-                                          }
-                                        },
-                                        {
-                                          "key": "execTimeoutSec",
-                                          "label": "Job command timeout (s)",
-                                          "input": "number",
-                                          "placeholder": "60",
-                                          "initialFrom": {
-                                            "kind": "invoke",
-                                            "method": "rulesEffective",
-                                            "path": "execTimeoutSec"
-                                          }
-                                        },
-                                        {
-                                          "key": "maxBatchRows",
-                                          "label": "Maximum accounts per batch",
-                                          "input": "number",
-                                          "placeholder": "5000",
-                                          "initialFrom": {
-                                            "kind": "invoke",
-                                            "method": "rulesEffective",
-                                            "path": "maxBatchRows"
+                                            "method": "pppoeSettingsGet",
+                                            "path": "redial_batch"
                                           }
                                         }
                                       ]
@@ -1335,12 +1972,9 @@
                                           "type": "note",
                                           "title": "What each field means",
                                           "lines": [
-                                            "Interfaces per UCI chunk - 1 to 1000, default 100. Smaller waves reduce PADI and reload bursts but take longer.",
-                                            "Delay between chunks - 0 to 60000 milliseconds, default 1000. Applied between PPPoE create, stop, start, redial and delete waves.",
-                                            "IP-rule lines per command - 50 to 2000, default 500. Caps the stdin script used when many policy rules must be repaired after a reboot.",
-                                            "Job command timeout - 10 to 600 seconds, default 60. Every command is bounded even when the router is overloaded.",
-                                            "Maximum accounts per batch - 1 to 5000, default 5000. A guard rail, not a claim that the router has enough RAM for that many pppd processes.",
-                                            "These are saved for every router this module manages and take effect on the next job. The numbering both automations share is under Module settings, Advanced rules."
+                                            "Counter interval - 1 to 300 seconds. How often the router reads /proc/net/dev and corrects its session table.",
+                                            "Redial after - 0 to 86400 seconds. How long a session may stay down before the watchdog redials it; 0 turns the watchdog off and leaves every retry to netifd.",
+                                            "Redial batch - 1 to 500. The most redials one watchdog pass starts: a provider that has just dropped four hundred sessions does not want four hundred simultaneous reconnects from one router."
                                           ]
                                         }
                                       ]

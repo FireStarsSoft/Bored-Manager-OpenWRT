@@ -1,11 +1,12 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { ModuleExecResult } from '@shared/modules'
 import activate from '../../openwrt/main/index'
-import { ConfigStore, DEFAULT_RULES } from '../../openwrt/main/config'
+import { ConfigStore } from '../../openwrt/main/config'
 import type { JobSpec, OpenWrtJob } from '../../openwrt/main/jobs'
-import { PppoeManager, type PppoeStoreData } from '../../openwrt/main/pppoe'
+import { PppoeManager } from '../../openwrt/main/pppoe'
 import { Queries } from '../../openwrt/main/queries'
 import { HostStore } from '../../openwrt/main/store'
+import type { AgentCapability } from '../../openwrt/main/probe'
 import type { IfaceState, RouterModel } from '../../openwrt/main/types'
 import { ifaceIndex } from '../../openwrt/main/util'
 import { moduleHarness, sharedModuleConfig } from '../helpers/module-harness'
@@ -14,11 +15,10 @@ import { moduleHarness, sharedModuleConfig } from '../helpers/module-harness'
  * What the module does between two ticks, when nothing has changed.
  *
  * Everything here is about work that was repeated rather than work that was
- * wrong: a sweep against a router with nothing on it and nobody watching, four
- * surfaces each rebuilding the same five thousand rows, three readers each
- * indexing the same interface list, and a string built for every row that no
- * spec has ever asked for. Each one is asserted as a count of what the module
- * actually did, never as a duration.
+ * wrong: a sweep against a router with nothing on it and nobody watching,
+ * surfaces re-fetching answers the cache already holds, and readers each
+ * indexing the same interface list. Each one is asserted as a count of what
+ * the module actually did, never as a duration.
  */
 
 const ok = (stdout = '', stderr = '', code = 0): ModuleExecResult => ({ code, stdout, stderr })
@@ -76,15 +76,16 @@ function sweepOutput(): string {
   ].join('\n')
 }
 
-const BATCH = {
-  id: 'b1',
-  name: 'Pool',
-  prefix: 'pd',
+const INSTANCE = {
+  id: 'bind1',
+  name: 'Office',
+  lan: 'lan',
   carrier: 'eth1',
+  running: true,
+  sticky: true,
+  remap: true,
   createdAt: 1,
-  count: 2,
-  seqFrom: 1,
-  seqTo: 2
+  slot: 0
 }
 
 // ----------------------------------------------------- the idle fast sweep
@@ -117,7 +118,7 @@ describe('the fast sweep on a router with nothing to automate', () => {
   }
 
   it('drops to the slow cadence when there is nothing to reconcile and nobody looking', async () => {
-    // No batch, no binding instance, no open surface: every fast tick is one
+    // No pool, no binding instance, no open surface: every fast tick is one
     // SSH round trip producing numbers nothing reads - thirty a minute, for
     // each pooled machine the app happens to be connected to.
     const { harness } = idleRouter({ tabActive: false })
@@ -139,7 +140,7 @@ describe('the fast sweep on a router with nothing to automate', () => {
     // sweep notices, and a minute of that is worse than any saving here.
     const { harness } = idleRouter({
       tabActive: false,
-      hostData: { version: 1, nextSeq: 3, batches: [BATCH] }
+      hostData: { version: 2, instances: [INSTANCE] }
     })
     const runtime = activate(harness.ctx)
 
@@ -182,51 +183,135 @@ describe('the fast sweep on a router with nothing to automate', () => {
   })
 })
 
-// --------------------------------------------------------- the row builder
+// --------------------------------------------------------- the pool cache
 
-describe('the PPPoE rows four surfaces share', () => {
-  const SESSIONS = 200
+describe('the pool answers every surface shares', () => {
+  /** A capability that says the 2.x pool daemon is on the router. */
+  const withDaemon: AgentCapability = {
+    installed: true,
+    running: true,
+    release: '2.0.0',
+    apiVersion: 3,
+    schema: 2,
+    dataSchema: 2,
+    provides: ['pppoe'],
+    features: [
+      { name: 'bm-pppoe-pool', version: '2.0.0', apiVersion: 2, provides: ['pppoe'] }
+    ],
+    guard: null,
+    usable: true,
+    problem: null,
+    canGuard: true,
+    canUpdate: true
+  }
 
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  function pooled(): {
-    manager: PppoeManager
-    builds: () => number
-    data: PppoeStoreData
-    bump: () => void
-    setModel: (next: RouterModel) => void
-  } {
-    let builds = 0
-    let revision = 1
-    // `seqTo` is read by `batchSequences` and by nothing else on these paths,
-    // and `batchSequences` is called once per row build - so this counts
-    // builds without the module having to carry a counter for the test.
-    const batch = {
-      id: 'b1',
-      name: 'Pool',
-      prefix: 'pd',
-      carrier: 'eth1',
-      createdAt: 1,
-      count: SESSIONS,
-      seqFrom: 1,
-      get seqTo(): number {
-        builds += 1
-        return SESSIONS
+  const INFO = {
+    name: 'bm-pppoe-pool',
+    release: '2.0.0',
+    apiVersion: 2,
+    settings: { enabled: true, counter_interval: 5, redial_after: 120, redial_batch: 20 },
+    started: 1,
+    uptime: 100,
+    pools: [
+      {
+        id: 'fpt1',
+        mode: 'multi',
+        label: 'FPT line',
+        prefix: 'fpt',
+        carrier: 'eth1',
+        mac_mode: 'auto',
+        username: 'u@isp',
+        hasPassword: true,
+        table_base: 10_000,
+        service: '',
+        ac: '',
+        ac_mac: '',
+        mtu: 0,
+        keepalive: '5 1',
+        ipv6: '0',
+        peerdns: false,
+        dns: [],
+        defaultroute: true,
+        host_uniq: '',
+        demand: 0,
+        padi_attempts: 0,
+        padi_timeout: 0,
+        pppd_options: '',
+        zone: 'bmwanpool',
+        masq: true,
+        mtu_fix: true,
+        lan_forward: true,
+        created: 1_700_000_000,
+        memberList: [
+          { vlan: 101, username: '' },
+          { vlan: 102, username: '' }
+        ],
+        members: 2,
+        up: 1,
+        dialing: 0,
+        down: 0,
+        error: 0,
+        stopped: 0,
+        unwritten: 1,
+        createdAt: 1_700_000_000,
+        rate: { rxBps: 1000, txBps: 2000 }
       }
-    }
-    const data: PppoeStoreData = { nextSeq: SESSIONS + 1, batches: [batch] }
-    let model = modelWith([])
+    ],
+    legacy: []
+  }
+
+  const ROWS = {
+    sessions: [
+      {
+        pool: 'fpt1',
+        section: 'fpt101',
+        vlan: 101,
+        device: 'eth1.101',
+        username: 'u@isp',
+        mac: '02:a6:65:b8:00:65',
+        status: 'up',
+        autostart: true,
+        uptime: 90,
+        ip: '10.0.0.2',
+        table: 10_101,
+        errorCode: '',
+        rxBps: 500,
+        txBps: 600,
+        redials: 0
+      },
+      {
+        pool: 'fpt1',
+        section: 'fpt102',
+        vlan: 102,
+        device: 'eth1.102',
+        username: 'u@isp',
+        mac: '02:a6:65:b8:00:66',
+        status: 'unwritten',
+        autostart: true,
+        uptime: 0,
+        ip: '',
+        table: 10_102,
+        errorCode: '',
+        rxBps: 0,
+        txBps: 0,
+        redials: 0
+      }
+    ],
+    limit: 500
+  }
+
+  function cachedManager(): { manager: PppoeManager; calls: () => number } {
+    let calls = 0
     const harness = moduleHarness('openwrt', () => ok())
+    harness.exec.mockImplementation(async (command: string) => {
+      calls += 1
+      if (command.includes('bm.pppoe info')) return ok(JSON.stringify(INFO))
+      if (command.includes('bm.pppoe sessions')) return ok(JSON.stringify(ROWS))
+      return ok()
+    })
     const manager = new PppoeManager(
       harness.ctx,
-      { effectiveRules: () => ({ ...DEFAULT_RULES }) },
-      {
-        read: () => data,
-        update: <T,>(mutate: (value: PppoeStoreData) => T): T => mutate(data),
-        revision: () => revision
-      },
+      { effectiveRules: () => ({ execTimeoutSec: 60, tableBase: 10_000 }) },
       {
         start: (spec: JobSpec): OpenWrtJob => ({
           id: 'job_1',
@@ -242,105 +327,56 @@ describe('the PPPoE rows four surfaces share', () => {
         }),
         list: () => []
       },
-      { model: () => model, forceDump: () => {} }
+      { forceDump: () => {} },
+      () => withDaemon
     )
-    return {
-      manager,
-      builds: () => builds,
-      data,
-      bump: () => {
-        revision += 1
-      },
-      setModel: (next: RouterModel) => {
-        model = next
-      }
-    }
+    return { manager, calls: () => calls }
   }
 
-  it('builds them once for the summary, the batch table, the rows and the attention list', () => {
-    // One tick asks for the same rows four times over: the summary the module
-    // emits, the batch table, the open batch's row detail, and the attention
-    // table. Every one of them used to walk the whole pool and allocate a row
-    // object per session - 800 here, 20,000 on a five-thousand-account pool.
-    const { manager, builds } = pooled()
+  it('fetches once per tick, and every surface reads the same answers', async () => {
+    const { manager, calls } = cachedManager()
 
+    await manager.refresh()
+    const fetched = calls()
+    expect(fetched).toBe(2) // one info, one sessions
+
+    // The summary, the pools table, the row tables and the range provider all
+    // read the cache; none of them costs another round trip.
     const summary = manager.snapshot()
-    const batches = manager.batches()
-    const rows = manager.rows('b1')
-    const attention = manager.attentionRows()
+    const pools = manager.pools()
+    const rows = manager.rows('fpt1')
+    const attention = manager.rows('', 'attention')
+    manager.managedRanges()
 
-    expect(builds()).toBe(1)
-    // Same answers as before, from the one build.
-    expect(summary.total).toBe(SESSIONS)
-    expect(batches[0]).toMatchObject({ id: 'b1', count: SESSIONS, unknown: SESSIONS })
-    expect(rows).toHaveLength(SESSIONS)
-    expect(attention).toHaveLength(0)
-  })
-
-  it('rebuilds them for the next sample', () => {
-    const { manager, builds, setModel } = pooled()
-    manager.snapshot()
-    manager.batches()
-    expect(builds()).toBe(1)
-
-    // onSample drops the cache and then emits the summary off a fresh build.
-    const next = modelWith([upIface('pd00001')])
-    setModel(next)
-    manager.onSample(next)
-    expect(builds()).toBe(2)
-    expect(manager.rows('b1')[0]).toMatchObject({ name: 'pd00001', status: 'up' })
-    expect(builds()).toBe(2)
-  })
-
-  it('rebuilds them when the batch records move under it', () => {
-    // `read()` hands back the same object before and after a create, so the
-    // store revision is the only thing that can tell a batch that was just
-    // added from one that was always there. Without it a create landing
-    // between two ticks left the page showing the pool as it was.
-    const { manager, builds, data, bump } = pooled()
-    manager.batches()
-    expect(builds()).toBe(1)
-
-    data.batches.push({
-      id: 'b2',
-      name: 'Second',
-      prefix: 'pe',
-      carrier: 'eth1',
-      createdAt: 2,
-      count: 3,
-      seqFrom: 1,
-      seqTo: 3
+    expect(calls()).toBe(fetched)
+    expect(summary).toMatchObject({ pools: 1, interfaces: 2, up: 1, unwritten: 1, attention: 1 })
+    expect(pools[0]).toMatchObject({
+      id: 'fpt1',
+      title: 'FPT line',
+      account: 'u@isp',
+      members: 2,
+      listText: '101-102'
     })
-    bump()
-
-    expect(manager.batches()).toHaveLength(2)
-    expect(builds()).toBe(2)
+    expect(rows).toHaveLength(2)
+    expect(rows[1]).toMatchObject({ name: 'fpt102', status: 'unwritten', table: 10_102 })
+    expect(attention).toHaveLength(1)
+    expect(attention[0]).toMatchObject({ name: 'fpt102' })
   })
 
-  it('still lets the dialing clock turn a stuck session into an error', () => {
-    // The one input that is time rather than state: `dialing` becomes a
-    // timeout on the wall clock alone, with the sample and the records
-    // unchanged. The cache is therefore only good until that moment, and no
-    // further - which is why it carries a deadline as well as a key.
-    const clock = vi.spyOn(Date, 'now')
-    const started = 1_700_000_000_000
-    clock.mockReturnValue(started)
-    const { manager, builds, setModel } = pooled()
-    const dialing = modelWith([dialingIface('pd00001')])
-    setModel(dialing)
-    manager.onSample(dialing)
+  it('keeps the last answers and marks them stale when the router stops answering', async () => {
+    const { manager } = cachedManager()
+    await manager.refresh()
+    expect(manager.snapshot().stale).toBe(false)
 
-    expect(manager.batches()[0]).toMatchObject({ dialing: 1 })
-    const cached = builds()
-    // Four minutes in it is still a session that might yet come up, and the
-    // rows already built say exactly that.
-    clock.mockReturnValue(started + 4 * 60_000)
-    expect(manager.batches()[0]).toMatchObject({ dialing: 1 })
-    expect(builds()).toBe(cached)
+    // The next fetch fails outright; the pools must not vanish.
+    const failing = vi.fn(async () => ok('', 'ubus timeout', 1))
+    ;(manager as unknown as { runtime: { ctx: { exec: unknown } } }).runtime.ctx.exec = failing
 
-    clock.mockReturnValue(started + 6 * 60_000)
-    expect(manager.batches()[0]).toMatchObject({ dialing: 0, error: 1 })
-    expect(builds()).toBe(cached + 1)
+    await manager.refresh()
+
+    expect(manager.snapshot().stale).toBe(true)
+    expect(manager.pools()).toHaveLength(1)
+    expect(manager.rows('fpt1')).toHaveLength(2)
   })
 })
 
@@ -356,11 +392,7 @@ describe('the interface index every reader shares', () => {
     expect(ifaceIndex(null).size).toBe(0)
   })
 
-  it('is the only pass the three readers make over the interface list', () => {
-    // The row builder, the manual-stop prune behind it and the device table
-    // each built their own `name -> iface` map. On a five-thousand-session
-    // router that was three passes over five thousand entries, per surface,
-    // per tick, to produce three identical maps.
+  it('is the only pass the device table makes over the interface list', () => {
     const model = modelWith([upIface('pd00001'), upIface('pd00002')])
     let passes = 0
     const walk = model.ifaces.map.bind(model.ifaces)
@@ -373,24 +405,10 @@ describe('the interface index every reader shares', () => {
     })
 
     const harness = moduleHarness('openwrt', () => ok(), {
-      hostData: { version: 1, nextSeq: 3, batches: [BATCH] },
       config: sharedModuleConfig(null)
     })
     const config = new ConfigStore(harness.ctx)
     const store = new HostStore(harness.ctx, () => config.effectiveRules())
-    const data: PppoeStoreData = { nextSeq: 3, batches: [BATCH] }
-    const manager = new PppoeManager(
-      harness.ctx,
-      { effectiveRules: () => ({ ...DEFAULT_RULES }) },
-      // No `revision`, so the row cache never answers and every call really
-      // does go looking for the index.
-      {
-        read: () => data,
-        update: <T,>(mutate: (value: PppoeStoreData) => T): T => mutate(data)
-      },
-      { start: () => ({}) as OpenWrtJob, list: () => [] },
-      { model: () => model, forceDump: () => {} }
-    )
     const queries = new Queries(
       () => model,
       () => ({}),
@@ -399,69 +417,8 @@ describe('the interface index every reader shares', () => {
     )
 
     queries.deviceRows()
-    manager.onSample(model)
-    manager.rows('b1')
-    manager.attentionRows()
 
     expect(passes).toBe(1)
-  })
-})
-
-// -------------------------------------------------------- unrendered fields
-
-describe('the fields a PPPoE row actually carries', () => {
-  it('carries exactly what the batch detail table reads', async () => {
-    // `uptimeLabel` was a formatted string built for every row of every batch
-    // on every tick. No page spec has ever named it: the table asks for
-    // `upSince` and counts from it in the renderer, which is what keeps a
-    // session's uptime ticking between samples instead of freezing at
-    // whatever the last one said.
-    const harness = moduleHarness('openwrt', (command) => {
-      if (command.includes("echo '===REL==='")) return ok(probeOutput())
-      if (command.includes("echo '===SYS==='")) {
-        return ok(
-          sweepOutput().replace(
-            JSON.stringify({ interface: [] }),
-            JSON.stringify({
-              interface: [
-                {
-                  interface: 'pd00001',
-                  up: true,
-                  proto: 'pppoe',
-                  device: 'pppoe-pd00001',
-                  uptime: 90,
-                  'ipv4-address': [{ address: '10.0.0.2', mask: 32 }]
-                }
-              ]
-            })
-          )
-        )
-      }
-      return ok('')
-    }, {
-      hostData: { version: 1, nextSeq: 3, batches: [BATCH] },
-      config: sharedModuleConfig(null)
-    })
-    const runtime = activate(harness.ctx)
-    runtime.applyPollers?.()
-    expect(await harness.handlers.get('sweepNow')?.()).toMatchObject({ ok: true })
-    await settle(20)
-
-    const rows = harness.handlers.get('pppoeRows')?.('b1') as Array<Record<string, unknown>>
-    expect(Object.keys(rows[0]).sort()).toEqual(
-      [
-        'batch',
-        'errorCode',
-        'ip',
-        'name',
-        'status',
-        'statusBadges',
-        'upSince',
-        'username'
-      ].sort()
-    )
-    expect(rows[0].upSince).toBeGreaterThan(0)
-    runtime.dispose?.()
   })
 })
 
@@ -491,9 +448,4 @@ function upIface(name: string): IfaceState {
     ipv4: { addr: '10.0.0.2', mask: 32 },
     uptimeSec: 90
   }
-}
-
-/** Listed, not up, nothing pending, no error code: the catch-all `dialing`. */
-function dialingIface(name: string): IfaceState {
-  return { ...upIface(name), up: false, ipv4: undefined, uptimeSec: 0 }
 }

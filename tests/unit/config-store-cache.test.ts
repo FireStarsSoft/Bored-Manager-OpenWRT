@@ -28,13 +28,13 @@ function counting(seed: unknown): { config: SharedModuleConfig; reads: () => num
 
 describe('OpenWRT config store', () => {
   it('resolves the effective rules once per document', () => {
-    const { config, reads } = counting({ version: 1, rules: { maxBatchRows: 1234 }, ui: { showHints: true } })
+    const { config, reads } = counting({ version: 1, rules: { maxEvents: 123 }, ui: { showHints: true } })
     const harness = moduleHarness('openwrt', () => ({ stdout: '', stderr: '', code: 0 }), { config })
     const store = new ConfigStore(harness.ctx)
 
-    expect(store.effectiveRules().maxBatchRows).toBe(1234)
+    expect(store.effectiveRules().maxEvents).toBe(123)
     // Defaults still fill in everything the document does not override.
-    expect(store.effectiveRules().ifacePrefix).toBe('pd')
+    expect(store.effectiveRules().tableBase).toBe(10_000)
     store.effectiveRules()
 
     expect(reads()).toBe(1)
@@ -44,11 +44,11 @@ describe('OpenWRT config store', () => {
     const { config, reads } = counting({ version: 1, rules: {}, ui: { showHints: true } })
     const harness = moduleHarness('openwrt', () => ({ stdout: '', stderr: '', code: 0 }), { config })
     const store = new ConfigStore(harness.ctx)
-    expect(store.effectiveRules().maxBatchRows).toBe(5000)
+    expect(store.effectiveRules().maxEvents).toBe(200)
 
-    config.set({ version: 1, rules: { maxBatchRows: 2000 }, ui: { showHints: true } })
+    config.set({ version: 1, rules: { maxEvents: 400 }, ui: { showHints: true } })
 
-    expect(store.effectiveRules().maxBatchRows).toBe(2000)
+    expect(store.effectiveRules().maxEvents).toBe(400)
     expect(reads()).toBe(2)
     store.dispose()
   })
@@ -59,9 +59,9 @@ describe('OpenWRT config store', () => {
     const store = new ConfigStore(harness.ctx)
     store.effectiveRules()
 
-    store.setRules({ maxBatchRows: 3000 })
+    store.setRules({ maxEvents: 300 })
 
-    expect(store.effectiveRules().maxBatchRows).toBe(3000)
+    expect(store.effectiveRules().maxEvents).toBe(300)
     expect(reads()).toBe(1)
   })
 })

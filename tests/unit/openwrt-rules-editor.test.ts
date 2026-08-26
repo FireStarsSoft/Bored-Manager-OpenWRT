@@ -59,9 +59,9 @@ const apply = (editorUnderTest: Editor, values: Record<string, unknown>): void =
 
 describe('a value the form cannot accept', () => {
   it('refuses a number that is not one, and shows what was typed', () => {
-    const report = editor().rules.check({ chunkDelayMs: '2,000' })
+    const report = editor().rules.check({ stickyCap: '2,000' })
 
-    expect(errors(report)).toEqual(['Delay between chunks (ms) must be a whole number'])
+    expect(errors(report)).toEqual(['Sticky mappings kept must be a whole number'])
     // The detail quotes the entry rather than a parsed value, because "you
     // entered 2" would be describing something the user did not type.
     expect(report.findings[0].detail).toContain('"2,000"')
@@ -82,18 +82,6 @@ describe('a value the form cannot accept', () => {
     expect(low.findings[0].label).toContain(String(bounds.max))
   })
 
-  it('refuses an interface prefix netifd could not carry', () => {
-    // This becomes the first characters of every managed section name, so it
-    // has to survive UCI, a shell and netifd's 15-character device limit.
-    for (const bad of ['PD', 'p_d', '1pd', 'prefix', 'pd ppp']) {
-      expect(editor().rules.check({ ifacePrefix: bad })).toMatchObject({ ok: false })
-    }
-    expect(errors(editor().rules.check({ ifacePrefix: 'PD' }))).toEqual([
-      'Interface prefix must be 1-4 lowercase letters or digits and start with a letter'
-    ])
-    expect(errors(editor().rules.check({ ifacePrefix: 'wan1' }))).toEqual([])
-  })
-
   it('refuses a firewall zone name UCI would not take as a section', () => {
     // The zone name is written as `firewall.<name>=zone`, so anything outside
     // the UCI section grammar produces a batch the router rejects halfway.
@@ -102,12 +90,6 @@ describe('a value the form cannot accept', () => {
     ])
     expect(errors(editor().rules.check({ zoneName: "lan';reboot;'" }))).toHaveLength(1)
     expect(errors(editor().rules.check({ zoneName: 'bm_wan_pool2' }))).toEqual([])
-  })
-
-  it('refuses a membership mode that is neither of the two', () => {
-    expect(errors(editor().rules.check({ zoneMode: 'devices' }))).toEqual([
-      'Firewall zone mode must be wildcard or networks'
-    ])
   })
 
   it('refuses a lease file that is not a plain absolute path', () => {
@@ -121,42 +103,42 @@ describe('a value the form cannot accept', () => {
 
   it('hands out no token, so the bad value cannot be applied anyway', () => {
     const run = editor()
-    const report = run.rules.check({ zoneName: 'bm-wan-pool', chunkDelayMs: '2000' })
+    const report = run.rules.check({ zoneName: 'bm-wan-pool', stickyCap: '2000' })
 
     expect(report.ok).toBe(false)
     expect(report.token).toBeUndefined()
     // And the good field in the same submission is not saved on its own: the
     // form is checked and applied as one group.
-    expect(run.config.effectiveRules().chunkDelayMs).toBe(DEFAULT_RULES.chunkDelayMs)
+    expect(run.config.effectiveRules().stickyCap).toBe(DEFAULT_RULES.stickyCap)
   })
 })
 
-describe('the six values that say where this module objects live', () => {
-  const LOCKED = { tableBase: '11000' }
+describe('the values that say where the binding rules live', () => {
+  const LOCKED = { catchAllTable: '31000' }
 
   it('may be changed on a router with no records of its own', () => {
     const run = editor('none')
 
     apply(run, LOCKED)
 
-    expect(run.config.effectiveRules().tableBase).toBe(11_000)
+    expect(run.config.effectiveRules().catchAllTable).toBe(31_000)
   })
 
-  it('are refused while batches or binding instances exist, and say what to delete', () => {
+  it('are refused while binding instances exist, and say what to delete', () => {
     const report = editor('present').rules.check(LOCKED)
 
     expect(errors(report)).toEqual([
-      'Numbering and firewall-layout rules cannot change while batches or binding instances exist'
+      'Numbering rules cannot change while binding instances exist'
     ])
     expect(report.findings.find((finding) => finding.level === 'error')?.detail).toContain(
-      'tableBase'
+      'catchAllTable'
     )
   })
 
   it('are refused when nothing can say whether this router has records', () => {
     // The records are per-machine and the rules are global, so "no records"
     // read off a disconnected context is not evidence. Answering `none` there
-    // unlocked the table range of a router carrying a hundred live sessions.
+    // unlocked the preference range of a router carrying live binding rules.
     const report = editor('unknown').rules.check(LOCKED)
 
     expect(errors(report)).toEqual([
@@ -173,8 +155,8 @@ describe('the six values that say where this module objects live', () => {
     // not the user touched them.
     for (const topology of ['none', 'present', 'unknown'] as RulesTopology[]) {
       const report = editor(topology).rules.check({
-        tableBase: String(DEFAULT_RULES.tableBase),
-        chunkDelayMs: '2000'
+        catchAllTable: String(DEFAULT_RULES.catchAllTable),
+        stickyCap: '2000'
       })
       expect(errors(report)).toEqual([])
     }
@@ -183,12 +165,17 @@ describe('the six values that say where this module objects live', () => {
   it('are not writable through a rule that is not locked', () => {
     // A sanity check on the list itself: the unlocked rules stay editable on a
     // router that is carrying records, which is the whole reason the lock is
-    // six values rather than all of them.
+    // three values rather than all of them. The pool numbering that used to be
+    // locked here lives on the router now, per pool.
     const run = editor('present')
 
-    apply(run, { chunkDelayMs: '2000', releaseGraceSec: '600' })
+    apply(run, { stickyCap: '2000', releaseGraceSec: '600', tableBase: '11000' })
 
-    expect(run.config.effectiveRules()).toMatchObject({ chunkDelayMs: 2_000, releaseGraceSec: 600 })
+    expect(run.config.effectiveRules()).toMatchObject({
+      stickyCap: 2_000,
+      releaseGraceSec: 600,
+      tableBase: 11_000
+    })
   })
 })
 
@@ -196,20 +183,20 @@ describe('what a save actually writes', () => {
   it('stores only the values that differ from their defaults', () => {
     const run = editor()
 
-    apply(run, { chunkDelayMs: '2000' })
+    apply(run, { stickyCap: '2000' })
 
     // The file is hand-editable and the defaults move between releases. A
     // document that copied every default would silently pin this router to the
     // defaults of the build that wrote it.
-    expect(run.saved().rules).toEqual({ chunkDelayMs: 2_000 })
+    expect(run.saved().rules).toEqual({ stickyCap: 2_000 })
   })
 
   it('drops an override again when the value is set back to its default', () => {
     const run = editor()
-    apply(run, { chunkDelayMs: '2000' })
-    expect(run.saved().rules).toEqual({ chunkDelayMs: 2_000 })
+    apply(run, { stickyCap: '2000' })
+    expect(run.saved().rules).toEqual({ stickyCap: 2_000 })
 
-    apply(run, { chunkDelayMs: String(DEFAULT_RULES.chunkDelayMs) })
+    apply(run, { stickyCap: String(DEFAULT_RULES.stickyCap) })
 
     expect(run.saved().rules).toEqual({})
   })
@@ -218,19 +205,19 @@ describe('what a save actually writes', () => {
     const run = editor()
     apply(run, { releaseGraceSec: '600' })
 
-    const report = run.rules.check({ chunkDelayMs: '2000' })
+    const report = run.rules.check({ stickyCap: '2000' })
 
     // Two different counts, and they answer two different questions: what this
     // save moves, and how much of the document is no longer a default.
-    expect(pass(report)).toContain('1 rule(s) will change: chunkDelayMs')
+    expect(pass(report)).toContain('1 rule(s) will change: stickyCap')
     expect(pass(report)).toContain('2 rule override(s) will be saved')
   })
 
   it('says every rule is a default once the last override goes', () => {
     const run = editor()
-    apply(run, { chunkDelayMs: '2000' })
+    apply(run, { stickyCap: '2000' })
 
-    const report = run.rules.check({ chunkDelayMs: String(DEFAULT_RULES.chunkDelayMs) })
+    const report = run.rules.check({ stickyCap: String(DEFAULT_RULES.stickyCap) })
 
     expect(pass(report)).toContain('Every OpenWRT rule will use its default')
   })
@@ -241,28 +228,28 @@ describe('a token applied against something other than what was checked', () => 
     // The token is bound to the values it was issued for. A save that carried
     // different ones would write a document nothing had validated.
     const run = editor()
-    const report = run.rules.check({ chunkDelayMs: '2000' })
+    const report = run.rules.check({ stickyCap: '2000' })
     expect(report.ok).toBe(true)
     if (!report.ok) return
 
-    expect(run.rules.apply({ token: report.token, values: { chunkDelayMs: '50000' } })).toMatchObject({
+    expect(run.rules.apply({ token: report.token, values: { stickyCap: '50000' } })).toMatchObject({
       ok: false,
       error: expect.stringContaining('check again')
     })
-    expect(run.config.effectiveRules().chunkDelayMs).toBe(DEFAULT_RULES.chunkDelayMs)
+    expect(run.config.effectiveRules().stickyCap).toBe(DEFAULT_RULES.stickyCap)
   })
 
   it('cannot be spent twice', () => {
     const run = editor()
-    const report = run.rules.check({ chunkDelayMs: '2000' })
+    const report = run.rules.check({ stickyCap: '2000' })
     expect(report.ok).toBe(true)
     if (!report.ok) return
 
-    expect(run.rules.apply({ token: report.token, values: { chunkDelayMs: '2000' } })).toEqual({
+    expect(run.rules.apply({ token: report.token, values: { stickyCap: '2000' } })).toEqual({
       ok: true
     })
     expect(
-      run.rules.apply({ token: report.token, values: { chunkDelayMs: '2000' } })
+      run.rules.apply({ token: report.token, values: { stickyCap: '2000' } })
     ).toMatchObject({ ok: false })
   })
 })

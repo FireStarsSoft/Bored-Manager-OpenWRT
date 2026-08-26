@@ -6,7 +6,6 @@ export type OpenWrtOptionKind =
   | 'lan-ifaces'
   | 'carriers'
   | 'binding-carriers'
-  | 'batches'
 
 function uniqueSorted(options: FormFieldOption[]): FormFieldOption[] {
   const byValue = new Map<string, FormFieldOption>()
@@ -138,14 +137,8 @@ export function isBindingCarrier(device: string): boolean {
 export function selectOptions(
   kind: unknown,
   model: RouterModel | null,
-  data: OwrtHostData
+  _data: OwrtHostData
 ): FormFieldOption[] {
-  if (kind === 'batches') {
-    return data.batches.map((batch) => ({
-      value: batch.id,
-      label: `${batch.name} (${batch.prefix}, ${batch.count})`
-    }))
-  }
   if (!model) return []
 
   if (kind === 'lan-ifaces') {

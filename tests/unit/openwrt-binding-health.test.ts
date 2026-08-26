@@ -47,6 +47,9 @@ function routerModel(uptimeSec = 4_000): RouterModel {
         pending: false,
         autostart: true,
         uptimeSec: 3_000,
+        // Pool members carry their table in the dump, written by the pool
+        // daemon; it is where the WAN-to-table map reads them from.
+        ip4Table: 10_001,
         ipv4: { addr: '198.51.100.1', mask: 32 }
       },
       {
@@ -58,6 +61,7 @@ function routerModel(uptimeSec = 4_000): RouterModel {
         pending: false,
         autostart: true,
         uptimeSec: 3_000,
+        ip4Table: 10_002,
         ipv4: { addr: '198.51.100.2', mask: 32 }
       }
     ],
@@ -70,18 +74,7 @@ function routerModel(uptimeSec = 4_000): RouterModel {
 
 function hostData(sticky: Array<[string, string, string, number]> = []): unknown {
   return {
-    version: 1,
-    nextSeq: 3,
-    batches: [{
-      id: 'b1',
-      name: 'Home',
-      prefix: 'pd',
-      carrier: 'eth1',
-      createdAt: 1,
-      count: 2,
-      seqFrom: 1,
-      seqTo: 2
-    }],
+    version: 2,
     instances: [{
       id: 'bind1',
       name: 'Office LAN',

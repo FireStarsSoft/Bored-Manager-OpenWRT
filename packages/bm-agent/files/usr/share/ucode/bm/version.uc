@@ -9,7 +9,7 @@
 // RELEASE has to match PKG_VERSION in the Makefile and packages/version.json.
 // `npm run packages:check` fails the build when they disagree.
 
-export const RELEASE = '1.4.1';
+export const RELEASE = '2.0.0';
 export const API_VERSION = 3;
 
 // The shape of the data on disk - configuration and the agent's own state.
@@ -18,7 +18,12 @@ export const API_VERSION = 3;
 // that adds a ubus call touches API_VERSION, and only a release that changes
 // what is written to /etc touches this. It is what a downgrade is refused on,
 // and what the migration chain counts up to.
-export const CONFIG_SCHEMA = 1;
+//
+// 2 is the pool-of-members shape of /etc/config/bm_pppoe: pools carry a mode
+// and per-VLAN member sections instead of a sequence range. Old pool sections
+// are left in place for delete-only handling; the step to 2 stamps and moves
+// nothing, but it has to exist so the chain is unbroken.
+export const CONFIG_SCHEMA = 2;
 
 // `1.2.10` -> [1, 2, 10]. Anything that is not three dotted numbers - a build
 // somebody hand-edited, an empty string from a file that was not there - comes

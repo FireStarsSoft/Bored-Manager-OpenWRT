@@ -12,14 +12,31 @@
 import { shQuote } from '@shared/shell'
 import type { OwrtRules } from '../config'
 import { MANAGED_PREF_CEILING } from '../records'
-import type { HostStore } from '../store'
 
 export const EXEC_TIMEOUT_MS = 20_000
 
+/**
+ * One managed name range: `prefix` plus a numeric suffix inside the bounds.
+ * A v2 pool is `prefix:0-4094` (its members are VLAN-numbered), a legacy pool
+ * still carries the sequence range it was created with (five-digit suffixes
+ * parse as the same numbers). The provider is the pool cache, which reads
+ * them off the router - the router is the record now.
+ */
 export interface ManagedPppoeRange {
   prefix: string
   seqFrom: number
   seqTo: number
+}
+
+/** A range that is safe to interpolate into the awk spec below. */
+export function isManagedRange(range: ManagedPppoeRange): boolean {
+  return (
+    /^[a-z][a-z0-9]{0,3}$/.test(range.prefix) &&
+    Number.isInteger(range.seqFrom) &&
+    Number.isInteger(range.seqTo) &&
+    range.seqFrom >= 0 &&
+    range.seqTo >= range.seqFrom
+  )
 }
 
 const DEV_AWK = [
@@ -33,7 +50,7 @@ const DEV_AWK = [
   `    prefix=pair[1]`,
   `    if (substr(logical, 1, length(prefix)) != prefix) continue`,
   `    suffix=substr(logical, length(prefix)+1)`,
-  `    if (suffix !~ /^[0-9][0-9][0-9][0-9][0-9]$/) continue`,
+  `    if (suffix !~ /^[0-9]+$/ || length(suffix) > 5) continue`,
   `    seq=suffix+0`,
   `    if (seq >= bounds[1]+0 && seq <= bounds[2]+0) return 1`,
   `  }`,
@@ -122,27 +139,3 @@ export const SLOW_COMMAND = [
   // larger than anything else this probe collects.
   `echo '===FWZONES==='; uci -q show firewall 2>/dev/null | grep -E '=zone$|\\.name=|\\.network=' || true`
 ].join('; ')
-
-/**
- * The recorded PPPoE batches, as the ranges the router-side awk understands.
- * Anything malformed is dropped rather than passed on: the spec is interpolated
- * into a command, and a batch whose bounds make no sense would match either
- * everything or nothing.
- */
-export function managedRanges(store: HostStore): ManagedPppoeRange[] {
-  return store
-    .read()
-    .batches.filter(
-      (batch) =>
-        /^[a-z][a-z0-9]{0,3}$/.test(batch.prefix) &&
-        Number.isInteger(batch.seqFrom) &&
-        Number.isInteger(batch.seqTo) &&
-        batch.seqFrom >= 1 &&
-        batch.seqTo >= batch.seqFrom
-    )
-    .map((batch) => ({
-      prefix: batch.prefix,
-      seqFrom: batch.seqFrom,
-      seqTo: batch.seqTo
-    }))
-}

@@ -239,7 +239,7 @@ describe('a write still on the debounce', () => {
     const { store, writes, point } = switchable()
 
     store.update((data) => {
-      data.nextSeq = 42
+      data.extraTables.push(['wan1', 10_042])
     })
     // The app moves to the next machine in the pool before the timer lands.
     point('router-b')
@@ -252,7 +252,7 @@ describe('a write still on the debounce', () => {
     vi.advanceTimersByTime(11_000)
 
     expect(writes).toHaveLength(1)
-    expect(writes[0]).toMatchObject({ nextSeq: 42 })
+    expect(writes[0]).toMatchObject({ extraTables: [['wan1', 10_042]] })
   })
 
   it('gives up rather than retrying for the life of the process', () => {
@@ -260,7 +260,7 @@ describe('a write still on the debounce', () => {
     const { store, writes, point } = switchable()
 
     store.update((data) => {
-      data.nextSeq = 42
+      data.extraTables.push(['wan1', 10_042])
     })
     point('router-b')
     vi.advanceTimersByTime(10 * 60_000)
@@ -270,7 +270,7 @@ describe('a write still on the debounce', () => {
     expect(writes).toHaveLength(0)
     // Still in memory, so the next mutation carries it out.
     store.update((data) => {
-      data.nextSeq = 43
+      data.extraTables.push(['wan2', 10_043])
     })
     vi.advanceTimersByTime(11_000)
     expect(writes).toHaveLength(1)

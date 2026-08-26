@@ -10,7 +10,7 @@
  * they live in `../parse.ts`, which the rest of the module shares. Import this
  * barrel, never a file inside it.
  */
-export { buildFastSweepCommand, type ManagedPppoeRange } from './command'
+export { buildFastSweepCommand, isManagedRange, type ManagedPppoeRange } from './command'
 export { sampleHistory } from './history'
 export type { FastSweepHooks } from './runtime'
 export { FastSweep } from './sweep'

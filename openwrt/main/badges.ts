@@ -66,7 +66,11 @@ const STATUS_COLOR: Readonly<Record<string, string>> = {
   failed: BADGE.bad,
   'wan-error': BADGE.bad,
 
-  missing: BADGE.missing
+  missing: BADGE.missing,
+  // A pool member the record carries and /etc/config/network does not: the
+  // same "configured here, absent there" failure `missing` names, in the
+  // daemon's own vocabulary.
+  unwritten: BADGE.missing
 }
 
 /** One chip. Pass a colour for a word whose meaning is local to the caller. */

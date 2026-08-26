@@ -246,22 +246,33 @@ describe('the drawers that used to poll every row', () => {
     return ''
   }
 
-  // Both tables sat in a row drawer on a plain `invoke`, so opening one batch
-  // of five thousand accounts pushed about a megabyte on every interval for as
-  // long as the drawer stayed open. A subnav only polls the tab that is
-  // showing, and the tab that shows first asks for the short list.
-  for (const [file, method] of [
-    ['pages/automation.json', 'pppoeRows'],
-    ['pages/automation.json', 'bindingRows']
-  ] as const) {
-    it(`opens ${method} on the narrow tab`, () => {
-      const spec = specNamed(file)
-      expect(initialOf(spec, method)).toBe('attention')
-      const args = tabArgs(spec, method)
-      expect(args['attention']).toEqual(['$row.id', 'attention'])
-      expect(args['all']).toEqual(['$row.id'])
+  // The binding drawer sat on a plain `invoke`, so opening one instance
+  // pushed every assignment on every interval for as long as the drawer
+  // stayed open. A subnav only polls the tab that is showing, and the tab
+  // that shows first asks for the short list.
+  it('opens bindingRows on the narrow tab', () => {
+    const spec = specNamed('pages/automation.json')
+    expect(initialOf(spec, 'bindingRows')).toBe('attention')
+    const args = tabArgs(spec, 'bindingRows')
+    expect(args['attention']).toEqual(['$row.id', 'attention'])
+    expect(args['all']).toEqual(['$row.id'])
+  })
+
+  it('scopes pppoeRows to the open pool', () => {
+    // A pool holds at most 500 members and the daemon caps the reply the same
+    // way, so the interfaces table is deliberately always-complete: a member
+    // whose section is missing must be a visible row, not a filtered one.
+    const spec = specNamed('pages/automation.json')
+    const scoped = nodes(spec).some((node) => {
+      const source = node['source'] as Record<string, unknown> | undefined
+      return (
+        source?.['method'] === 'pppoeRows' &&
+        Array.isArray(source['args']) &&
+        source['args'][0] === '$row.id'
+      )
     })
-  }
+    expect(scoped).toBe(true)
+  })
 })
 
 describe('the Cancel button on a job card', () => {
@@ -288,37 +299,37 @@ describe('the Cancel button on a job card', () => {
 })
 
 describe('the PPPoE stat row', () => {
-  it('shows every state a session can be in, so the counts add up to Sessions', () => {
+  it('shows every state a member can be in, so the counts add up to Interfaces', () => {
     const shown = new Set<string>()
     for (const node of nodes(specNamed('pages/automation.json'))) {
       if (node['type'] !== 'stat') continue
       const source = node['source'] as Record<string, unknown> | undefined
       if (source?.['event'] === 'pppoe') shown.add(String(source['path']))
     }
-    // Stopping a batch moved its sessions out of every tile on the page, so
-    // Up + Dialing + Error + Missing stopped matching Sessions and nothing
-    // said where the difference had gone.
-    for (const key of ['total', 'up', 'dialing', 'error', 'stopped', 'missing', 'unknown']) {
+    // Disabling a member moved it out of every tile on the page, so the
+    // states stopped adding up and nothing said where the difference went.
+    for (const key of ['interfaces', 'up', 'dialing', 'down', 'error', 'stopped', 'unwritten']) {
       expect(shown.has(key)).toBe(true)
     }
   })
 })
 
-describe('the batch prefix field', () => {
-  it('opens on the prefix this router is configured to use', () => {
-    let initial: unknown
-    let from: Record<string, unknown> | undefined
+describe('the create form table base', () => {
+  it('opens on the base this module is configured to offer', () => {
+    const froms: Array<Record<string, unknown> | undefined> = []
     for (const node of nodes(specNamed('pages/automation.json'))) {
-      // `input` is what makes it a form field rather than the Prefix column on
-      // the batch table, which carries the same key.
-      if (node['key'] !== 'prefix' || node['input'] == null) continue
-      initial = node['initial']
-      from = node['initialFrom'] as Record<string, unknown>
+      // `input` is what makes it a form field rather than a table column
+      // carrying the same key.
+      if (node['key'] !== 'table_base' || node['input'] == null) continue
+      if (node['initialFromScope'] != null) continue
+      froms.push(node['initialFrom'] as Record<string, unknown>)
     }
-    // A hardcoded "pd" meant the `ifacePrefix` rule on the settings page could
-    // never take effect: every batch created from this form ignored it.
-    expect(initial).toBeUndefined()
-    expect(from).toMatchObject({ kind: 'invoke', method: 'rulesEffective', path: 'ifacePrefix' })
+    // Both create tabs offer it; a hardcoded number would mean the tableBase
+    // rule on the settings page never reached the form.
+    expect(froms.length).toBeGreaterThan(0)
+    for (const from of froms) {
+      expect(from).toMatchObject({ kind: 'invoke', method: 'rulesEffective', path: 'tableBase' })
+    }
   })
 })
 
@@ -445,48 +456,9 @@ function waitingHarness(): ReturnType<typeof moduleHarness> {
   return harness
 }
 
-describe('the connections a batch drawer asks for', () => {
-  it('narrows to the ones worth acting on when the drawer says so', async () => {
-    // pd00001 answers; pd00002 is configured here and absent from the router,
-    // which is the fault the narrow tab exists for.
-    const dump = JSON.stringify({
-      interface: [
-        {
-          interface: 'pd00001',
-          up: true,
-          pending: false,
-          proto: 'pppoe',
-          device: 'pppoe-pd00001',
-          'ipv4-address': [{ address: '198.51.100.1', mask: 32 }]
-        }
-      ]
-    })
-    const harness = moduleHarness('openwrt', () => ok(), {
-      hostData: { version: 1, nextSeq: 3, batches: [BATCH] },
-      config: sharedModuleConfig(null)
-    })
-    harness.exec.mockImplementation(async (command) => {
-      if (command.includes("echo '===REL==='")) return ok(probeOutput())
-      if (command.includes("echo '===SYS==='")) return ok(sweepOutput({ dump }))
-      return ok()
-    })
-    const runtime = activate(harness.ctx)
-    runtime.applyPollers?.()
-    expect(await harness.handlers.get('sweepNow')?.()).toMatchObject({ ok: true })
-    await settle()
-
-    const rows = (scope?: string): Array<{ name: string; status: string }> =>
-      harness.handlers.get('pppoeRows')?.('b1', scope) as Array<{
-        name: string
-        status: string
-      }>
-
-    expect(rows().map((row) => row.status)).toEqual(['up', 'missing'])
-    expect(rows('attention').map((row) => row.name)).toEqual(['pd00002'])
-
-    runtime.dispose?.()
-  })
-})
+// The member rows themselves come from the pool daemon now - the scope
+// narrowing and the always-visible `unwritten` row are proved against its
+// contract in openwrt-hot-path.test.ts and openwrt-pppoe-guards.test.ts.
 
 describe('the assignments a binding drawer asks for', () => {
   it('narrows to the devices whose WAN stopped working', async () => {

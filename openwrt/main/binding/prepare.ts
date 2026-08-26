@@ -14,7 +14,6 @@ import type { JobSpec } from '../jobs'
 import { recordLayout } from '../records'
 import type { BindingInstanceRecord } from '../store'
 import { carrierScopesOverlap, parseCidr, subnetsOverlap } from '../util'
-import { isPppoePrefix } from '../uci'
 import { recordEvents } from './events'
 import { lanCidr } from './pool'
 import { applyChange } from './reconcile'
@@ -43,6 +42,13 @@ import type {
   DhcpPreparation,
   TablePreparation
 } from './types'
+
+/**
+ * How many `uci set` lines travel in one batch. A fixed number rather than a
+ * rule since the PPPoE chunk-size setting left with the SSH path that needed
+ * tuning; a hundred lines is about ten kilobytes of stdin.
+ */
+const UCI_WRITE_CHUNK = 100
 
 export async function applyBinding(
   runtime: BindingRuntime,
@@ -87,8 +93,8 @@ function preparationJob(runtime: BindingRuntime, plan: BindingCreatePlan): JobSp
   const rules = runtime.options.rules()
   const timeoutMs = rules.execTimeoutSec * 1000
   const chunks: TablePreparation[][] = []
-  for (let index = 0; index < plan.tableAdds.length; index += rules.uciChunkSize) {
-    chunks.push(plan.tableAdds.slice(index, index + rules.uciChunkSize))
+  for (let index = 0; index < plan.tableAdds.length; index += UCI_WRITE_CHUNK) {
+    chunks.push(plan.tableAdds.slice(index, index + UCI_WRITE_CHUNK))
   }
   const items: JobSpec['items'] = [
     {
@@ -410,44 +416,20 @@ async function installFirewallForwardings(
     )
   }
   const prefix = `bmf${instance.slot}_`
-  // Every prefix the zone has to keep claiming: the one configured now, plus
-  // the one every existing batch was created under. Rebuilt from the records
-  // rather than appended to, so running this twice cannot leave a duplicate.
-  const prefixes = [
-    ...new Set([
-      runtime.options.rules().ifacePrefix,
-      ...runtime.store.read().batches.map((batch) => batch.prefix)
-    ])
-  ].filter((entry) => isPppoePrefix(entry))
   const lines = [
-    // This is the module-owned masquerading zone used by managed PPPoE
-    // wildcard devices. Existing DHCP/static WAN zones are left untouched.
+    // The module-owned masquerading zone this instance was created against.
+    // Existing DHCP/static WAN zones are left untouched, and so is the zone's
+    // own membership: when it is the pool zone, bm-pppoe-pool owns the
+    // `list network` entries and rebuilds them on every pool change - the old
+    // `pppoe-<prefix>+` device wildcard this path used to claim is gone with
+    // the model that needed it.
     `set firewall.${layout.zoneName}=zone`,
     `set firewall.${layout.zoneName}.name=${shQuote(layout.zoneName)}`,
     `set firewall.${layout.zoneName}.input='REJECT'`,
     `set firewall.${layout.zoneName}.output='ACCEPT'`,
     `set firewall.${layout.zoneName}.forward='REJECT'`,
     `set firewall.${layout.zoneName}.masq='1'`,
-    `set firewall.${layout.zoneName}.mtu_fix='1'`,
-    // The device claim, which this path used to leave out entirely.
-    //
-    // A binding instance can be the first thing that ever creates this zone -
-    // before any PPPoE batch exists, and `uci/firewall.ts` is the only other
-    // place that gives it members - so the zone was committed to the router
-    // with no `list network` and no `list device` at all. A memberless zone
-    // matches nothing, so this was cruft rather than an outage; but it is
-    // persistent cruft that survives reboots and that the removal path never
-    // took away, on a router the user did not ask to have it.
-    //
-    // The same `pppoe-<prefix>+` glob the PPPoE path writes, so both produce
-    // one shape. `delete` first because `add_list` appends: without it a second
-    // instance would claim the same glob twice. `network` is deliberately left
-    // alone - in `networks` mode the PPPoE path owns that list, and clearing it
-    // here would strip the membership of every batch already in the zone.
-    `delete firewall.${layout.zoneName}.device`,
-    ...prefixes.map(
-      (entry) => `add_list firewall.${layout.zoneName}.device=${shQuote(`pppoe-${entry}+`)}`
-    )
+    `set firewall.${layout.zoneName}.mtu_fix='1'`
   ]
   const cleanup: string[] = []
   for (let index = 0; index < 32; index++) {

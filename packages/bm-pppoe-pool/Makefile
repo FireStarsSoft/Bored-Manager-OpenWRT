@@ -1,22 +1,23 @@
-# bm-pppoe-pool: a pool of PPPoE sessions, dialled and watched on the router.
+# bm-pppoe-pool: pools of PPPoE sessions, owned end to end on the router.
 #
-# The module can already create one over SSH and will keep doing it on a router
-# without this package. What it cannot do from the far end of a connection is
-# create five thousand sections without five thousand round trips, notice a
-# session dropping the moment netifd says so rather than at the next poll, or
-# read a counter pass without shipping the result back over the wire.
+# 2.0.0 is the pool-of-members model. A pool is a mode (one shared account, or
+# one account per VLAN), a carrier, and a list of VLANs; every interface,
+# tagged device, routing table, MAC address and firewall membership is derived
+# from that record by this daemon. The app and LuCI only ever call ubus - no
+# other surface writes /etc/config/network or the firewall for PPPoE.
 #
-# There is a third thing, and it is the reason this package handles credentials
-# at all: a password written through uci from inside the daemon never becomes a
-# command line. /proc/<pid>/cmdline is world-readable, and the SSH path has to
-# work hard to keep passwords off it - here they simply never get there.
+# Credentials never become a command line. /proc/<pid>/cmdline is world-
+# readable; here a password arrives inline over the ubus socket or in a 0600
+# file this daemon reads and unlinks, and is written through the uci library
+# from inside the process. /etc/config/bm_pppoe itself carries the pool
+# accounts, which is why it installs 0600.
 #
 # ucode only, so PKGARCH:=all.
 
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=bm-pppoe-pool
-PKG_VERSION:=1.4.1
+PKG_VERSION:=2.0.0
 PKG_RELEASE:=1
 
 PKG_MAINTAINER:=FireStarsSoft
@@ -36,17 +37,19 @@ define Package/bm-pppoe-pool
 endef
 
 define Package/bm-pppoe-pool/description
-  Creates and watches pools of PPPoE sessions.
+  Creates and watches pools of PPPoE sessions, one interface per VLAN.
 
-  A pool is a run of `config interface` sections in /etc/config/network, each
-  with its own credentials and its own routing table. This package writes them
-  through uci from inside the service - so a password never appears in any
-  process's command line - watches netifd for every session coming up and going
-  down instead of polling for it, and redials the ones that stay down.
+  A pool is one record: a mode (one shared account or one per VLAN), a
+  carrier, and a member list. The daemon derives everything else - the
+  `config interface` sections, the tagged devices and their per-session MACs,
+  the routing tables, the firewall zone and its memberships - writes it all
+  through uci from inside the service, watches netifd for every session
+  coming up and going down, and redials the ones that stay down.
 
-  Removing it leaves every session exactly where it is. The sections belong to
-  whoever created them, not to this package, and netifd keeps dialling them
-  whether or not anything is here to watch.
+  Removing the package leaves every session exactly where it is. The sections
+  belong to the router's configuration, and netifd keeps dialling them
+  whether or not anything is here to watch. Deleting a pool is a separate,
+  explicit act, in the app, in LuCI, and in `bmpppoe delete`.
 endef
 
 define Package/bm-pppoe-pool/conffiles
@@ -81,12 +84,14 @@ define Package/bm-pppoe-pool/install
 endef
 
 # `default_postinst` has already enabled and started the service - see
-# packages/README.md - so the only thing left is the restart that makes an
-# upgrade actually run the new code, deferred and detached for the same reason
-# bm-agent's is.
+# packages/README.md - so what is left is the restart that makes an upgrade
+# actually run the new code, deferred and detached for the same reason
+# bm-agent's is, and one chmod: /etc/config/bm_pppoe now carries the pool
+# credentials, and a file kept across the upgrade keeps its old mode too.
 define Package/bm-pppoe-pool/postinst
 #!/bin/sh
 [ -n "$$IPKG_INSTROOT" ] && exit 0
+chmod 600 /etc/config/bm_pppoe >/dev/null 2>&1
 (sleep 3; /etc/init.d/bm-pppoe restart) >/dev/null 2>&1 &
 exit 0
 endef

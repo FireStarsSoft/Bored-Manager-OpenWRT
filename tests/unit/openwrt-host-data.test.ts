@@ -7,6 +7,7 @@ import { HostStore } from '../../openwrt/main/store'
 import type { Lease, RouterModel } from '../../openwrt/main/types'
 import { harnessOverHostData, hostDataDocument, type HostDataDocument } from '../helpers/host-data'
 import { sharedModuleConfig, type ModuleHarness } from '../helpers/module-harness'
+import { POOL_AGENT_INFO, routerProbeOutput } from '../helpers/router'
 
 /**
  * Everything here is one question asked four times: was it written, or was it
@@ -33,124 +34,123 @@ const settle = async (rounds = 40): Promise<void> => {
 }
 
 // ------------------------------------------------------------- PPPoE + jobs
+//
+// The batch record itself no longer lives in this document - the pool of
+// record is /etc/config/bm_pppoe on the router, kept by bm-pppoe-pool - so
+// the restart question left with it. What still has to survive a restart on
+// this side is the job history the create leaves behind.
 
-const PROBE = [
-  '===REL===',
-  "DISTRIB_ID='OpenWrt'",
-  "DISTRIB_RELEASE='25.12.0'",
-  '===BOARD===',
-  JSON.stringify({ model: 'Test Router', release: { distribution: 'OpenWrt', version: '25.12.0' } }),
-  '===TOOLS===',
-  '/sbin/ubus',
-  '/sbin/uci',
-  '/sbin/ip',
-  '/sbin/fw4',
-  '/usr/sbin/nft',
-  '/usr/sbin/pppd',
-  '===PPP===',
-  'plugin',
-  'kmod',
-  '===PKG===',
-  'apkdb',
-  '===DONE==='
-].join('\n')
-
-/** A router that accepts a two-connection create and lists the result. */
+/** A router whose pool daemon accepts a one-member create. */
 function pppoeRouter(doc: HostDataDocument): ModuleHarness {
   const harness = harnessOverHostData('openwrt', () => ok(), doc, {
-    config: sharedModuleConfig({ rules: { chunkDelayMs: 0 } })
+    config: sharedModuleConfig(null)
   })
-  harness.exec.mockImplementation(async (command, options) => {
-    const stdin = options?.stdin ?? ''
-    if (command.includes("echo '===REL==='")) return ok(PROBE)
-    if (command === 'sh -s' && stdin.includes('===CARRIER===')) {
-      return ok('===CARRIER===1\n===NETWORK===\n')
+  harness.exec.mockImplementation(async (command) => {
+    if (command.includes("echo '===REL==='")) {
+      return ok(routerProbeOutput({ agent: POOL_AGENT_INFO }))
     }
-    if (command === 'ubus -S call network.interface dump') {
-      return ok(JSON.stringify({ interface: [{ interface: 'pd00001' }, { interface: 'pd00002' }] }))
+    if (command.includes('mktemp /tmp/bm-pool.XXXXXX')) return ok('/tmp/bm-pool.doc001\n')
+    if (command.includes("cat > '/tmp/bm-pool.")) return ok()
+    if (command.includes('bm.pppoe pool_check')) {
+      return ok(JSON.stringify({ ok: true, findings: [] }))
     }
-    if (command.startsWith('nft list ruleset')) return ok('1 1')
+    if (command.includes('bm.pppoe pool_create')) {
+      return ok(JSON.stringify({ ok: true, id: 'fpt1', created: 1 }))
+    }
+    if (command.includes('bm.pppoe info')) {
+      return ok(
+        JSON.stringify({
+          name: 'bm-pppoe-pool',
+          release: '2.0.0',
+          apiVersion: 2,
+          settings: { enabled: true, counter_interval: 5, redial_after: 120, redial_batch: 20 },
+          started: 1,
+          uptime: 1,
+          pools: [
+            {
+              id: 'fpt1',
+              mode: 'multi',
+              label: '',
+              prefix: 'fpt',
+              carrier: 'eth1',
+              mac_mode: 'auto',
+              username: 'u@isp',
+              hasPassword: true,
+              table_base: 10_000,
+              service: '',
+              ac: '',
+              ac_mac: '',
+              mtu: 0,
+              keepalive: '',
+              ipv6: '0',
+              peerdns: false,
+              dns: [],
+              defaultroute: true,
+              host_uniq: '',
+              demand: 0,
+              padi_attempts: 0,
+              padi_timeout: 0,
+              pppd_options: '',
+              zone: 'bmwanpool',
+              masq: true,
+              mtu_fix: true,
+              lan_forward: true,
+              created: 1,
+              memberList: [{ vlan: 101, username: '' }],
+              members: 1,
+              up: 0,
+              dialing: 0,
+              down: 1,
+              error: 0,
+              stopped: 0,
+              unwritten: 0,
+              createdAt: 1,
+              rate: { rxBps: 0, txBps: 0 }
+            }
+          ],
+          legacy: []
+        })
+      )
+    }
+    if (command.includes('bm.pppoe sessions')) {
+      return ok(JSON.stringify({ sessions: [], limit: 500 }))
+    }
     return ok()
   })
   return harness
 }
 
-async function createBatch(harness: ModuleHarness): Promise<void> {
-  const values = { name: 'Pool', carrier: 'eth1', prefix: 'pd', listText: 'u1,p1\nu2,p2' }
-  const report = (await harness.handlers.get('pppoeBatchCheck')?.(values)) as {
-    ok: boolean
-    token?: string
-  }
-  expect(report.ok).toBe(true)
-  expect(
-    await harness.handlers.get('pppoeBatchApply')?.({
-      token: report.token,
-      values: { ...values, listFile: '', listText: '' }
-    })
-  ).toMatchObject({ ok: true })
-  await settle()
-}
-
-describe('a PPPoE batch record after the module is restarted', () => {
-  it('comes back off the document rather than out of the cache it was created in', async () => {
+describe('a PPPoE create after the module is restarted', () => {
+  it('brings the job that created it back out of the document', async () => {
     const doc = hostDataDocument()
     const first = pppoeRouter(doc)
     const running = activate(first.ctx)
     running.applyPollers?.()
     await settle()
 
-    await createBatch(first)
-    expect(first.handlers.get('pppoeBatches')?.()).toHaveLength(1)
-    running.dispose?.()
-
-    // The positive control: without a write reaching the document, everything
-    // below would be asserting that an empty module has no batches.
-    expect(doc.writes).toBeGreaterThan(0)
-
-    const second = pppoeRouter(doc)
-    const restarted = activate(second.ctx)
-
-    // Nothing has sampled this router and nothing has been created; every field
-    // here can only have come out of what the first module wrote.
-    const reloaded = second.handlers.get('pppoeBatches')?.() as Array<{ id: string }>
-    expect(reloaded).toMatchObject([{ name: 'Pool', prefix: 'pd', carrier: 'eth1', count: 2 }])
-    // The sequence range too, read back the only way a surface can see it: the
-    // section names are `prefix` plus `seqFrom..seqTo`, and they are what a
-    // later delete has to hand to UCI.
-    const rows = second.handlers.get('pppoeRows')?.(reloaded[0].id) as Array<{ name: string }>
-    expect(rows.map((row) => row.name)).toEqual(['pd00001', 'pd00002'])
-    restarted.dispose?.()
-  })
-
-  it('brings the job that created it back too', async () => {
-    const doc = hostDataDocument()
-    const first = pppoeRouter(doc)
-    const running = activate(first.ctx)
-    running.applyPollers?.()
+    const values = { mode: 'multi', id: 'fpt1', carrier: 'eth1', prefix: 'fpt', vlans: '101' }
+    const report = (await first.handlers.get('poolCreateCheck')?.(values)) as {
+      ok: boolean
+      token?: string
+    }
+    expect(report.ok).toBe(true)
+    expect(
+      await first.handlers.get('poolCreateApply')?.({ token: report.token, values })
+    ).toMatchObject({ ok: true })
     await settle()
 
-    await createBatch(first)
     // Job history is written on the ten-second debounce, so the flush that
     // dispose performs is the only thing that can have saved it.
     running.dispose?.()
+    expect(doc.writes).toBeGreaterThan(0)
 
     const second = pppoeRouter(doc)
     const restarted = activate(second.ctx)
     const jobs = (restarted.snapshots?.() as { jobs: { finished: Array<{ label: string; state: string }> } })
       .jobs
 
-    expect(jobs.finished.map((job) => job.label)).toContain('Create batch Pool (2 connections)')
+    expect(jobs.finished.map((job) => job.label)).toContain('Create pool fpt1 (1 interface)')
     expect(jobs.finished[0].state).toBe('done')
-    restarted.dispose?.()
-  })
-
-  it('does not resurrect a batch on a router whose document is empty', async () => {
-    // The other half of the same statement. If the reload above were reading
-    // anything but the document, this would find the batch as well.
-    const second = pppoeRouter(hostDataDocument())
-    const restarted = activate(second.ctx)
-
-    expect(second.handlers.get('pppoeBatches')?.()).toEqual([])
     restarted.dispose?.()
   })
 })
@@ -296,8 +296,7 @@ describe('a binding instance after the module is restarted', () => {
       rulePrefBase: DEFAULT_RULES.rulePrefBase,
       catchAllPrefBase: DEFAULT_RULES.catchAllPrefBase,
       catchAllTable: DEFAULT_RULES.catchAllTable,
-      zoneName: DEFAULT_RULES.zoneName,
-      zoneMode: DEFAULT_RULES.zoneMode
+      zoneName: DEFAULT_RULES.zoneName
     })
   })
 })

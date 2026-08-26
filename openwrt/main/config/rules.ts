@@ -9,27 +9,27 @@
  */
 import { isRecord } from '../util'
 
-export type ZoneMode = 'wildcard' | 'networks'
-
+/**
+ * The PPPoE knobs that used to live here - interface prefix, chunk sizes and
+ * delays, batch caps, the redial timer, the zone membership mode - are gone
+ * with the SSH path that consumed them. A pool records its own numbering and
+ * firewall on the router, and the daemon's watchdog has its own settings
+ * form. `tableBase` stays for two callers: the binding half numbers extra WAN
+ * tables from it, and the create form offers it as the default base.
+ */
 export interface OwrtRules {
-  ifacePrefix: string
   tableBase: number
   rulePrefBase: number
   catchAllPrefBase: number
   catchAllTable: number
-  uciChunkSize: number
-  chunkDelayMs: number
   ruleChunkLines: number
   execTimeoutSec: number
-  maxBatchRows: number
   zoneName: string
-  zoneMode: ZoneMode
   remapOnWanError: boolean
   wanErrorGraceSec: number
   wanWarnUptimeSec: number
   stickyByMac: boolean
   releaseGraceSec: number
-  autoRedialAfterMin: number
   /** Rewrite a WAN's missing `option ip4table` during the slow-tick audit. */
   autoRepairTables: boolean
   leaseFile: string
@@ -53,24 +53,18 @@ export interface OwrtConfig {
 }
 
 export const DEFAULT_RULES: OwrtRules = {
-  ifacePrefix: 'pd',
   tableBase: 10_000,
   rulePrefBase: 20_000,
   catchAllPrefBase: 29_900,
   catchAllTable: 29_999,
-  uciChunkSize: 100,
-  chunkDelayMs: 1_000,
   ruleChunkLines: 500,
   execTimeoutSec: 60,
-  maxBatchRows: 5_000,
   zoneName: 'bmwanpool',
-  zoneMode: 'wildcard',
   remapOnWanError: true,
   wanErrorGraceSec: 30,
   wanWarnUptimeSec: 60,
   stickyByMac: true,
   releaseGraceSec: 300,
-  autoRedialAfterMin: 0,
   autoRepairTables: true,
   leaseFile: '/tmp/dhcp.leases',
   maxEvents: 200,
@@ -99,15 +93,11 @@ export const RULE_BOUNDS: Record<NumericRule, { min: number; max: number; label:
   rulePrefBase: { min: 1_000, max: 28_999, label: 'Assignment rule priority base' },
   catchAllPrefBase: { min: 2_000, max: 29_999, label: 'Catch-all rule priority base' },
   catchAllTable: { min: 2_000, max: 32_766, label: 'Catch-all routing table' },
-  uciChunkSize: { min: 1, max: 1_000, label: 'UCI sessions per chunk' },
-  chunkDelayMs: { min: 0, max: 60_000, label: 'Delay between chunks (ms)' },
   ruleChunkLines: { min: 50, max: 2_000, label: 'IP-rule lines per command' },
   execTimeoutSec: { min: 10, max: 600, label: 'Job command timeout (s)' },
-  maxBatchRows: { min: 1, max: 5_000, label: 'Connections per batch' },
   wanErrorGraceSec: { min: 0, max: 3_600, label: 'WAN error grace (s)' },
   wanWarnUptimeSec: { min: 0, max: 3_600, label: 'WAN warning uptime (s)' },
   releaseGraceSec: { min: 0, max: 86_400, label: 'Lease release grace (s)' },
-  autoRedialAfterMin: { min: 0, max: 1_440, label: 'Automatic redial delay (min)' },
   maxEvents: { min: 20, max: 1_000, label: 'Saved binding events' },
   stickyCap: { min: 100, max: 10_000, label: 'Sticky mappings kept' },
   historySampleSec: { min: 5, max: 3_600, label: 'Chart sample interval (s)' }
@@ -120,7 +110,6 @@ export const BOOLEAN_KEYS = [
   'autoRepairTables'
 ] as const satisfies ReadonlyArray<keyof OwrtRules>
 
-export const IFACE_PREFIX = /^[a-z][a-z0-9]{0,3}$/
 export const UCI_NAME = /^[a-z][a-z0-9_]{0,31}$/
 
 export function validLeaseFile(value: string): boolean {
@@ -164,24 +153,11 @@ export function normalize(raw: unknown): OwrtConfig {
     }
   }
   if (
-    typeof sourceRules.ifacePrefix === 'string' &&
-    IFACE_PREFIX.test(sourceRules.ifacePrefix) &&
-    sourceRules.ifacePrefix !== DEFAULT_RULES.ifacePrefix
-  ) {
-    rules.ifacePrefix = sourceRules.ifacePrefix
-  }
-  if (
     typeof sourceRules.zoneName === 'string' &&
     UCI_NAME.test(sourceRules.zoneName) &&
     sourceRules.zoneName !== DEFAULT_RULES.zoneName
   ) {
     rules.zoneName = sourceRules.zoneName
-  }
-  if (
-    (sourceRules.zoneMode === 'wildcard' || sourceRules.zoneMode === 'networks') &&
-    sourceRules.zoneMode !== DEFAULT_RULES.zoneMode
-  ) {
-    rules.zoneMode = sourceRules.zoneMode
   }
   if (
     typeof sourceRules.leaseFile === 'string' &&
@@ -191,31 +167,19 @@ export function normalize(raw: unknown): OwrtConfig {
     rules.leaseFile = sourceRules.leaseFile
   }
 
-  // Never accept a persisted numbering layout that overlaps its own safety rule/table.
+  // Never accept a persisted numbering layout that overlaps its own safety
+  // rule/table, or leaves less room than the router half will run with.
   const candidate = { ...DEFAULT_RULES, ...rules }
-  if (candidate.rulePrefBase >= candidate.catchAllPrefBase) {
-    delete rules.rulePrefBase
-    delete rules.catchAllPrefBase
-  }
-  const spanned = { ...DEFAULT_RULES, ...rules }
-  // The same span test the tables get, for the preferences. One client rule per
-  // WAN, so a range narrower than a batch runs into the catch-all preferences.
-  // The floor applies whatever the batch size: bm-wanbind refuses an instance
-  // with less than that between the two, and refuses it by leaving the section
-  // out of its own list - which shows up as an instance with no devices, no
-  // error and nothing to say why.
   if (
-    spanned.rulePrefBase + spanned.maxBatchRows >= spanned.catchAllPrefBase ||
-    spanned.catchAllPrefBase - spanned.rulePrefBase < MIN_PREF_SPAN
+    candidate.rulePrefBase >= candidate.catchAllPrefBase ||
+    candidate.catchAllPrefBase - candidate.rulePrefBase < MIN_PREF_SPAN
   ) {
     delete rules.rulePrefBase
     delete rules.catchAllPrefBase
-    delete rules.maxBatchRows
   }
   const checked = { ...DEFAULT_RULES, ...rules }
-  if (checked.tableBase + checked.maxBatchRows >= checked.catchAllTable) {
+  if (checked.tableBase + MIN_PREF_SPAN >= checked.catchAllTable) {
     delete rules.tableBase
-    delete rules.maxBatchRows
     delete rules.catchAllTable
   }
 

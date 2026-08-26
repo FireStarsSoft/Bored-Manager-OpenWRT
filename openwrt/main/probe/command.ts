@@ -363,6 +363,23 @@ function agentFacts(body: string): AgentFacts {
       ? (guard as Record<string, unknown>)
       : null
 
+  const features = (Array.isArray(info.features) ? info.features : [])
+    .map((entry): AgentFacts['features'][number] | null => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null
+      const record = entry as Record<string, unknown>
+      const name = typeof record.name === 'string' ? record.name : ''
+      if (!name) return null
+      return {
+        name,
+        version: typeof record.version === 'string' ? record.version : '',
+        apiVersion: number(record.apiVersion),
+        provides: Array.isArray(record.provides)
+          ? record.provides.filter((value): value is string => typeof value === 'string')
+          : []
+      }
+    })
+    .filter((entry): entry is AgentFacts['features'][number] => entry !== null)
+
   return {
     installed: true,
     // `bmctl info --json` carries `service`; a ubus reply does not, and a ubus
@@ -375,6 +392,7 @@ function agentFacts(body: string): AgentFacts {
     provides: Array.isArray(info.provides)
       ? info.provides.filter((name): name is string => typeof name === 'string')
       : [],
+    features,
     guard:
       guardRecord && guardRecord.armed === true
         ? {
