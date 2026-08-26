@@ -175,8 +175,14 @@ export interface OpenWrtCapabilities {
   hasFw4: boolean
   hasPppoe: boolean
   hasDnsmasq: boolean
-  /** `ip rule` actually ran. BusyBox `ip` on some targets has no rule support. */
+  /**
+   * This router's `ip` accepts a numeric routing table, which is the only
+   * thing WAN binding ever asks of it. Deliberately not "`ip rule` answers":
+   * BusyBox's applet lists rules perfectly well and then refuses the tables.
+   */
   hasIpRule: boolean
+  /** Where `ip` resolves, and whether an unused iproute2 sits beside it. */
+  ip: ProbeFacts['ip']
   /**
    * The three things a binary in PATH says nothing about. An installed dnsmasq
    * with a stopped service is the case that used to read as `hasDnsmasq: true`
@@ -223,6 +229,16 @@ export interface OpenWrtCapabilities {
   /** Something is missing that this module knows how to install from here. */
   setupNeeded: boolean
   /**
+   * Which automation is being held back by something installable, so each one
+   * can offer the installer on its own tab rather than sending the user to
+   * another page - or showing an installer for a package it does not use.
+   *
+   * A spec cannot ask "either of these two", and binding needs both `ip rule`
+   * and dnsmasq, so the disjunction is decided here rather than duplicated into
+   * two identical conditionals in the page.
+   */
+  missingFor: { pppoe: boolean; binding: boolean }
+  /**
    * Whether an install could run at all: a working router, with apk, logged
    * in as root. `setupNeeded` is this plus "and something is missing", and
    * folding the two together left the install form unreachable on a router
@@ -252,6 +268,30 @@ export interface ProbeFacts {
   /** -1 when unknown. */
   overlayFreeKb: number
   hasIpRule: boolean
+  /**
+   * Where `ip` actually resolves on this router, and whether a working
+   * iproute2 is sitting beside it unused.
+   *
+   * `hasIpRule` on its own cannot tell three very different routers apart: one
+   * that never had iproute2, one that has it at `/usr/libexec/ip-full` while
+   * `/sbin/ip` is still the BusyBox symlink (an install that ran and did not
+   * switch the alternative), and one whose kernel has no policy routing at all,
+   * where no package will ever help. All three used to end at the same
+   * sentence and the same offer to install `ip-full` again.
+   *
+   * Every string is `''` and every flag `false` when the router was not asked
+   * or could not answer - "not known" has to stay distinguishable from "no".
+   */
+  ip: {
+    /** What `command -v ip` printed, e.g. `/sbin/ip`. */
+    path: string
+    /** What that resolves to, e.g. `/bin/busybox` or `/usr/libexec/ip-full`. */
+    real: string
+    /** `/usr/libexec/ip-full` exists and is executable. */
+    fullPresent: boolean
+    /** ...and answers a numeric routing table when called directly. */
+    fullWorks: boolean
+  }
   services: { dnsmasq: ServiceState; netifd: ServiceState; fw4: ServiceState }
   /** Already filtered to below `rulePrefBase` and capped by the router. */
   foreignRules: readonly ForeignRule[]
@@ -304,6 +344,7 @@ export function emptyFacts(): ProbeFacts {
     uid: -1,
     overlayFreeKb: -1,
     hasIpRule: false,
+    ip: { path: '', real: '', fullPresent: false, fullWorks: false },
     services: { dnsmasq: 'unknown', netifd: 'unknown', fw4: 'unknown' },
     foreignRules: [],
     foreignRuleCount: 0,

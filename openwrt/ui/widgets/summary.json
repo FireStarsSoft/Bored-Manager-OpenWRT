@@ -3,7 +3,11 @@
     {
       "type": "conditional",
       "when": {
-        "source": { "kind": "stream", "event": "capabilities", "path": "state" },
+        "source": {
+          "kind": "stream",
+          "event": "capabilities",
+          "path": "state"
+        },
         "op": "eq",
         "value": "blocked"
       },
@@ -21,7 +25,11 @@
         {
           "type": "conditional",
           "when": {
-            "source": { "kind": "stream", "event": "capabilities", "path": "state" },
+            "source": {
+              "kind": "stream",
+              "event": "capabilities",
+              "path": "state"
+            },
             "op": "eq",
             "value": "connecting"
           },
@@ -29,14 +37,20 @@
             {
               "type": "note",
               "title": "Waiting for the router",
-              "lines": ["This card fills in as soon as the router answers over SSH."]
+              "lines": [
+                "This card fills in as soon as the router answers over SSH."
+              ]
             }
           ],
           "else": [
             {
               "type": "conditional",
               "when": {
-                "source": { "kind": "stream", "event": "capabilities", "path": "state" },
+                "source": {
+                  "kind": "stream",
+                  "event": "capabilities",
+                  "path": "state"
+                },
                 "op": "eq",
                 "value": "checking"
               },
@@ -54,7 +68,11 @@
                 {
                   "type": "conditional",
                   "when": {
-                    "source": { "kind": "stream", "event": "capabilities", "path": "state" },
+                    "source": {
+                      "kind": "stream",
+                      "event": "capabilities",
+                      "path": "state"
+                    },
                     "op": "eq",
                     "value": "attention"
                   },
@@ -74,28 +92,65 @@
                   "blocks": [
                     {
                       "type": "pie",
-                      "source": { "kind": "stream", "event": "overview", "path": "poolAgg" },
-                      "center": { "key": "total", "label": "WANs" },
+                      "source": {
+                        "kind": "stream",
+                        "event": "overview",
+                        "path": "poolAgg"
+                      },
+                      "center": {
+                        "key": "total",
+                        "label": "WANs"
+                      },
                       "slices": [
-                        { "key": "up", "label": "Up", "status": "ok" },
-                        { "key": "dialing", "label": "Dialing", "status": "warn" },
-                        { "key": "error", "label": "Error", "status": "bad" },
-                        { "key": "stopped", "label": "Stopped", "status": "unknown" }
+                        {
+                          "key": "up",
+                          "label": "Up",
+                          "status": "ok"
+                        },
+                        {
+                          "key": "dialing",
+                          "label": "Dialing",
+                          "status": "warn"
+                        },
+                        {
+                          "key": "error",
+                          "label": "Error",
+                          "status": "bad"
+                        },
+                        {
+                          "key": "stopped",
+                          "label": "Stopped",
+                          "status": "unknown"
+                        }
                       ],
                       "emptyText": "No managed WANs yet"
                     },
                     {
                       "type": "conditional",
                       "when": {
-                        "source": { "kind": "stream", "event": "overview", "path": "counts.wanErr" },
+                        "source": {
+                          "kind": "stream",
+                          "event": "overview",
+                          "path": "counts.wanErr"
+                        },
                         "op": "gt",
                         "value": 0
                       },
                       "blocks": [
                         {
                           "type": "keyValue",
-                          "source": { "kind": "stream", "event": "overview", "path": "counts" },
-                          "rows": [{ "key": "wanErr", "label": "WANs failing", "format": "number" }]
+                          "source": {
+                            "kind": "stream",
+                            "event": "overview",
+                            "path": "counts"
+                          },
+                          "rows": [
+                            {
+                              "key": "wanErr",
+                              "label": "WANs failing",
+                              "format": "number"
+                            }
+                          ]
                         },
                         {
                           "type": "note",
@@ -114,11 +169,27 @@
                   "blocks": [
                     {
                       "type": "keyValue",
-                      "source": { "kind": "stream", "event": "overview", "path": "counts" },
+                      "source": {
+                        "kind": "stream",
+                        "event": "overview",
+                        "path": "counts"
+                      },
                       "rows": [
-                        { "key": "devices", "label": "On DHCP", "format": "number" },
-                        { "key": "bound", "label": "Bound to a WAN", "format": "number" },
-                        { "key": "waiting", "label": "Waiting for a WAN", "format": "number" }
+                        {
+                          "key": "devices",
+                          "label": "On DHCP",
+                          "format": "number"
+                        },
+                        {
+                          "key": "bound",
+                          "label": "Bound to a WAN",
+                          "format": "number"
+                        },
+                        {
+                          "key": "waiting",
+                          "label": "Waiting for a WAN",
+                          "format": "number"
+                        }
                       ]
                     }
                   ]

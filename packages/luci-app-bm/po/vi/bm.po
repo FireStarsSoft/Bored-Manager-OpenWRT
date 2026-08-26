@@ -64,7 +64,7 @@ msgstr "đã chọn %d"
 msgid "%s %s, %s"
 msgstr "%s %s, %s"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:202
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:217
 msgid "%s ago"
 msgstr "%s trước"
 
@@ -100,7 +100,7 @@ msgstr "0 là không dùng. Thiết bị VLAN sẽ được tạo nếu cần."
 msgid "1 to 4 characters, starting with a letter. Sessions are named prefix00001 upwards."
 msgstr "1 đến 4 ký tự, bắt đầu bằng chữ cái. Phiên được đặt tên prefix00001 trở lên."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:345
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:360
 msgid "A change is waiting to be confirmed"
 msgstr "Một thay đổi đang chờ được xác nhận"
 
@@ -517,7 +517,7 @@ msgstr "Tiền tố giao diện"
 msgid "Its ip rules are taken off before the section is removed. After the section is gone nothing knows they were its."
 msgstr "Các ip rule của nó được gỡ trước khi xoá section. Sau khi section mất đi thì không còn gì biết chúng là của nó nữa."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:371
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:386
 msgid "Keep these changes"
 msgstr "Giữ thay đổi này"
 
@@ -525,7 +525,7 @@ msgstr "Giữ thay đổi này"
 msgid "Kept before restoring %s"
 msgstr "Giữ lại trước khi khôi phục %s"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:368
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:383
 msgid "Kept. The countdown has been cancelled."
 msgstr "Đã giữ. Đồng hồ đếm ngược đã được huỷ."
 
@@ -769,7 +769,7 @@ msgstr "Những nhóm mà chính router này tự quay số. Phiên được the
 msgid "Prefix"
 msgstr "Tiền tố"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:360
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:375
 msgid "Put back. The router is reloading now."
 msgstr "Đã đưa về như cũ. Router đang nạp lại."
 
@@ -789,7 +789,7 @@ msgstr "Đọc lại router và báo phiên bản nó đang trả lời"
 msgid "Reading the snapshot..."
 msgstr "Đang đọc bản lưu..."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:355
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:370
 msgid "Reason given: %s"
 msgstr "Lý do đã ghi: %s"
 
@@ -1033,7 +1033,7 @@ msgstr "Bản thân các tài khoản không bị đụng tới; chúng nằm �
 msgid "The bm-wanbind service is not answering, so the numbers below are missing: %s"
 msgstr "Dịch vụ bm-wanbind không trả lời, nên các con số bên dưới bị thiếu: %s"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:110
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:125
 msgid "The call failed and the router did not say why."
 msgstr "Lệnh gọi hỏng và router không nói vì sao."
 
@@ -1046,7 +1046,7 @@ msgstr "Không áp được thay đổi: %s"
 msgid "The client rule priority has to be below the catch-all priority, or there is no range to write client rules in."
 msgstr "Ưu tiên rule của máy khách phải thấp hơn ưu tiên của luật chặn dự phòng, nếu không thì không còn dải nào để ghi rule."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:346
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:361
 msgid "The countdown has run out"
 msgstr "Đồng hồ đếm ngược đã hết giờ"
 
@@ -1087,9 +1087,13 @@ msgstr "Máy chủ phát hành đưa ra %s còn router này trả lời %s, và 
 msgid "The release server offers %s; this router is on %s."
 msgstr "Máy chủ phát hành đưa ra %s; router này đang ở %s."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:108
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:123
 msgid "The router did not answer. The connection may have gone."
 msgstr "Router không trả lời. Có thể kết nối đã mất."
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:116
+msgid "The router failed that call without saying why, and the daemon may have stopped. Run \"logread -e bm-\" on the router."
+msgstr "Router không thực hiện được lệnh gọi đó và không nói vì sao; có thể daemon đã dừng. Hãy chạy \"logread -e bm-\" trên router."
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:172
 msgid "The router had nothing to send for that snapshot."
@@ -1111,7 +1115,7 @@ msgstr "Router đã chạy một lượt quét đầy đủ."
 msgid "The router keeps a copy of its own configuration before every change it makes, and can put one back without anybody being able to reach it."
 msgstr "Router giữ một bản sao cấu hình của chính nó trước mọi thay đổi nó thực hiện, và có thể đưa một bản về mà không cần ai liên lạc được với nó."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:104
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:109
 msgid "The router rejected the arguments of that call."
 msgstr "Router từ chối các tham số của lệnh gọi đó."
 
@@ -1119,7 +1123,7 @@ msgstr "Router từ chối các tham số của lệnh gọi đó."
 msgid "The router stopped at %d rows. Narrow this down with the filter above, or look at one pool at a time."
 msgstr "Router dừng ở %d dòng. Hãy thu hẹp bằng bộ lọc bên trên, hoặc xem từng nhóm một."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:106
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:111
 msgid "The router took too long to answer."
 msgstr "Router trả lời quá lâu."
 
@@ -1127,7 +1131,7 @@ msgstr "Router trả lời quá lâu."
 msgid "The router would not do it."
 msgstr "Router không chịu làm việc đó."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:152
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:167
 msgid "The router would not do that, and did not say why."
 msgstr "Router không chịu làm việc đó, và không nói vì sao."
 
@@ -1201,6 +1205,10 @@ msgstr "Các trang này được dựng từ những gì bm-agent báo cáo, và
 msgid "This login is not allowed to make that call. The ACL that grants it is luci-app-bm."
 msgstr "Tài khoản đăng nhập này không được phép gọi lệnh đó. ACL cấp quyền là luci-app-bm."
 
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:121
+msgid "This login is older than the ACL that allows these calls. Log out of LuCI and back in; if that is not enough, run \"/etc/init.d/rpcd reload\" on the router."
+msgstr "Phiên đăng nhập này cũ hơn ACL cho phép các lệnh đó. Hãy đăng xuất LuCI rồi đăng nhập lại; nếu vẫn chưa đủ, chạy \"/etc/init.d/rpcd reload\" trên router."
+
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:208
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:156
 msgid "This page is drawn from what the router reports, and bm-agent did not answer: %s"
@@ -1238,7 +1246,7 @@ msgstr "Router này chưa chụp bản lưu nào. Một bản sẽ được ch�
 msgid "This router is on %s. Signed by key %s, fetched from %s."
 msgstr "Router này đang ở %s. Ký bằng khoá %s, tải từ %s."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:350
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:365
 msgid "This router is putting its configuration back now. It will be a moment."
 msgstr "Router đang đưa cấu hình về như cũ. Sẽ mất một lát."
 
@@ -1246,7 +1254,7 @@ msgstr "Router đang đưa cấu hình về như cũ. Sẽ mất một lát."
 msgid "This router knows of no sessions at all."
 msgstr "Router này không biết phiên nào cả."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:349
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:364
 msgid "This router will put its configuration back in %s unless somebody keeps the change."
 msgstr "Router này sẽ đưa cấu hình về như cũ sau %s nữa, trừ khi có người giữ thay đổi lại."
 
@@ -1275,7 +1283,7 @@ msgstr "Gõ tên instance để xác nhận:"
 msgid "Type the pool name to confirm:"
 msgstr "Gõ tên nhóm để xác nhận:"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:363
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:378
 msgid "Undo now"
 msgstr "Hoàn tác ngay"
 

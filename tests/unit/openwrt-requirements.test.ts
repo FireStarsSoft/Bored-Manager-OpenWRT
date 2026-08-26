@@ -133,7 +133,7 @@ describe('what the gate stops', () => {
     const result = await owrt.call('bindingStart', 'bind_1')
 
     expect((result as OkResult).ok).toBe(false)
-    expect(errorOf(result)).toContain('no rule support')
+    expect(errorOf(result)).toContain('steer traffic by routing table')
     expect(errorOf(result)).toContain('Install missing packages')
     owrt.dispose()
   })

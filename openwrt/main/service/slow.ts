@@ -19,6 +19,7 @@ import {
 import type { OpenWrtSlowSample } from '../types'
 import { EXEC_TIMEOUT_MS, SLOW_COMMAND } from './command'
 import { noteError, reportHealth } from './health'
+import { sampleHistory } from './history'
 import { isCurrent, type SweepRuntime } from './runtime'
 
 /**
@@ -101,25 +102,8 @@ export async function sampleSlow(runtime: SweepRuntime, generation: number): Pro
     }
   }
   if (!isCurrent(runtime, generation)) return
-  const overview = runtime.overview
-  if (overview && overview.t !== runtime.historyModelAt) {
-    runtime.historyModelAt = overview.t
-    runtime.ctx.addHistory({
-      t: sample.t,
-      wanUp: overview.counts.wanUp,
-      wanErr: overview.counts.wanErr,
-      devices: overview.counts.devices,
-      // Kept next to the device count on purpose: "40 devices" says nothing on
-      // its own, and reading it against how many of them held a WAN is the
-      // only way to see a pool that ran out overnight.
-      bound: overview.counts.bound,
-      waiting: overview.counts.waiting,
-      rx: overview.poolAgg.rx,
-      tx: overview.poolAgg.tx,
-      // Persisted alongside the traffic so the history charts can show a
-      // router that ran out of memory next to the throughput that stopped.
-      load1: overview.sys.load1,
-      memPct: overview.sys.memPct
-    })
-  }
+  // The floor under the fast tick's own sampling: a router whose fast sweep has
+  // stalled still lands on the chart at the slow cadence, and one running
+  // normally has already had this offered to it several times since.
+  sampleHistory(runtime, sample.t)
 }

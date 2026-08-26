@@ -3,7 +3,11 @@
     {
       "type": "conditional",
       "when": {
-        "source": { "kind": "stream", "event": "capabilities", "path": "state" },
+        "source": {
+          "kind": "stream",
+          "event": "capabilities",
+          "path": "state"
+        },
         "op": "eq",
         "value": "blocked"
       },
@@ -14,12 +18,27 @@
           "blocks": [
             {
               "type": "keyValue",
-              "source": { "kind": "stream", "event": "capabilities" },
+              "source": {
+                "kind": "stream",
+                "event": "capabilities"
+              },
               "rows": [
-                { "key": "stateLabel", "label": "Status" },
-                { "key": "release", "label": "Release" },
-                { "key": "board", "label": "Board" },
-                { "key": "problem", "label": "Problem" }
+                {
+                  "key": "stateLabel",
+                  "label": "Status"
+                },
+                {
+                  "key": "release",
+                  "label": "Release"
+                },
+                {
+                  "key": "board",
+                  "label": "Board"
+                },
+                {
+                  "key": "problem",
+                  "label": "Problem"
+                }
               ]
             },
             {
@@ -33,7 +52,12 @@
             },
             {
               "type": "actions",
-              "actions": [{ "label": "Check again", "method": "sweepNow" }]
+              "actions": [
+                {
+                  "label": "Check again",
+                  "method": "sweepNow"
+                }
+              ]
             }
           ]
         }
@@ -42,7 +66,11 @@
         {
           "type": "conditional",
           "when": {
-            "source": { "kind": "stream", "event": "capabilities", "path": "state" },
+            "source": {
+              "kind": "stream",
+              "event": "capabilities",
+              "path": "state"
+            },
             "op": "eq",
             "value": "connecting"
           },
@@ -60,7 +88,11 @@
             {
               "type": "conditional",
               "when": {
-                "source": { "kind": "stream", "event": "capabilities", "path": "state" },
+                "source": {
+                  "kind": "stream",
+                  "event": "capabilities",
+                  "path": "state"
+                },
                 "op": "eq",
                 "value": "checking"
               },
@@ -79,16 +111,33 @@
                     },
                     {
                       "type": "keyValue",
-                      "source": { "kind": "stream", "event": "capabilities" },
+                      "source": {
+                        "kind": "stream",
+                        "event": "capabilities"
+                      },
                       "rows": [
-                        { "key": "stateLabel", "label": "Status" },
-                        { "key": "release", "label": "Release" },
-                        { "key": "board", "label": "Board" }
+                        {
+                          "key": "stateLabel",
+                          "label": "Status"
+                        },
+                        {
+                          "key": "release",
+                          "label": "Release"
+                        },
+                        {
+                          "key": "board",
+                          "label": "Board"
+                        }
                       ]
                     },
                     {
                       "type": "actions",
-                      "actions": [{ "label": "Check now", "method": "sweepNow" }]
+                      "actions": [
+                        {
+                          "label": "Check now",
+                          "method": "sweepNow"
+                        }
+                      ]
                     }
                   ]
                 }
@@ -97,7 +146,11 @@
                 {
                   "type": "conditional",
                   "when": {
-                    "source": { "kind": "stream", "event": "capabilities", "path": "state" },
+                    "source": {
+                      "kind": "stream",
+                      "event": "capabilities",
+                      "path": "state"
+                    },
                     "op": "eq",
                     "value": "attention"
                   },
@@ -115,7 +168,11 @@
                 {
                   "type": "conditional",
                   "when": {
-                    "source": { "kind": "stream", "event": "overview", "path": "health.fastOk" },
+                    "source": {
+                      "kind": "stream",
+                      "event": "overview",
+                      "path": "health.fastOk"
+                    },
                     "op": "eq",
                     "value": false
                   },
@@ -135,10 +192,21 @@
                         },
                         {
                           "type": "keyValue",
-                          "source": { "kind": "stream", "event": "overview", "path": "health" },
+                          "source": {
+                            "kind": "stream",
+                            "event": "overview",
+                            "path": "health"
+                          },
                           "rows": [
-                            { "key": "lastError", "label": "Reason" },
-                            { "key": "lastFastT", "label": "Age of the frozen sample", "format": "duration" }
+                            {
+                              "key": "lastError",
+                              "label": "Reason"
+                            },
+                            {
+                              "key": "lastFastT",
+                              "label": "Age of the frozen sample",
+                              "format": "duration"
+                            }
                           ]
                         }
                       ]
@@ -172,7 +240,11 @@
                 {
                   "type": "conditional",
                   "when": {
-                    "source": { "kind": "stream", "event": "overview", "path": "health.dumpOk" },
+                    "source": {
+                      "kind": "stream",
+                      "event": "overview",
+                      "path": "health.dumpOk"
+                    },
                     "op": "eq",
                     "value": false
                   },
@@ -193,10 +265,21 @@
                         },
                         {
                           "type": "keyValue",
-                          "source": { "kind": "stream", "event": "overview", "path": "health" },
+                          "source": {
+                            "kind": "stream",
+                            "event": "overview",
+                            "path": "health"
+                          },
                           "rows": [
-                            { "key": "lastError", "label": "Reason" },
-                            { "key": "lastFastT", "label": "Age of the last fast sample", "format": "duration" }
+                            {
+                              "key": "lastError",
+                              "label": "Reason"
+                            },
+                            {
+                              "key": "lastFastT",
+                              "label": "Age of the last fast sample",
+                              "format": "duration"
+                            }
                           ]
                         }
                       ]
@@ -206,7 +289,11 @@
                 {
                   "type": "conditional",
                   "when": {
-                    "source": { "kind": "stream", "event": "ui", "path": "hintsOn" },
+                    "source": {
+                      "kind": "stream",
+                      "event": "ui",
+                      "path": "hintsOn"
+                    },
                     "op": "eq",
                     "value": true
                   },
@@ -218,330 +305,1060 @@
                         "WAN-pool traffic is aggregated on the router; per-session counters are deliberately not transferred.",
                         "At large interface counts the full interface dump runs every second or third fast tick, so WAN state can lag by up to three update cycles.",
                         "All live figures come from one batched SSH probe per tick. Its speed is an app setting rather than a module one: Settings, General, Update intervals.",
-                        "History is read back from disk and is written once per slow sweep, so its resolution is coarser than the live tiles above it."
+                        "History is read back from disk, at whatever Chart sample interval is set under Module settings, Display & charts. The live tiles above the charts do not wait for it - they move on every fast tick."
                       ]
                     }
                   ]
                 },
                 {
-                  "type": "section",
-                  "title": "Router",
-                  "columns": 2,
-                  "slowTarget": "openwrt",
-                  "slowAt": { "kind": "stream", "event": "overview", "path": "slowAt" },
-                  "blocks": [
+                  "type": "subnav",
+                  "initial": "overview",
+                  "items": [
                     {
-                      "type": "keyValue",
-                      "source": { "kind": "stream", "event": "capabilities" },
-                      "rows": [
-                        { "key": "stateLabel", "label": "Status" },
-                        { "key": "release", "label": "OpenWRT release" },
-                        { "key": "board", "label": "Board" }
-                      ]
-                    },
-                    {
-                      "type": "keyValue",
-                      "source": { "kind": "stream", "event": "overview", "path": "sys" },
-                      "rows": [
-                        { "key": "bootAt", "label": "Up since", "format": "duration" },
-                        { "key": "load1", "label": "Load (1 minute)", "format": "number" },
-                        { "key": "memUsed", "label": "Memory in use", "format": "bytes" },
-                        { "key": "memTotal", "label": "Memory fitted", "format": "bytes" }
-                      ]
-                    },
-                    {
-                      "type": "actions",
-                      "actions": [{ "label": "Refresh now", "method": "sweepNow" }]
-                    }
-                  ]
-                },
-                {
-                  "type": "section",
-                  "title": "Live",
-                  "columns": 3,
-                  "slowTarget": "openwrt",
-                  "slowAt": { "kind": "stream", "event": "overview", "path": "t" },
-                  "blocks": [
-                    {
-                      "type": "stat",
-                      "label": "DHCP devices",
-                      "source": { "kind": "stream", "event": "overview", "path": "counts.devices" },
-                      "format": "number",
-                      "spark": { "source": { "kind": "stream", "event": "series" }, "key": "devices" }
-                    },
-                    {
-                      "type": "stat",
-                      "label": "WAN up",
-                      "source": { "kind": "stream", "event": "overview", "path": "counts.wanUp" },
-                      "format": "number",
-                      "spark": { "source": { "kind": "stream", "event": "series" }, "key": "wanUp" }
-                    },
-                    {
-                      "type": "stat",
-                      "label": "WAN errors",
-                      "source": { "kind": "stream", "event": "overview", "path": "counts.wanErr" },
-                      "format": "number",
-                      "spark": { "source": { "kind": "stream", "event": "series" }, "key": "wanErr" }
-                    },
-                    {
-                      "type": "stat",
-                      "label": "Devices bound to a WAN",
-                      "source": { "kind": "stream", "event": "overview", "path": "counts.bound" },
-                      "format": "number",
-                      "spark": { "source": { "kind": "stream", "event": "series" }, "key": "bound" }
-                    },
-                    {
-                      "type": "stat",
-                      "label": "Devices waiting for a WAN",
-                      "source": { "kind": "stream", "event": "overview", "path": "counts.waiting" },
-                      "format": "number",
-                      "spark": { "source": { "kind": "stream", "event": "series" }, "key": "waiting" }
-                    },
-                    {
-                      "type": "stat",
-                      "label": "Pool receive",
-                      "source": { "kind": "stream", "event": "overview", "path": "poolAgg.rxRate" },
-                      "format": "rate",
-                      "spark": { "source": { "kind": "stream", "event": "series" }, "key": "rx" }
-                    },
-                    {
-                      "type": "stat",
-                      "label": "Pool transmit",
-                      "source": { "kind": "stream", "event": "overview", "path": "poolAgg.txRate" },
-                      "format": "rate",
-                      "spark": { "source": { "kind": "stream", "event": "series" }, "key": "tx" }
-                    },
-                    {
-                      "type": "meter",
-                      "label": "Router memory in use",
-                      "source": { "kind": "stream", "event": "overview", "path": "sys.memPct" },
-                      "format": "pct",
-                      "max": 100
-                    }
-                  ]
-                },
-                {
-                  "type": "section",
-                  "title": "History",
-                  "columns": 2,
-                  "slowTarget": "openwrt",
-                  "slowAt": { "kind": "stream", "event": "overview", "path": "slowAt" },
-                  "blocks": [
-                    {
-                      "type": "chart",
-                      "title": "WAN-pool throughput",
-                      "kind": "area",
-                      "source": {
-                        "kind": "history",
-                        "stream": "openwrt",
-                        "keys": ["rx", "tx"],
-                        "liveEvent": "series"
-                      },
-                      "format": "rate",
-                      "window": 21600,
-                      "series": [
-                        { "key": "rx", "label": "Receive", "color": "download" },
-                        { "key": "tx", "label": "Transmit", "color": "upload" }
-                      ]
-                    },
-                    {
-                      "type": "chart",
-                      "title": "WAN pool and devices",
-                      "kind": "line",
-                      "source": {
-                        "kind": "history",
-                        "stream": "openwrt",
-                        "keys": ["wanUp", "wanErr", "devices"],
-                        "liveEvent": "series"
-                      },
-                      "format": "number",
-                      "window": 21600,
-                      "series": [
-                        { "key": "wanUp", "label": "WAN up", "color": "success" },
-                        { "key": "wanErr", "label": "WAN error", "color": "destructive" },
-                        { "key": "devices", "label": "DHCP devices", "color": "muted", "axis": "right" }
-                      ]
-                    },
-                    {
-                      "type": "chart",
-                      "title": "Devices bound and waiting",
-                      "kind": "area",
-                      "source": {
-                        "kind": "history",
-                        "stream": "openwrt",
-                        "keys": ["bound", "waiting"],
-                        "liveEvent": "series"
-                      },
-                      "format": "number",
-                      "window": 21600,
-                      "stacked": true,
-                      "series": [
-                        { "key": "bound", "label": "Bound to a WAN", "color": "success" },
-                        { "key": "waiting", "label": "Waiting for a WAN", "color": "warning" }
-                      ]
-                    },
-                    {
-                      "type": "chart",
-                      "title": "Router health",
-                      "kind": "line",
-                      "source": {
-                        "kind": "history",
-                        "stream": "openwrt",
-                        "keys": ["load1", "memPct"],
-                        "liveEvent": "series"
-                      },
-                      "decimals": 2,
-                      "window": 21600,
-                      "series": [
-                        { "key": "load1", "label": "Load (1 minute)", "color": "cpu" },
-                        { "key": "memPct", "label": "Memory", "color": "mem", "axis": "right", "format": "pct" }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "type": "section",
-                  "title": "Interfaces outside the managed PPPoE pool",
-                  "slowTarget": "openwrt",
-                  "slowAt": { "kind": "stream", "event": "overview", "path": "t" },
-                  "blocks": [
-                    {
-                      "type": "note",
-                      "title": "This table is a sample, not the whole router",
-                      "lines": [
-                        "Managed PPPoE sessions are never listed here - there can be thousands of them, and they are summarised by the WAN pool tiles above instead. The interfaces that are left are capped as well, because the whole payload has a per-tick size budget.",
-                        "Not listed below counts both: every managed pool session, plus anything past that cap. When it is large, the router shell on Module settings is the way to read the full list."
-                      ]
-                    },
-                    {
-                      "type": "keyValue",
-                      "source": { "kind": "stream", "event": "overview", "path": "counts" },
-                      "rows": [
-                        { "key": "ifTotal", "label": "Interfaces on this router", "format": "number" },
-                        { "key": "ifOmitted", "label": "Not listed below", "format": "number" }
-                      ]
-                    },
-                    {
-                      "type": "table",
-                      "source": { "kind": "stream", "event": "overview", "path": "ifaces" },
-                      "rowKey": "name",
-                      "columns": [
-                        { "key": "name", "label": "Interface" },
-                        { "key": "proto", "label": "Protocol" },
-                        { "key": "device", "label": "Device" },
-                        { "key": "statusBadges", "label": "State", "format": "badges", "sortable": false },
-                        { "key": "ipv4", "label": "IPv4" },
-                        { "key": "rxRate", "label": "Receive", "format": "rate", "align": "right" },
-                        { "key": "txRate", "label": "Transmit", "format": "rate", "align": "right" },
-                        { "key": "upSince", "label": "Up for", "format": "duration", "align": "right" }
-                      ],
-                      "sortDefault": { "key": "name", "dir": "asc" },
-                      "filterKeys": ["name", "proto", "device", "ipv4"],
-                      "emptyText": "No interfaces have been sampled yet"
-                    }
-                  ]
-                },
-                {
-                  "type": "section",
-                  "title": "DHCP devices",
-                  "slowTarget": "openwrt",
-                  "slowAt": { "kind": "stream", "event": "overview", "path": "t" },
-                  "blocks": [
-                    {
-                      "type": "note",
-                      "title": "Reassign and Unassign need an instance behind the device",
-                      "lines": [
-                        "Both act through the WAN Binding instance that owns the device's LAN. Group by binding state, or read the Binding column: a row marked unmanaged has no instance behind it, and both buttons refuse it and say so.",
-                        "To bring a LAN under management, create an instance for it on the Automation page, Create tab."
-                      ]
-                    },
-                    {
-                      "type": "table",
-                      "source": { "kind": "invoke", "method": "deviceRows", "intervalKey": "openwrt" },
-                      "rowKey": "mac",
-                      "columns": [
-                        { "key": "host", "label": "Host" },
-                        { "key": "mac", "label": "MAC" },
-                        { "key": "ip", "label": "IPv4" },
-                        { "key": "lan", "label": "LAN" },
-                        { "key": "wan", "label": "Assigned WAN" },
-                        { "key": "bindingStatus", "label": "Binding state" },
-                        { "key": "bindingBadges", "label": "Binding", "format": "badges", "sortable": false },
-                        { "key": "expires", "label": "Lease expires", "align": "right" }
-                      ],
-                      "sortDefault": { "key": "host", "dir": "asc" },
-                      "filterKeys": ["host", "mac", "ip", "lan", "wan", "bindingStatus"],
-                      "groupModes": [
-                        { "id": "lan", "label": "By LAN", "key": "lan" },
-                        { "id": "wan", "label": "By WAN", "key": "wan" },
-                        { "id": "binding", "label": "By binding state", "key": "bindingStatus" }
-                      ],
-                      "rowActions": [
+                      "id": "overview",
+                      "label": "Overview",
+                      "icon": "Gauge",
+                      "blocks": [
                         {
-                          "label": "Reassign",
-                          "method": "bindingReassign",
-                          "argsFromRow": ["instanceId", "mac"],
-                          "confirm": "Give this device a different WAN on the next sweep? Its current session is dropped. A device marked unmanaged has no binding instance behind it and is refused."
+                          "type": "section",
+                          "title": "Router",
+                          "columns": 2,
+                          "slowTarget": "openwrt",
+                          "slowAt": {
+                            "kind": "stream",
+                            "event": "overview",
+                            "path": "slowAt"
+                          },
+                          "blocks": [
+                            {
+                              "type": "keyValue",
+                              "source": {
+                                "kind": "stream",
+                                "event": "capabilities"
+                              },
+                              "rows": [
+                                {
+                                  "key": "stateLabel",
+                                  "label": "Status"
+                                },
+                                {
+                                  "key": "release",
+                                  "label": "OpenWRT release"
+                                },
+                                {
+                                  "key": "board",
+                                  "label": "Board"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "keyValue",
+                              "source": {
+                                "kind": "stream",
+                                "event": "overview",
+                                "path": "sys"
+                              },
+                              "rows": [
+                                {
+                                  "key": "bootAt",
+                                  "label": "Up since",
+                                  "format": "duration"
+                                },
+                                {
+                                  "key": "load1",
+                                  "label": "Load (1 minute)",
+                                  "format": "number"
+                                },
+                                {
+                                  "key": "memUsed",
+                                  "label": "Memory in use",
+                                  "format": "bytes"
+                                },
+                                {
+                                  "key": "memTotal",
+                                  "label": "Memory fitted",
+                                  "format": "bytes"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "actions",
+                              "actions": [
+                                {
+                                  "label": "Refresh now",
+                                  "method": "sweepNow"
+                                }
+                              ]
+                            }
+                          ]
                         },
                         {
-                          "label": "Unassign",
-                          "method": "bindingUnassign",
-                          "argsFromRow": ["instanceId", "mac"],
-                          "confirm": "Take this device's WAN away and leave it waiting? It keeps local access but has no internet route. A device marked unmanaged has no binding instance behind it and is refused."
+                          "type": "section",
+                          "title": "Live",
+                          "columns": 4,
+                          "slowTarget": "openwrt",
+                          "slowAt": {
+                            "kind": "stream",
+                            "event": "overview",
+                            "path": "t"
+                          },
+                          "blocks": [
+                            {
+                              "type": "stat",
+                              "label": "DHCP devices",
+                              "source": {
+                                "kind": "stream",
+                                "event": "overview",
+                                "path": "counts.devices"
+                              },
+                              "format": "number",
+                              "spark": {
+                                "source": {
+                                  "kind": "stream",
+                                  "event": "series"
+                                },
+                                "key": "devices"
+                              }
+                            },
+                            {
+                              "type": "stat",
+                              "label": "WAN up",
+                              "source": {
+                                "kind": "stream",
+                                "event": "overview",
+                                "path": "counts.wanUp"
+                              },
+                              "format": "number",
+                              "spark": {
+                                "source": {
+                                  "kind": "stream",
+                                  "event": "series"
+                                },
+                                "key": "wanUp"
+                              }
+                            },
+                            {
+                              "type": "stat",
+                              "label": "WAN errors",
+                              "source": {
+                                "kind": "stream",
+                                "event": "overview",
+                                "path": "counts.wanErr"
+                              },
+                              "format": "number",
+                              "spark": {
+                                "source": {
+                                  "kind": "stream",
+                                  "event": "series"
+                                },
+                                "key": "wanErr"
+                              }
+                            },
+                            {
+                              "type": "stat",
+                              "label": "Devices bound to a WAN",
+                              "source": {
+                                "kind": "stream",
+                                "event": "overview",
+                                "path": "counts.bound"
+                              },
+                              "format": "number",
+                              "spark": {
+                                "source": {
+                                  "kind": "stream",
+                                  "event": "series"
+                                },
+                                "key": "bound"
+                              }
+                            },
+                            {
+                              "type": "stat",
+                              "label": "Devices waiting for a WAN",
+                              "source": {
+                                "kind": "stream",
+                                "event": "overview",
+                                "path": "counts.waiting"
+                              },
+                              "format": "number",
+                              "spark": {
+                                "source": {
+                                  "kind": "stream",
+                                  "event": "series"
+                                },
+                                "key": "waiting"
+                              }
+                            },
+                            {
+                              "type": "stat",
+                              "label": "Pool receive",
+                              "source": {
+                                "kind": "stream",
+                                "event": "overview",
+                                "path": "poolAgg.rxRate"
+                              },
+                              "format": "rate",
+                              "spark": {
+                                "source": {
+                                  "kind": "stream",
+                                  "event": "series"
+                                },
+                                "key": "rx"
+                              }
+                            },
+                            {
+                              "type": "stat",
+                              "label": "Pool transmit",
+                              "source": {
+                                "kind": "stream",
+                                "event": "overview",
+                                "path": "poolAgg.txRate"
+                              },
+                              "format": "rate",
+                              "spark": {
+                                "source": {
+                                  "kind": "stream",
+                                  "event": "series"
+                                },
+                                "key": "tx"
+                              }
+                            },
+                            {
+                              "type": "meter",
+                              "label": "Router memory in use",
+                              "source": {
+                                "kind": "stream",
+                                "event": "overview",
+                                "path": "sys.memPct"
+                              },
+                              "format": "pct",
+                              "max": 100
+                            }
+                          ]
                         }
-                      ],
-                      "emptyText": "No active DHCP leases"
-                    }
-                  ]
-                },
-                {
-                  "type": "section",
-                  "title": "Devices waiting for a WAN",
-                  "slowTarget": "openwrt",
-                  "slowAt": { "kind": "stream", "event": "overview", "path": "t" },
-                  "blocks": [
-                    {
-                      "type": "note",
-                      "title": "A waiting device has no internet route",
-                      "lines": [
-                        "Reason says why each one is still waiting, across every binding instance on this router. Waiting for a free WAN clears itself when one comes back; unassigned by hand needs Reassign; preferences exhausted means the instance ran out of ip rule priorities and no WAN coming free will help - raise the client-rule priority base in Module settings, Rules."
                       ]
                     },
                     {
-                      "type": "table",
-                      "source": {
-                        "kind": "invoke",
-                        "method": "bindingWaitingRows",
-                        "args": [""],
-                        "intervalKey": "openwrt"
-                      },
-                      "rowKey": "key",
-                      "columns": [
-                        { "key": "position", "label": "Queue", "format": "number" },
-                        { "key": "instance", "label": "Instance" },
-                        { "key": "host", "label": "Host" },
-                        { "key": "mac", "label": "MAC" },
-                        { "key": "ip", "label": "IPv4" },
-                        { "key": "holdBadges", "label": "State", "format": "badges", "sortable": false },
-                        { "key": "reason", "label": "Reason" },
+                      "id": "history",
+                      "label": "History",
+                      "icon": "Activity",
+                      "blocks": [
                         {
-                          "key": "waitingSince",
-                          "label": "Waiting for",
-                          "format": "duration",
-                          "align": "right"
-                        }
-                      ],
-                      "sortDefault": { "key": "position", "dir": "asc" },
-                      "filterKeys": ["instance", "host", "mac", "ip", "reason"],
-                      "rowActions": [
+                          "type": "conditional",
+                          "when": {
+                            "source": {
+                              "kind": "stream",
+                              "event": "ui",
+                              "path": "hintsOn"
+                            },
+                            "op": "eq",
+                            "value": true
+                          },
+                          "blocks": [
+                            {
+                              "type": "note",
+                              "title": "Reading these charts",
+                              "lines": [
+                                "The right-hand edge is live - it comes from the same fast sweep as the tiles on the Overview tab. Everything behind it is read back from the metrics history on disk.",
+                                "How coarse that history is, is a setting: Module settings, Display & charts, Chart sample interval. At its default of 60 seconds a one-hour chart holds about sixty archived points, which is why a short window can look like a staircase.",
+                                "A range only reaches as far back as the app keeps history for. That cap is in the app's own Settings, under Data & storage."
+                              ]
+                            }
+                          ]
+                        },
                         {
-                          "label": "Reassign",
-                          "method": "bindingReassign",
-                          "argsFromRow": ["instanceId", "mac"],
-                          "confirm": "Release the hold and assign a free WAN when one is available?"
+                          "type": "subnav",
+                          "initial": "sixhours",
+                          "items": [
+                            {
+                              "id": "hour",
+                              "label": "1 hour",
+                              "blocks": [
+                                {
+                                  "type": "section",
+                                  "columns": 2,
+                                  "slowTarget": "openwrt",
+                                  "slowAt": {
+                                    "kind": "stream",
+                                    "event": "overview",
+                                    "path": "slowAt"
+                                  },
+                                  "blocks": [
+                                    {
+                                      "type": "chart",
+                                      "title": "WAN-pool throughput",
+                                      "kind": "area",
+                                      "source": {
+                                        "kind": "history",
+                                        "stream": "openwrt",
+                                        "keys": [
+                                          "rx",
+                                          "tx"
+                                        ],
+                                        "liveEvent": "series"
+                                      },
+                                      "format": "rate",
+                                      "window": 3600,
+                                      "series": [
+                                        {
+                                          "key": "rx",
+                                          "label": "Receive",
+                                          "color": "download"
+                                        },
+                                        {
+                                          "key": "tx",
+                                          "label": "Transmit",
+                                          "color": "upload"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "chart",
+                                      "title": "WAN pool and devices",
+                                      "kind": "line",
+                                      "source": {
+                                        "kind": "history",
+                                        "stream": "openwrt",
+                                        "keys": [
+                                          "wanUp",
+                                          "wanErr",
+                                          "devices"
+                                        ],
+                                        "liveEvent": "series"
+                                      },
+                                      "format": "number",
+                                      "window": 3600,
+                                      "series": [
+                                        {
+                                          "key": "wanUp",
+                                          "label": "WAN up",
+                                          "color": "success"
+                                        },
+                                        {
+                                          "key": "wanErr",
+                                          "label": "WAN error",
+                                          "color": "destructive"
+                                        },
+                                        {
+                                          "key": "devices",
+                                          "label": "DHCP devices",
+                                          "color": "muted",
+                                          "axis": "right"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "chart",
+                                      "title": "Devices bound and waiting",
+                                      "kind": "area",
+                                      "source": {
+                                        "kind": "history",
+                                        "stream": "openwrt",
+                                        "keys": [
+                                          "bound",
+                                          "waiting"
+                                        ],
+                                        "liveEvent": "series"
+                                      },
+                                      "format": "number",
+                                      "window": 3600,
+                                      "stacked": true,
+                                      "series": [
+                                        {
+                                          "key": "bound",
+                                          "label": "Bound to a WAN",
+                                          "color": "success"
+                                        },
+                                        {
+                                          "key": "waiting",
+                                          "label": "Waiting for a WAN",
+                                          "color": "warning"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "chart",
+                                      "title": "Router health",
+                                      "kind": "line",
+                                      "source": {
+                                        "kind": "history",
+                                        "stream": "openwrt",
+                                        "keys": [
+                                          "load1",
+                                          "memPct"
+                                        ],
+                                        "liveEvent": "series"
+                                      },
+                                      "decimals": 2,
+                                      "window": 3600,
+                                      "series": [
+                                        {
+                                          "key": "load1",
+                                          "label": "Load (1 minute)",
+                                          "color": "cpu"
+                                        },
+                                        {
+                                          "key": "memPct",
+                                          "label": "Memory",
+                                          "color": "mem",
+                                          "axis": "right",
+                                          "format": "pct"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "id": "sixhours",
+                              "label": "6 hours",
+                              "blocks": [
+                                {
+                                  "type": "section",
+                                  "columns": 2,
+                                  "slowTarget": "openwrt",
+                                  "slowAt": {
+                                    "kind": "stream",
+                                    "event": "overview",
+                                    "path": "slowAt"
+                                  },
+                                  "blocks": [
+                                    {
+                                      "type": "chart",
+                                      "title": "WAN-pool throughput",
+                                      "kind": "area",
+                                      "source": {
+                                        "kind": "history",
+                                        "stream": "openwrt",
+                                        "keys": [
+                                          "rx",
+                                          "tx"
+                                        ],
+                                        "liveEvent": "series"
+                                      },
+                                      "format": "rate",
+                                      "window": 21600,
+                                      "series": [
+                                        {
+                                          "key": "rx",
+                                          "label": "Receive",
+                                          "color": "download"
+                                        },
+                                        {
+                                          "key": "tx",
+                                          "label": "Transmit",
+                                          "color": "upload"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "chart",
+                                      "title": "WAN pool and devices",
+                                      "kind": "line",
+                                      "source": {
+                                        "kind": "history",
+                                        "stream": "openwrt",
+                                        "keys": [
+                                          "wanUp",
+                                          "wanErr",
+                                          "devices"
+                                        ],
+                                        "liveEvent": "series"
+                                      },
+                                      "format": "number",
+                                      "window": 21600,
+                                      "series": [
+                                        {
+                                          "key": "wanUp",
+                                          "label": "WAN up",
+                                          "color": "success"
+                                        },
+                                        {
+                                          "key": "wanErr",
+                                          "label": "WAN error",
+                                          "color": "destructive"
+                                        },
+                                        {
+                                          "key": "devices",
+                                          "label": "DHCP devices",
+                                          "color": "muted",
+                                          "axis": "right"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "chart",
+                                      "title": "Devices bound and waiting",
+                                      "kind": "area",
+                                      "source": {
+                                        "kind": "history",
+                                        "stream": "openwrt",
+                                        "keys": [
+                                          "bound",
+                                          "waiting"
+                                        ],
+                                        "liveEvent": "series"
+                                      },
+                                      "format": "number",
+                                      "window": 21600,
+                                      "stacked": true,
+                                      "series": [
+                                        {
+                                          "key": "bound",
+                                          "label": "Bound to a WAN",
+                                          "color": "success"
+                                        },
+                                        {
+                                          "key": "waiting",
+                                          "label": "Waiting for a WAN",
+                                          "color": "warning"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "chart",
+                                      "title": "Router health",
+                                      "kind": "line",
+                                      "source": {
+                                        "kind": "history",
+                                        "stream": "openwrt",
+                                        "keys": [
+                                          "load1",
+                                          "memPct"
+                                        ],
+                                        "liveEvent": "series"
+                                      },
+                                      "decimals": 2,
+                                      "window": 21600,
+                                      "series": [
+                                        {
+                                          "key": "load1",
+                                          "label": "Load (1 minute)",
+                                          "color": "cpu"
+                                        },
+                                        {
+                                          "key": "memPct",
+                                          "label": "Memory",
+                                          "color": "mem",
+                                          "axis": "right",
+                                          "format": "pct"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "id": "day",
+                              "label": "24 hours",
+                              "blocks": [
+                                {
+                                  "type": "section",
+                                  "columns": 2,
+                                  "slowTarget": "openwrt",
+                                  "slowAt": {
+                                    "kind": "stream",
+                                    "event": "overview",
+                                    "path": "slowAt"
+                                  },
+                                  "blocks": [
+                                    {
+                                      "type": "chart",
+                                      "title": "WAN-pool throughput",
+                                      "kind": "area",
+                                      "source": {
+                                        "kind": "history",
+                                        "stream": "openwrt",
+                                        "keys": [
+                                          "rx",
+                                          "tx"
+                                        ],
+                                        "liveEvent": "series"
+                                      },
+                                      "format": "rate",
+                                      "window": 86400,
+                                      "series": [
+                                        {
+                                          "key": "rx",
+                                          "label": "Receive",
+                                          "color": "download"
+                                        },
+                                        {
+                                          "key": "tx",
+                                          "label": "Transmit",
+                                          "color": "upload"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "chart",
+                                      "title": "WAN pool and devices",
+                                      "kind": "line",
+                                      "source": {
+                                        "kind": "history",
+                                        "stream": "openwrt",
+                                        "keys": [
+                                          "wanUp",
+                                          "wanErr",
+                                          "devices"
+                                        ],
+                                        "liveEvent": "series"
+                                      },
+                                      "format": "number",
+                                      "window": 86400,
+                                      "series": [
+                                        {
+                                          "key": "wanUp",
+                                          "label": "WAN up",
+                                          "color": "success"
+                                        },
+                                        {
+                                          "key": "wanErr",
+                                          "label": "WAN error",
+                                          "color": "destructive"
+                                        },
+                                        {
+                                          "key": "devices",
+                                          "label": "DHCP devices",
+                                          "color": "muted",
+                                          "axis": "right"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "chart",
+                                      "title": "Devices bound and waiting",
+                                      "kind": "area",
+                                      "source": {
+                                        "kind": "history",
+                                        "stream": "openwrt",
+                                        "keys": [
+                                          "bound",
+                                          "waiting"
+                                        ],
+                                        "liveEvent": "series"
+                                      },
+                                      "format": "number",
+                                      "window": 86400,
+                                      "stacked": true,
+                                      "series": [
+                                        {
+                                          "key": "bound",
+                                          "label": "Bound to a WAN",
+                                          "color": "success"
+                                        },
+                                        {
+                                          "key": "waiting",
+                                          "label": "Waiting for a WAN",
+                                          "color": "warning"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "chart",
+                                      "title": "Router health",
+                                      "kind": "line",
+                                      "source": {
+                                        "kind": "history",
+                                        "stream": "openwrt",
+                                        "keys": [
+                                          "load1",
+                                          "memPct"
+                                        ],
+                                        "liveEvent": "series"
+                                      },
+                                      "decimals": 2,
+                                      "window": 86400,
+                                      "series": [
+                                        {
+                                          "key": "load1",
+                                          "label": "Load (1 minute)",
+                                          "color": "cpu"
+                                        },
+                                        {
+                                          "key": "memPct",
+                                          "label": "Memory",
+                                          "color": "mem",
+                                          "axis": "right",
+                                          "format": "pct"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
                         }
-                      ],
-                      "emptyText": "No device is waiting for a WAN"
+                      ]
+                    },
+                    {
+                      "id": "devices",
+                      "label": "Devices",
+                      "icon": "ListTree",
+                      "blocks": [
+                        {
+                          "type": "section",
+                          "title": "DHCP devices",
+                          "slowTarget": "openwrt",
+                          "slowAt": {
+                            "kind": "stream",
+                            "event": "overview",
+                            "path": "t"
+                          },
+                          "blocks": [
+                            {
+                              "type": "conditional",
+                              "when": {
+                                "source": {
+                                  "kind": "stream",
+                                  "event": "ui",
+                                  "path": "hintsOn"
+                                },
+                                "op": "eq",
+                                "value": true
+                              },
+                              "blocks": [
+                                {
+                                  "type": "note",
+                                  "title": "Reassign and Unassign need an instance behind the device",
+                                  "lines": [
+                                    "Both act through the WAN Binding instance that owns the device's LAN. Group by binding state, or read the Binding column: a row marked unmanaged has no instance behind it, and both buttons refuse it and say so.",
+                                    "To bring a LAN under management, create an instance for it on the Automation page, under WAN Binding."
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "table",
+                              "source": {
+                                "kind": "invoke",
+                                "method": "deviceRows",
+                                "intervalKey": "openwrt"
+                              },
+                              "rowKey": "mac",
+                              "columns": [
+                                {
+                                  "key": "host",
+                                  "label": "Host"
+                                },
+                                {
+                                  "key": "mac",
+                                  "label": "MAC"
+                                },
+                                {
+                                  "key": "ip",
+                                  "label": "IPv4"
+                                },
+                                {
+                                  "key": "lan",
+                                  "label": "LAN"
+                                },
+                                {
+                                  "key": "wan",
+                                  "label": "Assigned WAN"
+                                },
+                                {
+                                  "key": "bindingStatus",
+                                  "label": "Binding state"
+                                },
+                                {
+                                  "key": "bindingBadges",
+                                  "label": "Binding",
+                                  "format": "badges",
+                                  "sortable": false
+                                },
+                                {
+                                  "key": "expires",
+                                  "label": "Lease expires",
+                                  "align": "right"
+                                }
+                              ],
+                              "sortDefault": {
+                                "key": "host",
+                                "dir": "asc"
+                              },
+                              "filterKeys": [
+                                "host",
+                                "mac",
+                                "ip",
+                                "lan",
+                                "wan",
+                                "bindingStatus"
+                              ],
+                              "groupModes": [
+                                {
+                                  "id": "lan",
+                                  "label": "By LAN",
+                                  "key": "lan"
+                                },
+                                {
+                                  "id": "wan",
+                                  "label": "By WAN",
+                                  "key": "wan"
+                                },
+                                {
+                                  "id": "binding",
+                                  "label": "By binding state",
+                                  "key": "bindingStatus"
+                                }
+                              ],
+                              "rowActions": [
+                                {
+                                  "label": "Reassign",
+                                  "method": "bindingReassign",
+                                  "argsFromRow": [
+                                    "instanceId",
+                                    "mac"
+                                  ],
+                                  "confirm": "Give this device a different WAN on the next sweep? Its current session is dropped. A device marked unmanaged has no binding instance behind it and is refused."
+                                },
+                                {
+                                  "label": "Unassign",
+                                  "method": "bindingUnassign",
+                                  "argsFromRow": [
+                                    "instanceId",
+                                    "mac"
+                                  ],
+                                  "confirm": "Take this device's WAN away and leave it waiting? It keeps local access but has no internet route. A device marked unmanaged has no binding instance behind it and is refused."
+                                }
+                              ],
+                              "emptyText": "No active DHCP leases"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "section",
+                          "title": "Devices waiting for a WAN",
+                          "slowTarget": "openwrt",
+                          "slowAt": {
+                            "kind": "stream",
+                            "event": "overview",
+                            "path": "t"
+                          },
+                          "blocks": [
+                            {
+                              "type": "conditional",
+                              "when": {
+                                "source": {
+                                  "kind": "stream",
+                                  "event": "ui",
+                                  "path": "hintsOn"
+                                },
+                                "op": "eq",
+                                "value": true
+                              },
+                              "blocks": [
+                                {
+                                  "type": "note",
+                                  "title": "A waiting device has no internet route",
+                                  "lines": [
+                                    "Reason says why each one is still waiting, across every binding instance on this router. Waiting for a free WAN clears itself when one comes back; unassigned by hand needs Reassign; preferences exhausted means the instance ran out of ip rule priorities and no WAN coming free will help - raise the client-rule priority base in Module settings, Rules."
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "table",
+                              "source": {
+                                "kind": "invoke",
+                                "method": "bindingWaitingRows",
+                                "args": [
+                                  ""
+                                ],
+                                "intervalKey": "openwrt"
+                              },
+                              "rowKey": "key",
+                              "columns": [
+                                {
+                                  "key": "position",
+                                  "label": "Queue",
+                                  "format": "number"
+                                },
+                                {
+                                  "key": "instance",
+                                  "label": "Instance"
+                                },
+                                {
+                                  "key": "host",
+                                  "label": "Host"
+                                },
+                                {
+                                  "key": "mac",
+                                  "label": "MAC"
+                                },
+                                {
+                                  "key": "ip",
+                                  "label": "IPv4"
+                                },
+                                {
+                                  "key": "holdBadges",
+                                  "label": "State",
+                                  "format": "badges",
+                                  "sortable": false
+                                },
+                                {
+                                  "key": "reason",
+                                  "label": "Reason"
+                                },
+                                {
+                                  "key": "waitingSince",
+                                  "label": "Waiting for",
+                                  "format": "duration",
+                                  "align": "right"
+                                }
+                              ],
+                              "sortDefault": {
+                                "key": "position",
+                                "dir": "asc"
+                              },
+                              "filterKeys": [
+                                "instance",
+                                "host",
+                                "mac",
+                                "ip",
+                                "reason"
+                              ],
+                              "rowActions": [
+                                {
+                                  "label": "Reassign",
+                                  "method": "bindingReassign",
+                                  "argsFromRow": [
+                                    "instanceId",
+                                    "mac"
+                                  ],
+                                  "confirm": "Release the hold and assign a free WAN when one is available?"
+                                }
+                              ],
+                              "emptyText": "No device is waiting for a WAN"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "interfaces",
+                      "label": "Interfaces",
+                      "icon": "Cable",
+                      "blocks": [
+                        {
+                          "type": "section",
+                          "title": "Interfaces outside the managed PPPoE pool",
+                          "slowTarget": "openwrt",
+                          "slowAt": {
+                            "kind": "stream",
+                            "event": "overview",
+                            "path": "t"
+                          },
+                          "blocks": [
+                            {
+                              "type": "conditional",
+                              "when": {
+                                "source": {
+                                  "kind": "stream",
+                                  "event": "ui",
+                                  "path": "hintsOn"
+                                },
+                                "op": "eq",
+                                "value": true
+                              },
+                              "blocks": [
+                                {
+                                  "type": "note",
+                                  "title": "This table is a sample, not the whole router",
+                                  "lines": [
+                                    "Managed PPPoE sessions are never listed here - there can be thousands of them, and they are summarised by the WAN pool tiles above instead. The interfaces that are left are capped as well, because the whole payload has a per-tick size budget.",
+                                    "Not listed below counts both: every managed pool session, plus anything past that cap. When it is large, the router shell on Module settings is the way to read the full list."
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "keyValue",
+                              "source": {
+                                "kind": "stream",
+                                "event": "overview",
+                                "path": "counts"
+                              },
+                              "rows": [
+                                {
+                                  "key": "ifTotal",
+                                  "label": "Interfaces on this router",
+                                  "format": "number"
+                                },
+                                {
+                                  "key": "ifOmitted",
+                                  "label": "Not listed below",
+                                  "format": "number"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "table",
+                              "source": {
+                                "kind": "stream",
+                                "event": "overview",
+                                "path": "ifaces"
+                              },
+                              "rowKey": "name",
+                              "columns": [
+                                {
+                                  "key": "name",
+                                  "label": "Interface"
+                                },
+                                {
+                                  "key": "proto",
+                                  "label": "Protocol"
+                                },
+                                {
+                                  "key": "device",
+                                  "label": "Device"
+                                },
+                                {
+                                  "key": "statusBadges",
+                                  "label": "State",
+                                  "format": "badges",
+                                  "sortable": false
+                                },
+                                {
+                                  "key": "ipv4",
+                                  "label": "IPv4"
+                                },
+                                {
+                                  "key": "rxRate",
+                                  "label": "Receive",
+                                  "format": "rate",
+                                  "align": "right"
+                                },
+                                {
+                                  "key": "txRate",
+                                  "label": "Transmit",
+                                  "format": "rate",
+                                  "align": "right"
+                                },
+                                {
+                                  "key": "upSince",
+                                  "label": "Up for",
+                                  "format": "duration",
+                                  "align": "right"
+                                }
+                              ],
+                              "sortDefault": {
+                                "key": "name",
+                                "dir": "asc"
+                              },
+                              "filterKeys": [
+                                "name",
+                                "proto",
+                                "device",
+                                "ipv4"
+                              ],
+                              "emptyText": "No interfaces have been sampled yet"
+                            }
+                          ]
+                        }
+                      ]
                     }
                   ]
                 }

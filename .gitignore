@@ -1,5 +1,10 @@
 node_modules/
 dist/
+
+# .apk files built locally (WSL + the official SDK) for putting onto a test
+# router by hand. The published ones are built and attached by CI on a pkg-v*
+# tag; nothing here is source.
+dist-packages/
 # esbuild output for the module's main half. Rebuilt on demand by the app that
 # installs it, deliberately kept out of the release zip, and skipped by the
 # folder hash - so it is never source.
@@ -7,6 +12,10 @@ openwrt/.dist/
 *.log
 .claude/
 .cursor/
+
+# The working plan for the current review pass: local scratch for whoever is
+# doing the work, not source and not documentation.
+Plan.MD
 
 # The OpenWrt tree the router-side packages are written against, cloned at the
 # 25.12 maintenance branch. It is a reference, not a dependency: nothing here

@@ -92,13 +92,12 @@ Source, issues and changelog live in
 
 | Where | What |
 |---|---|
-| Sidebar → OpenWRT → Dashboard | Router health, aggregate throughput, seven live tiles with sparklines, four history charts, DHCP clients, every device waiting for a WAN, and the interfaces *outside* the managed PPPoE pool - the first 64 by name, since this table is pushed on every tick. The pool itself is summarised rather than listed: a thousand `pppoe-*` sessions are a number, not a thousand rows, and the page says how many interfaces it is *not* listing. |
-| Sidebar → OpenWRT → Automation → PPPoE Dialer | Create, start, stop, redial, inspect, and remove one to thousands of PPPoE sessions from a text file or pasted list. |
-| Sidebar → OpenWRT → Automation → WAN Binding | Assign every DHCP client on one selected LAN to one free WAN on one selected carrier, one-to-one. |
+| Sidebar → OpenWRT → Dashboard | Four groups on a rail. **Overview**: router health and seven live tiles with sparklines. **History**: four charts at 1 hour, 6 hours or 24 hours. **Devices**: DHCP clients, and every device waiting for a WAN. **Interfaces**: the interfaces *outside* the managed PPPoE pool - the first 64 by name, since this table is pushed on every tick. The pool itself is summarised rather than listed: a thousand `pppoe-*` sessions are a number, not a thousand rows, and the page says how many interfaces it is *not* listing. |
+| Sidebar → OpenWRT → Automation → PPPoE Dialer | Everything about the dialer in one place: create, start, stop, redial, inspect and remove one to thousands of PPPoE sessions from a text file or pasted list, plus the batch pacing and limits behind them. |
+| Sidebar → OpenWRT → Automation → WAN Binding | Everything about binding in one place: create an instance that assigns every DHCP client on one selected LAN to one free WAN on one selected carrier, one-to-one, and the defaults new instances start from. |
 | Sidebar → OpenWRT → Automation → Jobs | Live progress cards for chunked operations, per-step timings, and finished-job history. |
 | Sidebar → OpenWRT → Automation → Events | Binding, PPPoE and router events in one table. Outside this page they reach the app log and stop there. |
-| Sidebar → OpenWRT → Automation → Create | The two check-and-apply forms: a PPPoE batch, a binding instance. |
-| Sidebar → OpenWRT → Module settings | Router readiness, Install missing packages, the install job's own progress and finished-job history, Display, and Rules - the scaling and safety numbers. A router shell sits beside the note about fw4, for the few things the module deliberately will not do for you. |
+| Sidebar → OpenWRT → Module settings | Five groups on a rail. **Router readiness** with Install missing packages, **Router packages**, **Jobs** - the install jobs' own progress and finished history, **Display & charts** - the hints toggle and the charts' sample interval, and **Advanced rules**, the numbering and housekeeping both automations share. A router shell sits beside the note about fw4, for the few things the module deliberately will not do for you. |
 | Overview cards | An optional WAN-pool and binding summary. |
 | History | `openwrt`: aggregate WAN, device, receive, transmit, bound, waiting, load and memory values, charted on the dashboard. |
 
@@ -157,10 +156,16 @@ than "repair" sounds, and it is deliberately worded that way - but it is more
 than this page had before, which was *"Everything selected is already
 installed"* and no path at all.
 
-The same install form appears a second time, on the Automation page's **Create**
-tab, whenever something the two forms below it depend on is missing. It is the
-same check, the same job and the same allowlist; putting it there is only about
-not answering "this needs ip-full" with directions to another page.
+The same install form appears on each automation's own tab whenever that
+automation is missing something - ticked for what *it* needs, so the PPPoE tab
+offers `ppp` and the binding tab offers `ip-full` and `dnsmasq`. It is the same
+check, the same job and the same allowlist; putting it there is only about not
+answering "this needs ip-full" with directions to another page.
+
+Which automation is held back is decided in the verdict (`missingFor`) rather
+than in the page, because binding is blocked by *either* a missing `ip rule` or
+a missing dnsmasq and a page spec cannot ask "either of these two" - the
+alternative was the same install section written out twice.
 
 Installing needs root, and the only package manager is `apk`: a router still on
 opkg is blocked well before this section, for the reasons under *Requirements*,
@@ -182,6 +187,32 @@ The package names are a fixed table in `main/packages.ts` and nothing else can
 reach an install command line - no value typed into a form is ever part of one.
 A router that is not ready is re-checked every 30 seconds, but only while a page
 that shows readiness is open.
+
+### When `ip-full` is installed and policy routing still does not work
+
+"This router cannot steer by routing table" is three faults wearing one
+sentence, and only one of them is an install. The probe asks `ip -4 route show
+table 29999`, and when that fails it also asks where `ip` resolves and whether a
+working iproute2 is sitting beside it unused:
+
+| What the router has | What the card says |
+|---|---|
+| BusyBox `ip`, no iproute2 | the BusyBox paragraph, and the install form's *Policy routing (ip-full)* box |
+| `ip-full` on disk, working when called directly, and `/sbin/ip` still BusyBox | the alternatives link never switched: `ln -sf /usr/libexec/ip-full /sbin/ip` at a router shell, and **no** offer to install it again |
+| `ip-full` on disk and the kernel still refusing a numeric table | policy routing is not built into this firmware; no package adds it |
+
+The middle row is why this exists. `apk add ip-full` reports success, the binary
+is on disk and answers a numeric table when called by its own path, and `ip`
+still means the BusyBox applet - so the capability the install job verifies is
+still missing. That used to end at *"still not available after installing; the
+router may need a reboot"*, which is the one remedy that cannot help, and the
+job finished `partial` however many times it was run.
+
+The install job also asks the router twice now before calling a capability
+missing. `refreshCapabilities` joins a probe that is already in flight, and the
+readiness poller is guaranteed to be ticking on the page the job was started
+from, so a probe sent before `apk add` returned could otherwise answer the
+verify step with what was true beforehand.
 
 ### Competing policy routing
 
@@ -207,7 +238,7 @@ does have business doing is saying so before an apply.
 ### What each control needs before it will run
 
 Every method the pages can call is listed in `main/requirements.ts`, and
-`runtime/handlers.ts` routes all thirty-four through the one gate that reads it.
+`runtime/handlers.ts` routes all thirty-nine through the one gate that reads it.
 Before that, the requirements were two hand-written `if` chains inside the two
 create handlers: `pppoeBatchApply` would apply a plan the check had refused, and
 `bindingStart` on an instance created months ago never asked again whether
@@ -563,14 +594,23 @@ The router side runs one combined command per fast tick:
 
 PPPoE device counters are aggregated on the router before crossing SSH, so what
 you get is aggregate pool throughput, not a separate throughput graph for every
-PPPoE session. At more than 2,000 sessions use the Low (5 second) fast interval,
-in the app's own Settings under General → Update intervals.
+PPPoE session. At more than 2,000 sessions use the Low (5 second) fast interval, in the app's own
+Settings under General → Update intervals.
+
+How often a point reaches the *charts* is a separate number, because it is a
+different cost: **Module settings → Display & charts → Chart sample interval**,
+5 to 3600 seconds, default 60. It used to be "once per slow sweep", which is why
+a chart window shorter than an hour looked like a staircase however fast the
+router was being read. Lowering it buys resolution against the history retention
+and storage cap in the app's own Settings → Data & storage. The live tiles are
+not affected either way - they read the module's own `series` stream on every
+fast tick.
 
 For more than roughly 1,000 LAN clients, review the findings shown before a
 binding instance is applied. They cover:
 
 - dnsmasq DHCP lease limits - the one finding apply can act on for you, with the
-  checkbox on the Create tab. Raising them restarts dnsmasq, which briefly
+  checkbox on the create form. Raising them restarts dnsmasq, which briefly
   interrupts DHCP and DNS for the whole router;
 - `nf_conntrack_max`;
 - neighbor-table garbage-collection thresholds;
@@ -582,10 +622,24 @@ shell.
 
 ## Hints
 
-Every form field explains its accepted value, default, unit, and operational
-effect. Page-level notes explain each workflow and its warnings. The checkbox
-under Module settings → Display turns them off; the preference applies to all
-three pages immediately and survives an app restart.
+Every form has a panel beside it explaining what each of its fields accepts, its
+default, its unit and its operational effect, and page-level notes explain each
+workflow and its warnings. The checkbox under **Module settings → Display &
+charts** turns all of them off; the preference applies to all three pages
+immediately, is shared by every router this module manages, and survives an app
+restart.
+
+It really is all of them. The explanations used to be `help` strings on the form
+fields themselves, which the app renders as an always-on paragraph under each
+field and which nothing in a module's spec can gate - so the toggle reached the
+notes and left fifty lines of prose on screen. There are none left: an
+explanation is a note, and a note can be switched off.
+
+What the toggle deliberately does **not** hide is a state banner - a router that
+cannot be managed, a collector that has stopped, a frozen interface list,
+compatibility mode. Those describe the router in front of you rather than
+explaining the page, and a page that went quiet about them would be tidier and
+wrong.
 
 ## Persistence and recovery
 
@@ -840,7 +894,7 @@ ui/widgets/*.json   the Overview widget spec
 | `main/uci/` | Everything this module writes to a router: legal names, PPPoE lines, the shared firewall zone and its verification, and the only code that executes a `uci batch`. |
 | `main/store/` | The bounded, debounced per-router document, and the trimming that keeps it inside its size budget. |
 | `main/packages.ts` | The allowlist: every package this module may install, and why. |
-| `main/config.ts` | Effective module rules and the hint preference. |
+| `main/config/` | Effective module rules and the hint preference: the schema and defaults, the cached store, and the settings-form editor. |
 | `main/events.ts` | The PPPoE, router and binding event rings, and the live log stream. |
 | `main/jobs.ts` | Cancellable chunk-job progress and history. |
 | `main/parse.ts` | OpenWRT output and account-list parsers. |

@@ -11,6 +11,7 @@
  * already derived from them, which is what keeps every branch - including the
  * ones only a broken router reaches - reachable from a test.
  */
+import { IP_FULL_PATH } from './command'
 import { APK_REQUIRED, FW4_MISSING, SPACE_BAD_KB, SPACE_WARN_KB } from './text'
 import type {
   AgentCapability,
@@ -231,6 +232,80 @@ function featureCheck(
   }
 }
 
+/**
+ * Whether this router can steer a packet by numeric routing table, and - when
+ * it cannot - which of three quite different reasons applies.
+ *
+ * The three used to be one sentence and one offer to install `ip-full`. Two of
+ * them are not fixed by installing anything: a router where the package went on
+ * and the alternatives symlink did not switch already has the binary, and a
+ * kernel built without multiple routing tables refuses a numeric table from a
+ * full iproute2 as well. Offering an install to either is how somebody comes to
+ * run the same job three times and read `partial` three times.
+ */
+function ipRuleCheck(facts: ProbeFacts): CheckSeed {
+  const base = {
+    key: 'iprule',
+    title: 'Policy routing (ip rule)',
+    required: false,
+    card: 'firewall'
+  } as const
+  const at = facts.ip.path || '/sbin/ip'
+  // Only worth printing when it points somewhere else: `/sbin/ip -> /sbin/ip` is
+  // two paths and no information.
+  const aliased = Boolean(facts.ip.real) && facts.ip.real !== at
+
+  if (facts.hasIpRule) {
+    return {
+      ...base,
+      status: 'ok',
+      detail: facts.ip.real ? `Present (${facts.ip.real})` : 'Present',
+      install: null
+    }
+  }
+
+  // Installed, working when called directly, and still not what `ip` means.
+  // This is the router that has just been through the install flow: `apk add`
+  // succeeded, the binary is there, and nothing switched the alternative.
+  if (facts.ip.fullPresent && facts.ip.fullWorks) {
+    return {
+      ...base,
+      status: 'warn',
+      detail:
+        `iproute2 is installed at ${IP_FULL_PATH} and does accept a numeric routing table, but ` +
+        `${at} still resolves to ${facts.ip.real || 'BusyBox'} - the alternatives link was never ` +
+        `switched, so \`ip\` on this router is still the BusyBox applet. Installing the package ` +
+        `again will not change that. Relink it at a router shell with ` +
+        `\`ln -sf ${IP_FULL_PATH} ${at}\`, then run Check again.`,
+      install: null
+    }
+  }
+
+  // Present and still refused, which is not a package problem at all.
+  if (facts.ip.fullPresent) {
+    return {
+      ...base,
+      status: 'warn',
+      detail:
+        `iproute2 is installed at ${IP_FULL_PATH} and this kernel still refuses a numeric routing ` +
+        `table, so policy routing is not built into this firmware. No package fixes that: WAN ` +
+        `binding needs an image built with multiple routing tables.`,
+      install: null
+    }
+  }
+
+  return {
+    ...base,
+    status: 'warn',
+    detail:
+      `This is the BusyBox \`ip\`${aliased ? ` (${at} -> ${facts.ip.real})` : ''}, which ` +
+      `answers \`ip rule show\` but rejects a numeric routing table - ` +
+      `\`invalid argument to 'table ID'\`. Every rule WAN binding writes names one, so it would ` +
+      `create an instance and then fail on the first line that steers anything.`,
+    install: 'ipfull'
+  }
+}
+
 /** Every row, in the order they are reported, as this router actually answered. */
 export function observedChecks(input: CheckInput): CheckSeed[] {
   const {
@@ -309,17 +384,7 @@ export function observedChecks(input: CheckInput): CheckSeed[] {
       install: null,
       card: 'firewall'
     },
-    {
-      key: 'iprule',
-      title: 'Policy routing (ip rule)',
-      status: facts.hasIpRule ? 'ok' : 'warn',
-      detail: facts.hasIpRule
-        ? 'Present'
-        : 'This is the BusyBox `ip`, which answers `ip rule show` but rejects a numeric routing table - `invalid argument to \'table ID\'`. Every rule WAN binding writes names one, so it would create an instance and then fail on the first line that steers anything.',
-      required: false,
-      install: facts.hasIpRule ? null : 'ipfull',
-      card: 'firewall'
-    },
+    ipRuleCheck(facts),
     conflictCheck(facts),
     {
       key: 'pppoe',

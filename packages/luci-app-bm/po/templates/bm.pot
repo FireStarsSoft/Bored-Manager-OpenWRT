@@ -58,7 +58,7 @@ msgstr ""
 msgid "%s %s, %s"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:202
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:217
 msgid "%s ago"
 msgstr ""
 
@@ -94,7 +94,7 @@ msgstr ""
 msgid "1 to 4 characters, starting with a letter. Sessions are named prefix00001 upwards."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:345
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:360
 msgid "A change is waiting to be confirmed"
 msgstr ""
 
@@ -511,7 +511,7 @@ msgstr ""
 msgid "Its ip rules are taken off before the section is removed. After the section is gone nothing knows they were its."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:371
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:386
 msgid "Keep these changes"
 msgstr ""
 
@@ -519,7 +519,7 @@ msgstr ""
 msgid "Kept before restoring %s"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:368
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:383
 msgid "Kept. The countdown has been cancelled."
 msgstr ""
 
@@ -763,7 +763,7 @@ msgstr ""
 msgid "Prefix"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:360
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:375
 msgid "Put back. The router is reloading now."
 msgstr ""
 
@@ -783,7 +783,7 @@ msgstr ""
 msgid "Reading the snapshot..."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:355
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:370
 msgid "Reason given: %s"
 msgstr ""
 
@@ -1027,7 +1027,7 @@ msgstr ""
 msgid "The bm-wanbind service is not answering, so the numbers below are missing: %s"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:110
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:125
 msgid "The call failed and the router did not say why."
 msgstr ""
 
@@ -1040,7 +1040,7 @@ msgstr ""
 msgid "The client rule priority has to be below the catch-all priority, or there is no range to write client rules in."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:346
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:361
 msgid "The countdown has run out"
 msgstr ""
 
@@ -1081,8 +1081,12 @@ msgstr ""
 msgid "The release server offers %s; this router is on %s."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:108
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:123
 msgid "The router did not answer. The connection may have gone."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:116
+msgid "The router failed that call without saying why, and the daemon may have stopped. Run \"logread -e bm-\" on the router."
 msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:172
@@ -1105,7 +1109,7 @@ msgstr ""
 msgid "The router keeps a copy of its own configuration before every change it makes, and can put one back without anybody being able to reach it."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:104
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:109
 msgid "The router rejected the arguments of that call."
 msgstr ""
 
@@ -1113,7 +1117,7 @@ msgstr ""
 msgid "The router stopped at %d rows. Narrow this down with the filter above, or look at one pool at a time."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:106
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:111
 msgid "The router took too long to answer."
 msgstr ""
 
@@ -1121,7 +1125,7 @@ msgstr ""
 msgid "The router would not do it."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:152
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:167
 msgid "The router would not do that, and did not say why."
 msgstr ""
 
@@ -1195,6 +1199,10 @@ msgstr ""
 msgid "This login is not allowed to make that call. The ACL that grants it is luci-app-bm."
 msgstr ""
 
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:121
+msgid "This login is older than the ACL that allows these calls. Log out of LuCI and back in; if that is not enough, run \"/etc/init.d/rpcd reload\" on the router."
+msgstr ""
+
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:208
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:156
 msgid "This page is drawn from what the router reports, and bm-agent did not answer: %s"
@@ -1232,7 +1240,7 @@ msgstr ""
 msgid "This router is on %s. Signed by key %s, fetched from %s."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:350
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:365
 msgid "This router is putting its configuration back now. It will be a moment."
 msgstr ""
 
@@ -1240,7 +1248,7 @@ msgstr ""
 msgid "This router knows of no sessions at all."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:349
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:364
 msgid "This router will put its configuration back in %s unless somebody keeps the change."
 msgstr ""
 
@@ -1269,7 +1277,7 @@ msgstr ""
 msgid "Type the pool name to confirm:"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:363
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:378
 msgid "Undo now"
 msgstr ""
 

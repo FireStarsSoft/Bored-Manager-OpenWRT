@@ -52,6 +52,8 @@ export interface SweepRuntime {
   previousDev: ProcNetDevSnapshot | null
   previousUptime: number
   historyModelAt: number
+  /** When the last history point was written, so the sample interval can be paced. */
+  historyAt: number
   cachedIfaces: IfaceState[]
   pppoeErrors: OpenWrtSlowSample['pppoeErrors']
   ticksSinceDump: number
@@ -91,6 +93,7 @@ export function createSweepRuntime(
     previousDev: null,
     previousUptime: 0,
     historyModelAt: 0,
+    historyAt: 0,
     cachedIfaces: [],
     pppoeErrors: {},
     ticksSinceDump: Number.MAX_SAFE_INTEGER,
@@ -122,6 +125,7 @@ export function resetRuntime(runtime: SweepRuntime): void {
   runtime.previousDev = null
   runtime.previousUptime = 0
   runtime.historyModelAt = 0
+  runtime.historyAt = 0
   runtime.cachedIfaces = []
   runtime.pppoeErrors = {}
   runtime.ticksSinceDump = Number.MAX_SAFE_INTEGER

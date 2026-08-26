@@ -585,7 +585,7 @@ describe('a device no binding instance manages', () => {
         ?.('', 'aa:bb:cc:dd:ee:01', 'pd00001')) as OkResult
       expect(result.ok).toBe(false)
       expect(result.error).toContain('No WAN Binding instance manages this device')
-      expect(result.error).toContain('Create tab')
+      expect(result.error).toContain('under WAN Binding')
     }
 
     runtime.dispose?.()

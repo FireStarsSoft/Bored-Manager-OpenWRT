@@ -143,7 +143,7 @@ describe('a missing package is not a router misconfiguration', () => {
 
   it('still gates on the two capabilities it always did', async () => {
     const noRules = await moduleWith(['ip-full'])
-    expect(text(await noRules.bindingCheck())).toContain('no rule support')
+    expect(text(await noRules.bindingCheck())).toContain('steer traffic by routing table')
     noRules.dispose()
 
     const noFw4 = await moduleWith(['fw4'])

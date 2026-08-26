@@ -1,697 +1,1084 @@
 {
   "blocks": [
     {
-      "type": "section",
-      "title": "Router readiness",
-      "slowTarget": "openwrt",
-      "slowAt": { "kind": "stream", "event": "capabilities", "path": "t" },
-      "blocks": [
+      "type": "subnav",
+      "initial": "readiness",
+      "items": [
         {
-          "type": "conditional",
-          "when": {
-            "source": { "kind": "stream", "event": "capabilities", "path": "state" },
-            "op": "eq",
-            "value": "connecting"
-          },
+          "id": "readiness",
+          "label": "Router readiness",
+          "icon": "Info",
           "blocks": [
             {
-              "type": "note",
-              "title": "Waiting for a connection",
-              "lines": [
-                "Add this OpenWRT router to the machine list and connect to it there as root over SSH. The app encrypts the saved credential; this module never stores one.",
-                "Router readiness below fills in as soon as the router answers."
-              ]
-            }
-          ],
-          "else": [
-            {
-              "type": "keyValue",
-              "source": { "kind": "stream", "event": "capabilities" },
-              "rows": [
-                { "key": "stateLabel", "label": "Status" },
-                { "key": "release", "label": "Release" },
-                { "key": "board", "label": "Board" },
-                { "key": "pkgManager", "label": "Package manager" },
-                { "key": "problem", "label": "Problem" }
-              ]
-            },
-            {
-              "type": "statusCards",
-              "source": { "kind": "stream", "event": "capabilities", "path": "cards" },
-              "rowKey": "key",
-              "titleKey": "title",
-              "statusKey": "status",
-              "subtitleKey": "subtitle",
-              "note": { "key": "note", "label": "Detail", "startOpen": true },
-              "items": {
-                "key": "checks",
-                "labelKey": "label",
-                "statusKey": "status",
-                "pinnedKey": "pinned",
-                "visibleRows": 3,
-                "pinnedFilterLabel": "Only what is not ok",
-                "emptyText": "nothing is checked in this group"
-              },
-              "columns": { "default": 2, "min": 1, "max": 3 },
-              "emptyText": "The router has not been checked yet"
-            },
-            {
-              "type": "actions",
-              "actions": [{ "label": "Check again", "method": "sweepNow" }]
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "type": "section",
-      "title": "Install missing packages",
-      "blocks": [
-        {
-          "type": "conditional",
-          "when": {
-            "source": { "kind": "stream", "event": "capabilities", "path": "canInstall" },
-            "op": "eq",
-            "value": true
-          },
-          "blocks": [
-            {
-              "type": "conditional",
-              "when": {
-                "source": { "kind": "stream", "event": "ui", "path": "hintsOn" },
-                "op": "eq",
-                "value": true
+              "type": "section",
+              "title": "Router readiness",
+              "slowTarget": "openwrt",
+              "slowAt": {
+                "kind": "stream",
+                "event": "capabilities",
+                "path": "t"
               },
               "blocks": [
                 {
-                  "type": "note",
-                  "title": "What this installs",
-                  "lines": [
-                    "Only the packages listed below can ever be installed from here, and only with the package manager this firmware actually ships. Nothing you type reaches a router command line.",
-                    "The check looks at free space and whether the router has a route to the internet; it changes nothing. Applying refreshes the package index once, installs one package per step, then re-runs the readiness probe to confirm the result.",
-                    "Firewall4 is deliberately not installable: a router still on fw3 would lose its firewall part-way through the upgrade rather than gain a working one. Moving a router to fw4 is a firmware upgrade and has to be done at a router shell."
+                  "type": "conditional",
+                  "when": {
+                    "source": {
+                      "kind": "stream",
+                      "event": "capabilities",
+                      "path": "state"
+                    },
+                    "op": "eq",
+                    "value": "connecting"
+                  },
+                  "blocks": [
+                    {
+                      "type": "note",
+                      "title": "Waiting for a connection",
+                      "lines": [
+                        "Add this OpenWRT router to the machine list and connect to it there as root over SSH. The app encrypts the saved credential; this module never stores one.",
+                        "Router readiness below fills in as soon as the router answers."
+                      ]
+                    }
+                  ],
+                  "else": [
+                    {
+                      "type": "keyValue",
+                      "source": {
+                        "kind": "stream",
+                        "event": "capabilities"
+                      },
+                      "rows": [
+                        {
+                          "key": "stateLabel",
+                          "label": "Status"
+                        },
+                        {
+                          "key": "release",
+                          "label": "Release"
+                        },
+                        {
+                          "key": "board",
+                          "label": "Board"
+                        },
+                        {
+                          "key": "pkgManager",
+                          "label": "Package manager"
+                        },
+                        {
+                          "key": "problem",
+                          "label": "Problem"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "statusCards",
+                      "source": {
+                        "kind": "stream",
+                        "event": "capabilities",
+                        "path": "cards"
+                      },
+                      "rowKey": "key",
+                      "titleKey": "title",
+                      "statusKey": "status",
+                      "subtitleKey": "subtitle",
+                      "note": {
+                        "key": "note",
+                        "label": "Detail",
+                        "startOpen": true
+                      },
+                      "items": {
+                        "key": "checks",
+                        "labelKey": "label",
+                        "statusKey": "status",
+                        "pinnedKey": "pinned",
+                        "visibleRows": 3,
+                        "pinnedFilterLabel": "Only what is not ok",
+                        "emptyText": "nothing is checked in this group"
+                      },
+                      "columns": {
+                        "default": 3,
+                        "min": 1,
+                        "max": 6
+                      },
+                      "emptyText": "The router has not been checked yet"
+                    },
+                    {
+                      "type": "actions",
+                      "actions": [
+                        {
+                          "label": "Check again",
+                          "method": "sweepNow"
+                        }
+                      ]
+                    }
                   ]
                 }
               ]
             },
             {
-              "type": "conditional",
-              "when": {
-                "source": { "kind": "stream", "event": "capabilities", "path": "setupNeeded" },
-                "op": "eq",
-                "value": true
-              },
+              "type": "section",
+              "title": "Install missing packages",
+              "columns": 2,
               "blocks": [
                 {
-                  "type": "list",
+                  "type": "conditional",
+                  "when": {
+                    "source": {
+                      "kind": "stream",
+                      "event": "capabilities",
+                      "path": "canInstall"
+                    },
+                    "op": "eq",
+                    "value": true
+                  },
+                  "blocks": [
+                    {
+                      "type": "conditional",
+                      "when": {
+                        "source": {
+                          "kind": "stream",
+                          "event": "capabilities",
+                          "path": "setupNeeded"
+                        },
+                        "op": "eq",
+                        "value": true
+                      },
+                      "blocks": [
+                        {
+                          "type": "list",
+                          "source": {
+                            "kind": "stream",
+                            "event": "capabilities",
+                            "path": "missingPackages"
+                          },
+                          "columns": [
+                            {
+                              "key": "name",
+                              "label": "Package"
+                            },
+                            {
+                              "key": "for",
+                              "label": "Needed for"
+                            }
+                          ],
+                          "limit": 32,
+                          "emptyText": "nothing is missing"
+                        }
+                      ],
+                      "else": [
+                        {
+                          "type": "note",
+                          "title": "Nothing is missing on this router",
+                          "lines": [
+                            "Every group below is already present, so a plain check will refuse. Tick \"Run the install again\" as well when a package is there but not working - that is the one case this form exists for on a router with nothing missing."
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "checkForm",
+                      "checkMethod": "setupCheck",
+                      "applyMethod": "setupApply",
+                      "checkLabel": "Check what would be installed",
+                      "applyLabel": "Install now",
+                      "fields": [
+                        {
+                          "key": "pppoe",
+                          "label": "PPPoE support (ppp, ppp-mod-pppoe, kmod-pppoe)",
+                          "input": "checkbox",
+                          "initial": true
+                        },
+                        {
+                          "key": "ipfull",
+                          "label": "Policy routing (ip-full)",
+                          "input": "checkbox",
+                          "initial": true
+                        },
+                        {
+                          "key": "dnsmasq",
+                          "label": "DHCP leases (dnsmasq)",
+                          "input": "checkbox",
+                          "initial": true
+                        },
+                        {
+                          "key": "repair",
+                          "label": "Run the install again, including groups already present",
+                          "input": "checkbox",
+                          "initial": false
+                        }
+                      ]
+                    }
+                  ],
+                  "else": [
+                    {
+                      "type": "note",
+                      "title": "Nothing can be installed from here",
+                      "lines": [
+                        "Something is in the way of installing anything at all - the login is not root, the firmware has no apk database, or the router has a problem more basic than a missing package. What to do next names which, read off this router rather than listing every possibility."
+                      ]
+                    },
+                    {
+                      "type": "keyValue",
+                      "source": {
+                        "kind": "invoke",
+                        "method": "installHint"
+                      },
+                      "rows": [
+                        {
+                          "key": "hint",
+                          "label": "What to do next"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "note",
+                      "title": "Firewall4 is the one thing this section can never install",
+                      "tone": "warning",
+                      "lines": [
+                        "A router still on fw3 would lose its firewall part-way through the upgrade rather than gain a working one, so the module refuses to try. Moving a router to fw4 is a firmware upgrade and is done at a router shell.",
+                        "Anything else the line above sends to a shell is done there too. The button below opens one on this router."
+                      ]
+                    },
+                    {
+                      "type": "terminal",
+                      "label": "Open a router shell",
+                      "commandTemplate": "sh"
+                    }
+                  ]
+                },
+                {
+                  "type": "conditional",
+                  "when": {
+                    "source": {
+                      "kind": "stream",
+                      "event": "ui",
+                      "path": "hintsOn"
+                    },
+                    "op": "eq",
+                    "value": true
+                  },
+                  "blocks": [
+                    {
+                      "type": "note",
+                      "title": "What these boxes install",
+                      "lines": [
+                        "These are OpenWrt's own packages, fetched from the router's package feed. The Bored Manager packages - the agent and its daemons - are a different thing, installed from the Router packages tab beside this one.",
+                        "Only the packages listed here can ever be installed from this form, and only with the package manager this firmware actually ships. Nothing you type reaches a router command line.",
+                        "PPPoE support - ppp, ppp-mod-pppoe and kmod-pppoe. Required before the PPPoE Dialer can create a batch. All three go in together because the probe reads files on disk, not a package list, so it cannot say which one is missing.",
+                        "Policy routing - ip-full. Required by WAN Binding. A stock image symlinks /sbin/ip at BusyBox, whose ip answers 'ip rule show' but refuses a numeric routing table, and every rule and route binding writes names one.",
+                        "DHCP leases - dnsmasq. Without it there are no DHCP leases to read, so the device table stays empty and binding has nobody to assign.",
+                        "Run the install again - off, a group the router already reports is skipped and a form with nothing missing is refused. On, every ticked group is installed again with the same command, which restores a package that has gone missing and leaves alone anything apk still considers installed.",
+                        "The check looks at free space and whether the router has a route to the internet; it changes nothing. Applying refreshes the package index once, installs one package per step, then re-runs the readiness probe to confirm the result.",
+                        "Firewall4 is deliberately not installable: a router still on fw3 would lose its firewall part-way through the upgrade rather than gain a working one. Moving a router to fw4 is a firmware upgrade and has to be done at a router shell."
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "packages",
+          "label": "Router packages",
+          "icon": "Boxes",
+          "blocks": [
+            {
+              "type": "section",
+              "title": "What is on the router",
+              "blocks": [
+                {
+                  "type": "table",
                   "source": {
-                    "kind": "stream",
-                    "event": "capabilities",
-                    "path": "missingPackages"
+                    "kind": "invoke",
+                    "method": "agentRows"
                   },
                   "columns": [
-                    { "key": "name", "label": "Package" },
-                    { "key": "for", "label": "Needed for" }
+                    {
+                      "key": "name",
+                      "label": "Package"
+                    },
+                    {
+                      "key": "installed",
+                      "label": "On the router"
+                    },
+                    {
+                      "key": "pinned",
+                      "label": "This module ships"
+                    },
+                    {
+                      "key": "status",
+                      "label": "Service"
+                    },
+                    {
+                      "key": "detail",
+                      "label": "Notes"
+                    }
                   ],
-                  "limit": 32,
-                  "emptyText": "nothing is missing"
+                  "emptyText": "nothing to show - run Check under Router readiness first"
                 }
-              ],
-              "else": [
+              ]
+            },
+            {
+              "type": "section",
+              "title": "Install or update them",
+              "columns": 2,
+              "blocks": [
                 {
-                  "type": "note",
-                  "title": "Nothing is missing on this router",
-                  "lines": [
-                    "Every group below is already present, so a plain check will refuse. Tick \"Run the install again\" as well when a package is there but not working - that is the one case this form exists for on a router with nothing missing."
+                  "type": "checkForm",
+                  "checkMethod": "agentInstallCheck",
+                  "applyMethod": "agentInstallApply",
+                  "checkLabel": "Check what would be installed",
+                  "applyLabel": "Install now",
+                  "fields": [
+                    {
+                      "key": "source",
+                      "label": "Where the packages come from",
+                      "input": "select",
+                      "initial": "pinned",
+                      "options": [
+                        {
+                          "value": "pinned",
+                          "label": "The release this module was built against"
+                        },
+                        {
+                          "value": "github",
+                          "label": "The latest release, fetched by the router"
+                        },
+                        {
+                          "value": "bundle",
+                          "label": "A .apkbundle file from this machine"
+                        },
+                        {
+                          "value": "path",
+                          "label": "A file already on the router"
+                        }
+                      ]
+                    },
+                    {
+                      "key": "bundleFile",
+                      "label": "Bundle file",
+                      "input": "file",
+                      "accept": ".apkbundle",
+                      "maxKb": 2048
+                    },
+                    {
+                      "key": "bundleText",
+                      "label": "…or paste the bundle here",
+                      "input": "textarea",
+                      "placeholder": "H4sIAAAAAAAA…"
+                    },
+                    {
+                      "key": "path",
+                      "label": "Path on the router",
+                      "input": "text",
+                      "placeholder": "/tmp/bm-agent-1.4.0-r1.apk"
+                    }
+                  ]
+                },
+                {
+                  "type": "conditional",
+                  "when": {
+                    "source": {
+                      "kind": "stream",
+                      "event": "ui",
+                      "path": "hintsOn"
+                    },
+                    "op": "eq",
+                    "value": true
+                  },
+                  "blocks": [
+                    {
+                      "type": "note",
+                      "title": "What these are for",
+                      "lines": [
+                        "These are the Bored Manager packages - bm-agent, bm-pppoe-pool, bm-wanbind and the router's own LuCI pages - not OpenWrt's; the ppp, ip-full and dnsmasq installer is under Router readiness.",
+                        "Without them this module drives the router entirely over SSH, which works and always will. What it cannot do from there is undo a change that has just taken the connection down: once SSH is gone there is nobody left to type the command that would put it back.",
+                        "The agent is that missing piece. It snapshots the configuration before every change, starts a countdown, and restores the router by itself if nothing confirms the change in time - which is exactly the case where nothing can.",
+                        "It also makes the rest faster: leases arrive as events rather than being polled, and a pool of several thousand sessions is written by the router instead of one round trip at a time.",
+                        "Nothing here calls out to the internet on its own. A router only checks for a new release when somebody presses the button."
+                      ]
+                    },
+                    {
+                      "type": "note",
+                      "title": "What each field means",
+                      "lines": [
+                        "Where the packages come from - the four differ in what they trust, not in what they install. Pinned: the router downloads, and each file is checked against a sha256 compiled into this module. Latest: the router fetches a signed release manifest and checks the signature itself, which needs an agent already installed. Bundle: you choose the file, and it needs no internet on the router at all. A path on the router: trusted because it is already there.",
+                        "Bundle file - the bm-packages-<version>.apkbundle attached to a packages release. It is base64 text rather than a binary archive, so it survives being read as text and can be pasted into the box below instead.",
+                        "Paste the bundle - used only when no file is chosen above.",
+                        "Path on the router - an absolute path to a .apk you have already copied onto the router. Nothing here checks it against a published checksum: it is trusted because you put it there."
+                      ]
+                    }
                   ]
                 }
               ]
             },
             {
-              "type": "checkForm",
-              "checkMethod": "setupCheck",
-              "applyMethod": "setupApply",
-              "checkLabel": "Check what would be installed",
-              "applyLabel": "Install now",
-              "fields": [
-                {
-                  "key": "pppoe",
-                  "label": "PPPoE support (ppp, ppp-mod-pppoe, kmod-pppoe)",
-                  "input": "checkbox",
-                  "initial": true,
-                  "help": "Required before the PPPoE Dialer can create a batch. All three go in together because the probe reads files on disk, not a package list, so it cannot say which one is missing."
+              "type": "conditional",
+              "when": {
+                "source": {
+                  "kind": "stream",
+                  "event": "capabilities",
+                  "path": "agent.installed"
                 },
+                "op": "eq",
+                "value": true
+              },
+              "blocks": [
                 {
-                  "key": "ipfull",
-                  "label": "Policy routing (ip-full)",
-                  "input": "checkbox",
-                  "initial": true,
-                  "help": "Required by WAN Binding. A stock image symlinks /sbin/ip at BusyBox, whose ip answers 'ip rule show' but refuses a numeric routing table - and every rule and route binding writes names one, so an instance would be created and then steer nothing."
-                },
-                {
-                  "key": "dnsmasq",
-                  "label": "DHCP leases (dnsmasq)",
-                  "input": "checkbox",
-                  "initial": true,
-                  "help": "Without it there are no DHCP leases to read, so the device table stays empty and binding has nobody to assign."
-                },
-                {
-                  "key": "repair",
-                  "label": "Run the install again, including groups already present",
-                  "input": "checkbox",
-                  "initial": false,
-                  "help": "Off, a group the router already reports is skipped and a form with nothing missing is refused. On, every ticked group is installed again with the same command - which restores a package that has gone missing, leaves alone anything apk still considers installed, and re-runs the readiness probe at the end so the result is read off the router rather than assumed."
-                }
-              ]
-            }
-          ],
-          "else": [
-            {
-              "type": "note",
-              "title": "Nothing can be installed from here",
-              "lines": [
-                "Something is in the way of installing anything at all - the login is not root, the firmware has no apk database, or the router has a problem more basic than a missing package. What to do next names which, read off this router rather than listing every possibility."
-              ]
-            },
-            {
-              "type": "keyValue",
-              "source": { "kind": "invoke", "method": "installHint" },
-              "rows": [{ "key": "hint", "label": "What to do next" }]
-            },
-            {
-              "type": "note",
-              "title": "Firewall4 is the one thing this section can never install",
-              "tone": "warning",
-              "lines": [
-                "A router still on fw3 would lose its firewall part-way through the upgrade rather than gain a working one, so the module refuses to try. Moving a router to fw4 is a firmware upgrade and is done at a router shell.",
-                "Anything else the line above sends to a shell is done there too. The button below opens one on this router."
-              ]
-            },
-            {
-              "type": "terminal",
-              "label": "Open a router shell",
-              "commandTemplate": "sh"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "type": "section",
-      "title": "Router packages",
-      "blocks": [
-        {
-          "type": "conditional",
-          "when": {
-            "source": { "kind": "stream", "event": "ui", "path": "hintsOn" },
-            "op": "eq",
-            "value": true
-          },
-          "blocks": [
-            {
-              "type": "note",
-              "title": "What these are for",
-              "lines": [
-                "Without them this module drives the router entirely over SSH, which works and always will. What it cannot do from there is undo a change that has just taken the connection down: once SSH is gone there is nobody left to type the command that would put it back.",
-                "The agent is that missing piece. It snapshots the configuration before every change, starts a countdown, and restores the router by itself if nothing confirms the change in time - which is exactly the case where nothing can.",
-                "It also makes the rest faster: leases arrive as events rather than being polled, and a pool of several thousand sessions is written by the router instead of one round trip at a time.",
-                "Nothing here calls out to the internet on its own. A router only checks for a new release when somebody presses the button."
-              ]
-            }
-          ]
-        },
-        {
-          "type": "table",
-          "source": { "kind": "invoke", "method": "agentRows" },
-          "columns": [
-            { "key": "name", "label": "Package" },
-            { "key": "installed", "label": "On the router" },
-            { "key": "pinned", "label": "This module ships" },
-            { "key": "status", "label": "Service" },
-            { "key": "detail", "label": "Notes" }
-          ],
-          "emptyText": "nothing to show - run Check under Router readiness first"
-        },
-        {
-          "type": "checkForm",
-          "checkMethod": "agentInstallCheck",
-          "applyMethod": "agentInstallApply",
-          "checkLabel": "Check what would be installed",
-          "applyLabel": "Install now",
-          "fields": [
-            {
-              "key": "source",
-              "label": "Where the packages come from",
-              "input": "select",
-              "initial": "pinned",
-              "options": [
-                { "value": "pinned", "label": "The release this module was built against" },
-                { "value": "github", "label": "The latest release, fetched by the router" },
-                { "value": "bundle", "label": "A .apkbundle file from this machine" },
-                { "value": "path", "label": "A file already on the router" }
-              ],
-              "help": "The four differ in what they trust, not in what they install. Pinned: the router downloads, and each file is checked against a sha256 compiled into this module. Latest: the router fetches a signed release manifest and checks the signature itself - it needs an agent already installed to do that. Bundle: you choose the file, and it needs no internet on the router at all. A path on the router: trusted because it is already there."
-            },
-            {
-              "key": "bundleFile",
-              "label": "Bundle file",
-              "input": "file",
-              "accept": ".apkbundle",
-              "maxKb": 2048,
-              "help": "The bm-packages-<version>.apkbundle attached to a packages release. It is base64 text rather than a binary archive, so it survives being read as text and can be pasted into the box below instead."
-            },
-            {
-              "key": "bundleText",
-              "label": "…or paste the bundle here",
-              "input": "textarea",
-              "placeholder": "H4sIAAAAAAAA…",
-              "help": "Used only when no file is chosen above."
-            },
-            {
-              "key": "path",
-              "label": "Path on the router",
-              "input": "text",
-              "placeholder": "/tmp/bm-agent-1.2.0-r1.apk",
-              "help": "An absolute path to a .apk you have already copied onto the router. Nothing here checks it against a published checksum: it is trusted because you put it there."
-            }
-          ]
-        },
-        {
-          "type": "conditional",
-          "when": {
-            "source": { "kind": "stream", "event": "capabilities", "path": "agent.installed" },
-            "op": "eq",
-            "value": true
-          },
-          "blocks": [
-            {
-              "type": "checkForm",
-              "checkMethod": "agentUninstallCheck",
-              "applyMethod": "agentUninstallApply",
-              "checkLabel": "Check what would be removed",
-              "applyLabel": "Remove them",
-              "fields": [
-                {
-                  "key": "purge",
-                  "label": "Delete the configuration and saved state as well",
-                  "input": "checkbox",
-                  "initial": false,
-                  "help": "Off, /etc/config/bm_* and everything under /etc/bm stay, so reinstalling comes back to the same router. On, they go - except the baseline snapshot, which is never deleted because it is the only way back to how this router looked before any of this touched it. Either way, each package's own prerm takes back the ip rules and hooks it installed, so removing them here leaves the same router behind as `apk del` at a shell."
+                  "type": "section",
+                  "title": "Remove them",
+                  "columns": 2,
+                  "blocks": [
+                    {
+                      "type": "checkForm",
+                      "checkMethod": "agentUninstallCheck",
+                      "applyMethod": "agentUninstallApply",
+                      "checkLabel": "Check what would be removed",
+                      "applyLabel": "Remove them",
+                      "kind": "danger",
+                      "fields": [
+                        {
+                          "key": "purge",
+                          "label": "Delete the configuration and saved state as well",
+                          "input": "checkbox",
+                          "initial": false
+                        }
+                      ]
+                    },
+                    {
+                      "type": "conditional",
+                      "when": {
+                        "source": {
+                          "kind": "stream",
+                          "event": "ui",
+                          "path": "hintsOn"
+                        },
+                        "op": "eq",
+                        "value": true
+                      },
+                      "blocks": [
+                        {
+                          "type": "note",
+                          "title": "What removing them takes with it",
+                          "lines": [
+                            "Delete the configuration and saved state - off, /etc/config/bm_* and everything under /etc/bm stay, so reinstalling comes back to the same router. On, they go, except the baseline snapshot, which is never deleted because it is the only way back to how this router looked before any of this touched it.",
+                            "Either way each package's own prerm takes back the ip rules and hooks it installed, so removing them here leaves the same router behind as `apk del` at a shell.",
+                            "Uninstall refuses while a binding instance is running or a PPPoE pool exists, and names what to stop first."
+                          ]
+                        }
+                      ]
+                    }
+                  ]
                 }
               ]
             }
           ]
-        }
-      ]
-    },
-    {
-      "type": "section",
-      "title": "Running now",
-      "blocks": [
-        {
-          "type": "statusCards",
-          "source": { "kind": "stream", "event": "jobs", "path": "running" },
-          "rowKey": "id",
-          "titleKey": "label",
-          "statusKey": "health",
-          "subtitleKey": "progressLabel",
-          "note": { "key": "note", "label": "Now", "startOpen": true },
-          "items": {
-            "key": "chips",
-            "labelKey": "label",
-            "statusKey": "status",
-            "pinnedKey": "pinned",
-            "visibleRows": 2,
-            "pinnedFilterLabel": "Only what is not ok",
-            "emptyText": "no steps yet"
-          },
-          "columns": { "default": 2, "min": 1, "max": 3 },
-          "emptyText": "No job is running on this router",
-          "rowActions": [
-            {
-              "label": "Cancel",
-              "method": "jobCancel",
-              "argsFromRow": ["id"],
-              "kind": "danger",
-              "confirm": "Stop this job after the router command that is running finishes?"
-            }
-          ],
-          "rowDetail": [
-            {
-              "type": "list",
-              "source": { "kind": "stream", "event": "jobs", "path": "$row.items" },
-              "columns": [
-                { "key": "name", "label": "Step" },
-                { "key": "statusBadges", "label": "Result", "format": "badges" },
-                { "key": "message", "label": "Message" },
-                { "key": "startedAt", "label": "Started", "format": "time", "align": "right" },
-                { "key": "ms", "label": "ms", "format": "number", "align": "right" }
-              ],
-              "limit": 200,
-              "emptyText": "no steps recorded"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "type": "section",
-      "title": "Finished jobs",
-      "blocks": [
-        {
-          "type": "table",
-          "source": { "kind": "stream", "event": "jobs", "path": "finished" },
-          "rowKey": "id",
-          "columns": [
-            { "key": "label", "label": "Job" },
-            { "key": "kind", "label": "Kind" },
-            { "key": "stateBadges", "label": "Outcome", "format": "badges", "sortable": false },
-            { "key": "done", "label": "Done", "format": "number", "align": "right" },
-            { "key": "total", "label": "Steps", "format": "number", "align": "right" },
-            { "key": "failed", "label": "Failed", "format": "number", "align": "right" },
-            { "key": "tookLabel", "label": "Took", "align": "right" },
-            { "key": "startedAt", "label": "Started", "format": "datetime", "align": "right" }
-          ],
-          "sortDefault": { "key": "startedAt", "dir": "desc" },
-          "filterKeys": ["label", "kind"],
-          "emptyText": "No finished job is stored",
-          "rowDetail": [
-            {
-              "type": "list",
-              "source": { "kind": "stream", "event": "jobs", "path": "$row.items" },
-              "columns": [
-                { "key": "name", "label": "Step" },
-                { "key": "statusBadges", "label": "Result", "format": "badges" },
-                { "key": "message", "label": "Message" },
-                { "key": "startedAt", "label": "Started", "format": "time", "align": "right" },
-                { "key": "ms", "label": "ms", "format": "number", "align": "right" }
-              ],
-              "limit": 200,
-              "emptyText": "no retained steps in this job"
-            }
-          ]
         },
         {
-          "type": "actions",
-          "actions": [
-            {
-              "label": "Clear finished",
-              "method": "jobsClear",
-              "confirm": "Forget every finished job? A running job is left alone."
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "type": "section",
-      "title": "Display",
-      "blocks": [
-        {
-          "type": "form",
-          "fields": [
-            {
-              "key": "hintsOn",
-              "label": "Show the explanatory notes on every OpenWRT page",
-              "input": "checkbox",
-              "initialFrom": { "kind": "stream", "event": "ui", "path": "hintsOn" },
-              "help": "The notes explain what each page does to the router. Turn them off once the behaviour is familiar; the setting is shared by every router this module manages."
-            }
-          ],
-          "submit": { "label": "Save", "method": "hintsSet" }
-        }
-      ]
-    },
-    {
-      "type": "section",
-      "title": "Rules",
-      "blocks": [
-        {
-          "type": "conditional",
-          "when": {
-            "source": { "kind": "stream", "event": "ui", "path": "hintsOn" },
-            "op": "eq",
-            "value": true
-          },
+          "id": "jobs",
+          "label": "Jobs",
+          "icon": "ListTree",
           "blocks": [
             {
-              "type": "note",
-              "title": "These forms show what is in force",
-              "tone": "warning",
-              "lines": [
-                "Every field opens filled in with the value this router is using right now, so each form doubles as the list of rules in force. Saving one group leaves the other three exactly as they are.",
-                "A field left empty means keep the current value. The placeholder still names the documented default; to put one rule back, type that default, and to put all of them back use Reset every rule.",
-                "Changing the routing-table or rule-priority bases while batches or binding instances exist is refused: the old and new ownership ranges cannot safely overlap."
+              "type": "section",
+              "title": "Running now",
+              "blocks": [
+                {
+                  "type": "statusCards",
+                  "source": {
+                    "kind": "stream",
+                    "event": "jobs",
+                    "path": "running"
+                  },
+                  "rowKey": "id",
+                  "titleKey": "label",
+                  "statusKey": "health",
+                  "subtitleKey": "progressLabel",
+                  "note": {
+                    "key": "note",
+                    "label": "Now",
+                    "startOpen": true
+                  },
+                  "items": {
+                    "key": "chips",
+                    "labelKey": "label",
+                    "statusKey": "status",
+                    "pinnedKey": "pinned",
+                    "visibleRows": 2,
+                    "pinnedFilterLabel": "Only what is not ok",
+                    "emptyText": "no steps yet"
+                  },
+                  "columns": {
+                    "default": 3,
+                    "min": 1,
+                    "max": 6
+                  },
+                  "emptyText": "No job is running on this router",
+                  "rowActions": [
+                    {
+                      "label": "Cancel",
+                      "method": "jobCancel",
+                      "argsFromRow": [
+                        "id"
+                      ],
+                      "kind": "danger",
+                      "confirm": "Stop this job after the router command that is running finishes?"
+                    }
+                  ],
+                  "rowDetail": [
+                    {
+                      "type": "list",
+                      "source": {
+                        "kind": "stream",
+                        "event": "jobs",
+                        "path": "$row.items"
+                      },
+                      "columns": [
+                        {
+                          "key": "name",
+                          "label": "Step"
+                        },
+                        {
+                          "key": "statusBadges",
+                          "label": "Result",
+                          "format": "badges"
+                        },
+                        {
+                          "key": "message",
+                          "label": "Message"
+                        },
+                        {
+                          "key": "startedAt",
+                          "label": "Started",
+                          "format": "time",
+                          "align": "right"
+                        },
+                        {
+                          "key": "ms",
+                          "label": "ms",
+                          "format": "number",
+                          "align": "right"
+                        }
+                      ],
+                      "limit": 200,
+                      "emptyText": "no steps recorded"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "section",
+              "title": "Finished jobs",
+              "blocks": [
+                {
+                  "type": "table",
+                  "source": {
+                    "kind": "stream",
+                    "event": "jobs",
+                    "path": "finished"
+                  },
+                  "rowKey": "id",
+                  "columns": [
+                    {
+                      "key": "label",
+                      "label": "Job"
+                    },
+                    {
+                      "key": "kind",
+                      "label": "Kind"
+                    },
+                    {
+                      "key": "stateBadges",
+                      "label": "Outcome",
+                      "format": "badges",
+                      "sortable": false
+                    },
+                    {
+                      "key": "done",
+                      "label": "Done",
+                      "format": "number",
+                      "align": "right"
+                    },
+                    {
+                      "key": "total",
+                      "label": "Steps",
+                      "format": "number",
+                      "align": "right"
+                    },
+                    {
+                      "key": "failed",
+                      "label": "Failed",
+                      "format": "number",
+                      "align": "right"
+                    },
+                    {
+                      "key": "tookLabel",
+                      "label": "Took",
+                      "align": "right"
+                    },
+                    {
+                      "key": "startedAt",
+                      "label": "Started",
+                      "format": "datetime",
+                      "align": "right"
+                    }
+                  ],
+                  "sortDefault": {
+                    "key": "startedAt",
+                    "dir": "desc"
+                  },
+                  "filterKeys": [
+                    "label",
+                    "kind"
+                  ],
+                  "emptyText": "No finished job is stored",
+                  "rowDetail": [
+                    {
+                      "type": "list",
+                      "source": {
+                        "kind": "stream",
+                        "event": "jobs",
+                        "path": "$row.items"
+                      },
+                      "columns": [
+                        {
+                          "key": "name",
+                          "label": "Step"
+                        },
+                        {
+                          "key": "statusBadges",
+                          "label": "Result",
+                          "format": "badges"
+                        },
+                        {
+                          "key": "message",
+                          "label": "Message"
+                        },
+                        {
+                          "key": "startedAt",
+                          "label": "Started",
+                          "format": "time",
+                          "align": "right"
+                        },
+                        {
+                          "key": "ms",
+                          "label": "ms",
+                          "format": "number",
+                          "align": "right"
+                        }
+                      ],
+                      "limit": 200,
+                      "emptyText": "no retained steps in this job"
+                    }
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "actions": [
+                    {
+                      "label": "Clear finished",
+                      "method": "jobsClear",
+                      "confirm": "Forget every finished job? A running job is left alone."
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "conditional",
+              "when": {
+                "source": {
+                  "kind": "stream",
+                  "event": "ui",
+                  "path": "hintsOn"
+                },
+                "op": "eq",
+                "value": true
+              },
+              "blocks": [
+                {
+                  "type": "note",
+                  "title": "What lands here",
+                  "lines": [
+                    "Package installs and router-package work run as jobs so a long operation cannot block the page. Automation jobs - creating a pool, preparing a binding instance - are on the Automation page's own Jobs tab.",
+                    "A job stops at its first failed step, so a step reading \"skipped\" was never attempted. An outcome of \"partial\" means some steps succeeded and at least one did not; open the row to see which."
+                  ]
+                }
               ]
             }
           ]
         },
         {
-          "type": "checkForm",
-          "title": "Numbering and firewall layout",
-          "checkMethod": "rulesCheck",
-          "applyMethod": "rulesApply",
-          "checkLabel": "Check this group",
-          "applyLabel": "Save this group",
-          "fields": [
+          "id": "display",
+          "label": "Display & charts",
+          "icon": "Settings2",
+          "blocks": [
             {
-              "key": "ifacePrefix",
-              "label": "Default PPPoE prefix",
-              "input": "text",
-              "placeholder": "pd",
-              "initialFrom": { "kind": "invoke", "method": "rulesEffective", "path": "ifacePrefix" },
-              "help": "One to four lowercase letters or digits, beginning with a letter. Default pd. A batch may override it."
+              "type": "section",
+              "title": "Explanatory text",
+              "columns": 2,
+              "blocks": [
+                {
+                  "type": "form",
+                  "fields": [
+                    {
+                      "key": "hintsOn",
+                      "label": "Show the explanatory notes and field help on every OpenWRT page",
+                      "input": "checkbox",
+                      "initialFrom": {
+                        "kind": "stream",
+                        "event": "ui",
+                        "path": "hintsOn"
+                      }
+                    }
+                  ],
+                  "submit": {
+                    "label": "Save",
+                    "method": "hintsSet"
+                  }
+                },
+                {
+                  "type": "conditional",
+                  "when": {
+                    "source": {
+                      "kind": "stream",
+                      "event": "ui",
+                      "path": "hintsOn"
+                    },
+                    "op": "eq",
+                    "value": true
+                  },
+                  "blocks": [
+                    {
+                      "type": "note",
+                      "title": "This is the switch that hides this panel",
+                      "lines": [
+                        "Every panel like this one is hidden when it is off: the notes that explain what a page does to the router, and the ones beside each form that explain its fields. Turn it off once the behaviour is familiar.",
+                        "State banners stay whatever this is set to - a router that is not ready, a collector that has stopped, a frozen interface list. Those are not hints.",
+                        "The setting is shared by every router this module manages, applies to all three pages immediately, and survives an app restart."
+                      ]
+                    }
+                  ]
+                }
+              ]
             },
             {
-              "key": "tableBase",
-              "label": "Routing-table base",
-              "input": "number",
-              "placeholder": "10000",
-              "initialFrom": { "kind": "invoke", "method": "rulesEffective", "path": "tableBase" },
-              "help": "Default 10000. A managed PPPoE session uses this value plus its sequence. Cannot change while managed batches or binding instances exist."
-            },
-            {
-              "key": "rulePrefBase",
-              "label": "Client-rule priority base",
-              "input": "number",
-              "placeholder": "20000",
-              "initialFrom": { "kind": "invoke", "method": "rulesEffective", "path": "rulePrefBase" },
-              "help": "Default 20000. Client source rules occupy the range from here up to, but not including, the safety-rule base."
-            },
-            {
-              "key": "catchAllPrefBase",
-              "label": "Safety-rule priority base",
-              "input": "number",
-              "placeholder": "29900",
-              "initialFrom": { "kind": "invoke", "method": "rulesEffective", "path": "catchAllPrefBase" },
-              "help": "Default 29900. Each binding instance gets one subnet catch-all priority from this base; it must be above every client rule."
-            },
-            {
-              "key": "catchAllTable",
-              "label": "Unreachable routing table",
-              "input": "number",
-              "placeholder": "29999",
-              "initialFrom": { "kind": "invoke", "method": "rulesEffective", "path": "catchAllTable" },
-              "help": "Default 29999. This table contains an unreachable default and prevents waiting clients from leaking through another WAN."
-            },
-            {
-              "key": "zoneName",
-              "label": "Firewall zone name",
-              "input": "text",
-              "placeholder": "bmwanpool",
-              "initialFrom": { "kind": "invoke", "method": "rulesEffective", "path": "zoneName" },
-              "help": "Default bmwanpool. The module owns this UCI zone and its LAN forwarding; use only letters, digits, or underscore."
-            },
-            {
-              "key": "zoneMode",
-              "label": "Firewall membership mode",
-              "input": "select",
-              "options": [
-                { "value": "wildcard", "label": "Wildcard PPPoE devices (default)" },
-                { "value": "networks", "label": "Explicit UCI network list" }
-              ],
-              "initialFrom": { "kind": "invoke", "method": "rulesEffective", "path": "zoneMode" },
-              "help": "Wildcard keeps a large firewall config small. Switch to the explicit list only when a PPPoE create job warns that the firewall reload produced no nft rule - the step that registers the new interfaces with the firewall, on the Automation Jobs tab. That warning means this router's fw4 build did not materialize the wildcard; it is also kept under Automation, Events."
+              "type": "section",
+              "title": "Dashboard charts",
+              "columns": 2,
+              "blocks": [
+                {
+                  "type": "checkForm",
+                  "title": "How often a chart point is recorded",
+                  "checkMethod": "rulesCheck",
+                  "applyMethod": "rulesApply",
+                  "checkLabel": "Check this group",
+                  "applyLabel": "Save this group",
+                  "fields": [
+                    {
+                      "key": "historySampleSec",
+                      "label": "Chart sample interval (s)",
+                      "input": "number",
+                      "placeholder": "60",
+                      "initialFrom": {
+                        "kind": "invoke",
+                        "method": "rulesEffective",
+                        "path": "historySampleSec"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "conditional",
+                  "when": {
+                    "source": {
+                      "kind": "stream",
+                      "event": "ui",
+                      "path": "hintsOn"
+                    },
+                    "op": "eq",
+                    "value": true
+                  },
+                  "blocks": [
+                    {
+                      "type": "note",
+                      "title": "What this changes, and what it does not",
+                      "lines": [
+                        "Chart sample interval - 5 to 3600 seconds, default 60. How often a point is written to the metrics history the Dashboard's History charts read back. It used to be written once per slow sweep, which is why a short chart window looked like a staircase.",
+                        "The live tiles above the charts are not affected. They are fed by the module's own fast sweep and move on every tick whatever this is set to.",
+                        "A low value writes more to disk - twelve times the points at 5 seconds than at 60, against the retention and storage cap in the app's own Settings under Data & storage. Resolution is bought with how far back the charts reach.",
+                        "How often the router itself is read is a different setting, and it lives in the app's own Settings under General, Update intervals. Above roughly 2,000 PPPoE sessions, drop the OpenWRT fast interval to Low."
+                      ]
+                    }
+                  ]
+                }
+              ]
             }
           ]
         },
         {
-          "type": "checkForm",
-          "title": "Batch pacing and limits",
-          "checkMethod": "rulesCheck",
-          "applyMethod": "rulesApply",
-          "checkLabel": "Check this group",
-          "applyLabel": "Save this group",
-          "fields": [
+          "id": "rules",
+          "label": "Advanced rules",
+          "icon": "Layers",
+          "blocks": [
             {
-              "key": "uciChunkSize",
-              "label": "Interfaces per UCI chunk",
-              "input": "number",
-              "placeholder": "100",
-              "initialFrom": { "kind": "invoke", "method": "rulesEffective", "path": "uciChunkSize" },
-              "help": "1 to 1000, default 100. Smaller waves reduce PADI and reload bursts but take longer."
+              "type": "conditional",
+              "when": {
+                "source": {
+                  "kind": "stream",
+                  "event": "ui",
+                  "path": "hintsOn"
+                },
+                "op": "eq",
+                "value": true
+              },
+              "blocks": [
+                {
+                  "type": "note",
+                  "title": "These forms show what is in force",
+                  "tone": "warning",
+                  "lines": [
+                    "Every field opens filled in with the value this router is using right now, so each form doubles as the list of rules in force. Saving one group leaves the others exactly as they are.",
+                    "A field left empty means keep the current value. The placeholder still names the documented default; to put one rule back, type that default, and to put all of them back use Reset every rule.",
+                    "Changing the routing-table or rule-priority bases while batches or binding instances exist is refused: the old and new ownership ranges cannot safely overlap.",
+                    "What belongs to one automation lives with that automation. Batch pacing is on Automation, PPPoE Dialer; binding behaviour is on Automation, WAN Binding. Only the values both of them share are here."
+                  ]
+                }
+              ]
             },
             {
-              "key": "chunkDelayMs",
-              "label": "Delay between chunks (ms)",
-              "input": "number",
-              "placeholder": "1000",
-              "initialFrom": { "kind": "invoke", "method": "rulesEffective", "path": "chunkDelayMs" },
-              "help": "0 to 60000, default 1000 milliseconds. Applied between PPPoE create, stop, start, redial, and delete waves."
+              "type": "section",
+              "title": "Numbering and firewall layout",
+              "columns": 2,
+              "blocks": [
+                {
+                  "type": "checkForm",
+                  "checkMethod": "rulesCheck",
+                  "applyMethod": "rulesApply",
+                  "checkLabel": "Check this group",
+                  "applyLabel": "Save this group",
+                  "fields": [
+                    {
+                      "key": "ifacePrefix",
+                      "label": "Default PPPoE prefix",
+                      "input": "text",
+                      "placeholder": "pd",
+                      "initialFrom": {
+                        "kind": "invoke",
+                        "method": "rulesEffective",
+                        "path": "ifacePrefix"
+                      }
+                    },
+                    {
+                      "key": "tableBase",
+                      "label": "Routing-table base",
+                      "input": "number",
+                      "placeholder": "10000",
+                      "initialFrom": {
+                        "kind": "invoke",
+                        "method": "rulesEffective",
+                        "path": "tableBase"
+                      }
+                    },
+                    {
+                      "key": "rulePrefBase",
+                      "label": "Client-rule priority base",
+                      "input": "number",
+                      "placeholder": "20000",
+                      "initialFrom": {
+                        "kind": "invoke",
+                        "method": "rulesEffective",
+                        "path": "rulePrefBase"
+                      }
+                    },
+                    {
+                      "key": "catchAllPrefBase",
+                      "label": "Safety-rule priority base",
+                      "input": "number",
+                      "placeholder": "29900",
+                      "initialFrom": {
+                        "kind": "invoke",
+                        "method": "rulesEffective",
+                        "path": "catchAllPrefBase"
+                      }
+                    },
+                    {
+                      "key": "catchAllTable",
+                      "label": "Unreachable routing table",
+                      "input": "number",
+                      "placeholder": "29999",
+                      "initialFrom": {
+                        "kind": "invoke",
+                        "method": "rulesEffective",
+                        "path": "catchAllTable"
+                      }
+                    },
+                    {
+                      "key": "zoneName",
+                      "label": "Firewall zone name",
+                      "input": "text",
+                      "placeholder": "bmwanpool",
+                      "initialFrom": {
+                        "kind": "invoke",
+                        "method": "rulesEffective",
+                        "path": "zoneName"
+                      }
+                    },
+                    {
+                      "key": "zoneMode",
+                      "label": "Firewall membership mode",
+                      "input": "select",
+                      "options": [
+                        {
+                          "value": "wildcard",
+                          "label": "Wildcard PPPoE devices (default)"
+                        },
+                        {
+                          "value": "networks",
+                          "label": "Explicit UCI network list"
+                        }
+                      ],
+                      "initialFrom": {
+                        "kind": "invoke",
+                        "method": "rulesEffective",
+                        "path": "zoneMode"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "conditional",
+                  "when": {
+                    "source": {
+                      "kind": "stream",
+                      "event": "ui",
+                      "path": "hintsOn"
+                    },
+                    "op": "eq",
+                    "value": true
+                  },
+                  "blocks": [
+                    {
+                      "type": "note",
+                      "title": "What each field means",
+                      "lines": [
+                        "Default PPPoE prefix - one to four lowercase letters or digits, beginning with a letter. Default pd. A batch may override it.",
+                        "Routing-table base - default 10000. A managed PPPoE session uses this value plus its sequence. Cannot change while managed batches or binding instances exist.",
+                        "Client-rule priority base - default 20000. Client source rules occupy the range from here up to, but not including, the safety-rule base.",
+                        "Safety-rule priority base - default 29900. Each binding instance gets one subnet catch-all priority from this base; it must be above every client rule.",
+                        "Unreachable routing table - default 29999. This table contains an unreachable default and prevents waiting clients from leaking through another WAN.",
+                        "Firewall zone name - default bmwanpool. The module owns this UCI zone and its LAN forwarding; use only letters, digits or underscore.",
+                        "Firewall membership mode - wildcard keeps a large firewall config small. Switch to the explicit list only when a PPPoE create job warns that the firewall reload produced no nft rule, which means this router's fw4 build did not materialize the wildcard."
+                      ]
+                    }
+                  ]
+                }
+              ]
             },
             {
-              "key": "ruleChunkLines",
-              "label": "IP-rule lines per command",
-              "input": "number",
-              "placeholder": "500",
-              "initialFrom": { "kind": "invoke", "method": "rulesEffective", "path": "ruleChunkLines" },
-              "help": "50 to 2000, default 500. Caps the stdin script used when many policy rules must be repaired after a reboot."
+              "type": "section",
+              "title": "Housekeeping",
+              "columns": 2,
+              "blocks": [
+                {
+                  "type": "checkForm",
+                  "checkMethod": "rulesCheck",
+                  "applyMethod": "rulesApply",
+                  "checkLabel": "Check this group",
+                  "applyLabel": "Save this group",
+                  "fields": [
+                    {
+                      "key": "maxEvents",
+                      "label": "Binding events kept",
+                      "input": "number",
+                      "placeholder": "200",
+                      "initialFrom": {
+                        "kind": "invoke",
+                        "method": "rulesEffective",
+                        "path": "maxEvents"
+                      }
+                    },
+                    {
+                      "key": "stickyCap",
+                      "label": "Sticky mappings kept",
+                      "input": "number",
+                      "placeholder": "6000",
+                      "initialFrom": {
+                        "kind": "invoke",
+                        "method": "rulesEffective",
+                        "path": "stickyCap"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "conditional",
+                  "when": {
+                    "source": {
+                      "kind": "stream",
+                      "event": "ui",
+                      "path": "hintsOn"
+                    },
+                    "op": "eq",
+                    "value": true
+                  },
+                  "blocks": [
+                    {
+                      "type": "note",
+                      "title": "What each field means",
+                      "lines": [
+                        "Binding events kept - 20 to 1000, default 200. Older event rows are discarded to keep per-router host data bounded.",
+                        "Sticky mappings kept - 100 to 10000, default 6000. Least-recently-seen MAC hints are pruned beyond this cap to stay below the 512 KiB host-data limit."
+                      ]
+                    }
+                  ]
+                }
+              ]
             },
             {
-              "key": "execTimeoutSec",
-              "label": "Job command timeout (s)",
-              "input": "number",
-              "placeholder": "60",
-              "initialFrom": { "kind": "invoke", "method": "rulesEffective", "path": "execTimeoutSec" },
-              "help": "10 to 600, default 60 seconds. Every command is bounded even when the router is overloaded."
+              "type": "section",
+              "title": "Start over",
+              "blocks": [
+                {
+                  "type": "actions",
+                  "actions": [
+                    {
+                      "label": "Reset every rule",
+                      "method": "rulesReset",
+                      "kind": "danger",
+                      "confirm": "Put every OpenWRT module rule back to its default?"
+                    }
+                  ]
+                }
+              ]
             },
             {
-              "key": "maxBatchRows",
-              "label": "Maximum accounts per batch",
-              "input": "number",
-              "placeholder": "5000",
-              "initialFrom": { "kind": "invoke", "method": "rulesEffective", "path": "maxBatchRows" },
-              "help": "1 to 5000, default 5000. This is a guard rail, not a claim that the router has enough RAM for that many pppd processes."
+              "type": "conditional",
+              "when": {
+                "source": {
+                  "kind": "stream",
+                  "event": "ui",
+                  "path": "hintsOn"
+                },
+                "op": "eq",
+                "value": true
+              },
+              "blocks": [
+                {
+                  "type": "note",
+                  "title": "Operating notes",
+                  "tone": "warning",
+                  "lines": [
+                    "PPPoE account passwords are stored in clear text by OpenWRT in /etc/config/network. Protect router root access and backups.",
+                    "Above roughly 2,000 sessions, drop the OpenWRT fast interval to Low (5 seconds) in the app's own Settings, under General, Update intervals. Pausing that interval pauses WAN Binding.",
+                    "A waiting client can still reach local router services such as DNS, but deliberately has no internet route.",
+                    "Router reboot and app restart are recovered by deriving state from UCI, DHCP leases, routing tables, and managed IP rules."
+                  ]
+                }
+              ]
             }
-          ]
-        },
-        {
-          "type": "checkForm",
-          "title": "Binding behaviour",
-          "checkMethod": "rulesCheck",
-          "applyMethod": "rulesApply",
-          "checkLabel": "Check this group",
-          "applyLabel": "Save this group",
-          "fields": [
-            {
-              "key": "remapOnWanError",
-              "label": "Remap after WAN errors",
-              "input": "checkbox",
-              "initialFrom": { "kind": "invoke", "method": "rulesEffective", "path": "remapOnWanError" },
-              "help": "Default on for new binding instances when no per-instance value is supplied. Each instance's own Remap choice is authoritative afterward."
-            },
-            {
-              "key": "wanErrorGraceSec",
-              "label": "WAN error grace (s)",
-              "input": "number",
-              "placeholder": "30",
-              "initialFrom": { "kind": "invoke", "method": "rulesEffective", "path": "wanErrorGraceSec" },
-              "help": "0 to 3600, default 30 seconds. A failed WAN must remain failed this long before its client can move."
-            },
-            {
-              "key": "wanWarnUptimeSec",
-              "label": "New-WAN warning window (s)",
-              "input": "number",
-              "placeholder": "60",
-              "initialFrom": { "kind": "invoke", "method": "rulesEffective", "path": "wanWarnUptimeSec" },
-              "help": "0 to 3600, default 60 seconds. A newly reconnected WAN remains Warning for this long so flapping is visible."
-            },
-            {
-              "key": "stickyByMac",
-              "label": "Sticky by MAC",
-              "input": "checkbox",
-              "initialFrom": { "kind": "invoke", "method": "rulesEffective", "path": "stickyByMac" },
-              "help": "Default on for new instances when no per-instance value is supplied. Each instance's own Sticky choice is authoritative afterward."
-            },
-            {
-              "key": "releaseGraceSec",
-              "label": "Lease release grace (s)",
-              "input": "number",
-              "placeholder": "300",
-              "initialFrom": { "kind": "invoke", "method": "rulesEffective", "path": "releaseGraceSec" },
-              "help": "0 to 86400, default 300 seconds. The WAN stays reserved for this long after a DHCP lease disappears."
-            },
-            {
-              "key": "autoRedialAfterMin",
-              "label": "Watchdog redial after (min)",
-              "input": "number",
-              "placeholder": "0",
-              "initialFrom": { "kind": "invoke", "method": "rulesEffective", "path": "autoRedialAfterMin" },
-              "help": "0 disables the watchdog (default) because netifd already retries. A positive value redials sessions that remain failed for that many minutes."
-            },
-            {
-              "key": "autoRepairTables",
-              "label": "Repair WAN routing tables automatically",
-              "input": "checkbox",
-              "initialFrom": { "kind": "invoke", "method": "rulesEffective", "path": "autoRepairTables" },
-              "help": "Default on. When a managed WAN loses its option ip4table, rewrite it and reload the network. Switch it off to keep every write to /etc/config/network under your own hand; the audit still runs and reports what it found under Automation, Events."
-            },
-            {
-              "key": "leaseFile",
-              "label": "DHCP lease file",
-              "input": "text",
-              "placeholder": "/tmp/dhcp.leases",
-              "initialFrom": { "kind": "invoke", "method": "rulesEffective", "path": "leaseFile" },
-              "help": "Default /tmp/dhcp.leases. It must be an absolute path without shell metacharacters and use dnsmasq's standard lease format."
-            }
-          ]
-        },
-        {
-          "type": "checkForm",
-          "title": "Housekeeping",
-          "checkMethod": "rulesCheck",
-          "applyMethod": "rulesApply",
-          "checkLabel": "Check this group",
-          "applyLabel": "Save this group",
-          "fields": [
-            {
-              "key": "maxEvents",
-              "label": "Binding events kept",
-              "input": "number",
-              "placeholder": "200",
-              "initialFrom": { "kind": "invoke", "method": "rulesEffective", "path": "maxEvents" },
-              "help": "20 to 1000, default 200. Older event rows are discarded to keep per-router host data bounded."
-            },
-            {
-              "key": "stickyCap",
-              "label": "Sticky mappings kept",
-              "input": "number",
-              "placeholder": "6000",
-              "initialFrom": { "kind": "invoke", "method": "rulesEffective", "path": "stickyCap" },
-              "help": "100 to 10000, default 6000. Least-recently-seen MAC hints are pruned beyond this cap to stay below the 512 KiB host-data limit."
-            }
-          ]
-        },
-        {
-          "type": "actions",
-          "actions": [
-            {
-              "label": "Reset every rule",
-              "method": "rulesReset",
-              "kind": "danger",
-              "confirm": "Put every OpenWRT module rule back to its default?"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "type": "conditional",
-      "when": {
-        "source": { "kind": "stream", "event": "ui", "path": "hintsOn" },
-        "op": "eq",
-        "value": true
-      },
-      "blocks": [
-        {
-          "type": "note",
-          "title": "Operating notes",
-          "tone": "warning",
-          "lines": [
-            "PPPoE account passwords are stored in clear text by OpenWRT in /etc/config/network. Protect router root access and backups.",
-            "Above roughly 2,000 sessions, drop the OpenWRT fast interval to Low (5 seconds) in the app's own Settings, under General, Update intervals. Pausing that interval pauses WAN Binding.",
-            "A waiting client can still reach local router services such as DNS, but deliberately has no internet route.",
-            "Router reboot and app restart are recovered by deriving state from UCI, DHCP leases, routing tables, and managed IP rules."
           ]
         }
       ]

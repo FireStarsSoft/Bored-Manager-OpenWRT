@@ -75,3 +75,53 @@ export const SPACE_WARN_KB = 2_048
  */
 export const FW4_MISSING =
   'Managed PPPoE pools and WAN binding both need nftables masquerading, which routers still on fw3 do not have. It cannot be installed from here: moving a router to fw4 is a firmware upgrade, done at a router shell.'
+
+/**
+ * Everything `installHint` needs, which is deliberately far less than a whole
+ * verdict: the readiness card is built halfway through assembling one, and a
+ * parameter that demanded the finished object could not be called from there.
+ */
+export interface InstallContext {
+  probed: boolean
+  problem: string | null
+  pkgManager: unknown
+  isRoot: boolean
+  setupNeeded: boolean
+}
+
+/**
+ * Where to send a user whose router is missing something. The module can now
+ * install most of it, so pointing at a shell is only right when it cannot -
+ * and then which reason it is decides what the user should do next.
+ * `setupNeeded` folds four conditions into one boolean, so a single fallback
+ * sentence sent a non-root login, a router with no package manager and a
+ * router nobody had probed yet all off to the same shell.
+ *
+ * It lives here rather than in `requirements.ts`, where it was written, because
+ * the readiness card needs the same sentence and `probe/` may not import that
+ * file. `requirements.ts` re-exports it, so every caller is unchanged.
+ */
+export function installHint(caps: InstallContext, what: string): string {
+  if (caps.setupNeeded) {
+    return `Open Module settings and use "Install missing packages" - this module installs ${what} for you with the package manager this release ships.`
+  }
+  if (!caps.probed) {
+    return 'Open Module settings and run Check again first, so this page can see what the router actually has.'
+  }
+  if (caps.problem) {
+    return `Something more basic is in the way first: ${caps.problem} Router readiness, in Module settings, has the rest.`
+  }
+  if (!caps.pkgManager) {
+    // Reached only if the gate above ever stops treating a missing apk database
+    // as a blocking problem; the sentence is shared with the checklist card and
+    // the install form either way.
+    return `${APK_REQUIRED} Until that is sorted out, ${what} has to go on at a router shell.`
+  }
+  if (!caps.isRoot) {
+    return `Installing ${what} needs root. Connect this machine entry as root and Module settings can install it for you.`
+  }
+  // Probed, healthy, root, with a package manager - so the checklist believes
+  // nothing is missing while the gate above says otherwise. That is a stale
+  // snapshot rather than a router problem, and re-probing is what fixes it.
+  return `Module settings does not currently list ${what} as missing. Run Check again there to re-read the router.`
+}

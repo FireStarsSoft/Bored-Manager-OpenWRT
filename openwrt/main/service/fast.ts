@@ -30,6 +30,7 @@ import {
   type ManagedPppoeRange
 } from './command'
 import { noteError, reportHealth } from './health'
+import { sampleHistory } from './history'
 import { buildOverview } from './overview'
 import { activeLeases, routerLocaltime, validDump } from './parse'
 import { isCurrent, type SweepRuntime } from './runtime'
@@ -112,6 +113,10 @@ function publish(
   while (runtime.series.length && runtime.series[0].t < cutoff) runtime.series.shift()
   runtime.ctx.emit('overview', overview)
   runtime.ctx.emit('series', point)
+  // The archive behind the charts, paced by `historySampleSec` rather than by
+  // whichever tick happens to be running. The live tail the chart draws on top
+  // of it is the `series` point above.
+  sampleHistory(runtime, point.t)
 }
 
 export async function sampleFast(runtime: SweepRuntime, generation: number): Promise<void> {

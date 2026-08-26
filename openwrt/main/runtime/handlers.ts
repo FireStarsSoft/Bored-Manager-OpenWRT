@@ -45,7 +45,7 @@ import { refreshCapabilities, startPollers } from './readiness'
  * checked here.
  */
 const UNMANAGED_DEVICE =
-  'No WAN Binding instance manages this device, so there is no WAN to give it or take away. Create an instance for its LAN on the Automation page, Create tab; devices on that LAN are assigned on the next sweep.'
+  'No WAN Binding instance manages this device, so there is no WAN to give it or take away. Create an instance for its LAN on the Automation page, under WAN Binding; devices on that LAN are assigned on the next sweep.'
 
 function noInstance(idOrKeys: unknown): boolean {
   return !Array.isArray(idOrKeys) && !String(idOrKeys ?? '').trim()

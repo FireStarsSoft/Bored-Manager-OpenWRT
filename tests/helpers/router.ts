@@ -46,6 +46,13 @@ export interface RouterProbeOptions {
    * `null` says so explicitly for a test that is about exactly that.
    */
   agent?: Record<string, unknown> | null
+  /**
+   * The `===IPRULE===` body after the `ok` line: where `ip` resolves, and
+   * whether an unused iproute2 sits beside it. Defaults to a router whose `ip`
+   * simply is iproute2, so `without: ['ip-full']` on its own still describes
+   * the plain BusyBox router it always did.
+   */
+  ipDetail?: readonly string[]
 }
 
 /** A healthy, current agent, as the probe would read it back. */
@@ -84,6 +91,7 @@ export function routerProbeOutput(options: RouterProbeOptions = {}): string {
     '/dev/loop0                8192      2048      6144  25% /overlay',
     '===IPRULE===',
     ...(without.includes('ip-full') ? [] : ['ok']),
+    ...(options.ipDetail ?? ['path /sbin/ip', 'real /sbin/ip']),
     '===SERVICE===',
     ...(options.service ?? ['pidof', 'dnsmasq', 'netifd', 'nftok', 'fw4']),
     '===CONFLICT===',

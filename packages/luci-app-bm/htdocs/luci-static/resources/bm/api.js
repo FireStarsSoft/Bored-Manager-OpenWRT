@@ -100,10 +100,25 @@ function describe(error) {
 		return _('The router has no such service listening. It may have stopped, or the package may have just been removed.');
 	if (/ubus code 6\b/.test(text))
 		return _('This login is not allowed to make that call. The ACL that grants it is luci-app-bm.');
-	if (/ubus code (2|7)\b/.test(text))
+	// Raw ubus status values - rpc.js prints the number and nothing else, so
+	// these have to agree with its own table (rpc.js, getStatusText): 2 is
+	// INVALID_ARGUMENT, 7 is TIMEOUT, 9 is UNKNOWN_ERROR. 2 and 7 shared one
+	// sentence about arguments, which is the wrong half of the advice for a
+	// daemon that is simply not answering.
+	if (/ubus code 2\b/.test(text))
 		return _('The router rejected the arguments of that call.');
-	if (/ubus code 9\b/.test(text))
+	if (/ubus code 7\b/.test(text))
 		return _('The router took too long to answer.');
+	// What a handler that threw replies with, immediately before the exception
+	// takes the daemon down with it (ubus.c, the default exception case). So it
+	// is the one code whose reason only ever exists in the log.
+	if (/ubus code 9\b/.test(text))
+		return _('The router failed that call without saying why, and the daemon may have stopped. Run "logread -e bm-" on the router.');
+	// The dispatcher's own refusal, not a ubus status: the session was created
+	// before this package's ACL existed, so rpcd never granted it these calls.
+	// A new login reads the ACL that is on disk now.
+	if (/-32002|Access denied/i.test(text))
+		return _('This login is older than the ACL that allows these calls. Log out of LuCI and back in; if that is not enough, run "/etc/init.d/rpcd reload" on the router.');
 	if (/HTTP error|NetworkError/i.test(text))
 		return _('The router did not answer. The connection may have gone.');
 

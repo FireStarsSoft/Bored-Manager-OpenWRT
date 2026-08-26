@@ -5,6 +5,141 @@ Module versions are independent of the app's. OpenWRT 2.x needs Bored Manager
 that open pre-filled, and OpenWrt **25.12** on the router. The 1.0.x line needs
 **0.3.3**, for the `subnav` and `note` blocks and the `file` form input.
 
+## 2.5.0
+
+Needs the same Bored Manager **0.4.1** and OpenWrt **25.12 or newer**. The
+router packages move to **1.4.1** alongside it: one fix, which is what lets the
+router's own LuCI pages call the daemons at all - see `packages/CHANGELOG.md`.
+This release is about where things are on the three pages, and about two
+answers the module was giving that were not true.
+
+### Every page is grouped by a rail
+
+The Dashboard and Module settings were each one column of stacked sections - six
+and seven of them - so a wide monitor got one very long scroll and everything
+below the first screen was found by scrolling past it. Both now sit behind the
+same `subnav` rail the Automation page already used, which is the block the
+app's own Settings page is built from:
+
+| Page | Rail |
+|---|---|
+| Dashboard | Overview · History · Devices · Interfaces |
+| Automation | PPPoE Dialer · WAN Binding · Jobs · Events |
+| Module settings | Router readiness · Router packages · Jobs · Display & charts · Advanced rules |
+
+Forms sit beside their explanation in a two-column section rather than under it,
+the readiness cards go up to six across instead of three, and the seven live
+tiles go four across.
+
+### Automation: each automation owns its own configuration
+
+**Create is gone as a tab.** It held four unrelated things - the PPPoE create
+form, the binding create form, a second copy of the package installer and a
+second copy of the job monitor - which meant neither automation's own tab could
+create anything, and the tab that could was about both of them at once.
+
+*Create a PPPoE batch* is on the PPPoE Dialer tab now and *Create a WAN Binding
+instance* is on the WAN Binding tab, each with the install prompt for what *that*
+automation is missing - decided by the verdict rather than by `setupNeeded`,
+because binding needs either `ip rule` or dnsmasq and a spec cannot ask "either
+of these". The duplicate job monitor is gone; the Jobs tab was always the one
+that kept every step.
+
+Two rule groups moved with them. *Batch pacing and limits* is a PPPoE setting and
+now sits on the PPPoE tab; *Binding behaviour* is a binding setting and sits on
+the binding tab. Module settings keeps what the two share - the numbering and
+firewall layout, housekeeping, and Reset every rule.
+
+Each of those two tabs then got a rail of its own: *Sessions · Create a batch ·
+Pacing and limits* on the dialer, *Instances · Create an instance · Behaviour*
+on binding. Operating, creating and tuning are three different errands, and on
+one scroll the last two sat below a table that can be a thousand rows tall.
+
+### The hints toggle now switches off everything it says it does
+
+*Show the explanatory notes* reached 12 of 48 notes and none of the 50 field
+help lines, because `FormField.help` renders as an always-on paragraph and
+nothing in the spec language can gate it. So there is no field help left
+anywhere: every explanation is a note, one per form, beside it rather than under
+each field, and the toggle switches all of them off. State banners are
+deliberately not affected - "this router cannot be managed", "the numbers below
+are frozen" and "compatibility mode" are not hints, and a page that went quiet
+about them would be tidier and wrong.
+
+### The dashboard charts have a range, and a sample interval
+
+All four charts pinned `window: 21600`, which overrides the range picker the app
+draws above the page - so that control was visible and inert, and every chart was
+six hours wide whatever anyone pressed. History is a rail item now with its own
+**1 hour / 6 hours / 24 hours** switch.
+
+Underneath it, a history point used to be written once per slow sweep, because
+that is where the call happened to sit. One point per minute however fast the
+router was being read is why every window shorter than an hour looked like a
+staircase. It is now a setting - **Module settings → Display & charts → Chart
+sample interval**, 5 to 3600 seconds, default 60, which is exactly what the slow
+sweep produced - and the fast tick is what offers the sample. The live tiles were
+never affected either way; they read the module's own `series` stream.
+
+### Policy routing: three faults, not one
+
+"This router cannot do policy routing" was three different problems wearing one
+sentence, and only one of them is fixed by installing a package. The probe now
+asks where `ip` resolves and whether an unused iproute2 is sitting beside it:
+
+| What the router has | What it says |
+|---|---|
+| BusyBox `ip`, no iproute2 | the BusyBox paragraph, and an offer to install `ip-full` |
+| `ip-full` installed, working, and `/sbin/ip` still BusyBox | the alternatives link never switched: `ln -sf /usr/libexec/ip-full /sbin/ip`, and **no** offer to install it again |
+| `ip-full` installed and the kernel still refuses a numeric table | policy routing is not in this firmware; no package adds it |
+
+The second row is the one that mattered. `apk add ip-full` succeeded, the binary
+was on disk and worked when called by its own path, and `ip` still meant the
+BusyBox applet - so the capability the install job verifies was still missing,
+the job finished `partial`, and the only remedy on offer was to run it again.
+Which somebody did, three times.
+
+"No offer to install it again" is every surface, not just the card. The list of
+missing packages was built from `hasIpRule` alone, so on both of the rows no
+package can fix, Module settings went on listing *ip-full* with its box ticked,
+the router stayed at **Needs attention** for ever, and the new install prompt on
+the WAN Binding tab offered the same job - directly contradicting the card one
+page over. A group only counts as missing now when installing it could still
+change the answer, which is also what lets the router finally read as ready.
+
+### Readiness cards say what to do about a failure
+
+Every check has carried an `install` field since the install flow existed and no
+surface ever read it, so the three rows this module can actually fix - policy
+routing, PPPoE support, DHCP leases - were the only ones whose detail named no
+next step, while every row it *cannot* fix spelled one out. The card now carries
+the same sentence the create-form refusals use, which also means it says *"needs
+root"* or *"no apk database"* where that is what is really in the way, rather
+than pointing at a form that would refuse.
+
+### The install job stopped guessing
+
+`... still not available after installing; the router may need a reboot` was the
+whole of that failure, and a reboot is the one thing that cannot help the case
+above. It now names the cause, and:
+
+- asks the router **twice** before failing. `refreshCapabilities` joins a probe
+  that is already in flight, and the readiness poller is guaranteed to be ticking
+  on the page the job was started from - so a probe sent before `apk add`
+  returned could answer the verify step with what was true beforehand;
+- a finished `partial` job reads amber on its card as well as on its badge. It
+  was tinted red by the failure count and labelled amber by its state, so a
+  three-step install whose last step could not confirm looked like a router on
+  fire.
+
+### Inside
+
+`main/config.ts` was eight lines under the 600-line limit, so it is a folder now
+- `rules.ts`, `store.ts`, `editor.ts` behind an `index.ts`. Every call site
+already imported `'../config'`, so nothing else changed. The history writer moved
+out of the slow tick into `service/history.ts`, which is now the only file that
+calls `addHistory` - and a test says so.
+
 ## 2.4.0
 
 Needs the same Bored Manager **0.4.1** and OpenWrt **25.12 or newer**. Router

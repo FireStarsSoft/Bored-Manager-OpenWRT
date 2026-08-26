@@ -16,6 +16,8 @@ import { CARDS, observedChecks, type CheckSeed } from './checks'
 import {
   APK_REQUIRED,
   CORE_TOOLS,
+  installHint,
+  type InstallContext,
   MIN_RELEASE,
   NOT_CONNECTED,
   NOT_OPENWRT,
@@ -96,6 +98,23 @@ export function judgeAgent(facts: AgentFacts): AgentCapability {
   }
 }
 
+/**
+ * The next step for a failing row, or `''` when there is nothing to add.
+ *
+ * `install` has been on every check since the install flow existed and no
+ * surface ever read it, so the three rows that *can* be fixed from Module
+ * settings - policy routing, PPPoE support, DHCP leases - were the only three
+ * whose detail named no next step at all, while every row that cannot be fixed
+ * from here spelled one out. A user reading "this router has the BusyBox ip"
+ * was told what was wrong and left to find the form themselves.
+ */
+function remedy(seed: CheckSeed, context: InstallContext): string {
+  if (!seed.install) return ''
+  const group = PACKAGE_GROUPS.find((entry) => entry.key === seed.install)
+  if (!group) return ''
+  return ` ${installHint(context, `${group.title} (${group.packages.join(', ')})`)}`
+}
+
 const RANK: Record<ReadinessStatus, number> = { bad: 0, warn: 1, unknown: 2, ok: 3 }
 
 function worst(statuses: readonly ReadinessStatus[]): ReadinessStatus {
@@ -153,9 +172,18 @@ export function buildReadiness(facts: ProbeFacts): OpenWrtCapabilities {
   // by default rather than by observation, and listing all three groups then
   // put "install ppp, ppp-mod-pppoe and kmod-pppoe" on the settings page for a
   // router that had not been asked.
+  //
+  // And only when installing it could still change the answer. `ip-full` on
+  // disk is the case that made this necessary: the capability stays false
+  // because the alternatives link was never switched, or because this kernel has
+  // no policy routing at all, and `apk add ip-full` is a no-op in both. The
+  // readiness row already says so and offers no install - the form read
+  // `hasIpRule` on its own and offered it anyway, so the same router was invited
+  // to run the same no-op job for ever, which is the loop this release is about.
   if (facts.probed) {
     for (const group of PACKAGE_GROUPS) {
       if (capabilityValues[group.capability]) continue
+      if (group.capability === 'hasIpRule' && facts.ip.fullPresent) continue
       for (const name of group.packages) {
         missingPackages.push({ name, group: group.key, for: group.purpose })
       }
@@ -213,6 +241,16 @@ export function buildReadiness(facts: ProbeFacts): OpenWrtCapabilities {
       )
 
   const checks: ReadinessCheck[] = seeds.map(({ card: _card, ...check }) => check)
+  const canInstall = ready && pkgManager !== null && isRoot
+  const setupNeeded = canInstall && missingPackages.length > 0
+  // Read off `missingPackages` rather than off the capabilities a second time,
+  // so an automation tab cannot offer an install that the settings page has
+  // already decided is not worth offering.
+  const missingGroups = new Set(missingPackages.map((entry) => entry.group))
+  // Hoisted above the cards on purpose: a row that names an installable group
+  // has to be able to say where to go and install it, and `installHint` needs
+  // both of the flags above to pick which of the four sentences applies.
+  const installContext: InstallContext = { probed: facts.probed, problem, pkgManager, isRoot, setupNeeded }
   const cards: ReadinessCard[] = CARDS.map((shape) => {
     const own = seeds.filter((seed) => seed.card === shape.key)
     const failing = own.filter((seed) => seed.status !== 'ok')
@@ -226,7 +264,7 @@ export function buildReadiness(facts: ProbeFacts): OpenWrtCapabilities {
       note: !facts.probed
         ? UNANSWERED
         : failing.length
-          ? failing.map((seed) => `${seed.title}: ${seed.detail}`).join(' ')
+          ? failing.map((seed) => `${seed.title}: ${seed.detail}${remedy(seed, installContext)}`).join(' ')
           : shape.okNote,
       checks: own.map((seed) => ({
         label: seed.title,
@@ -236,8 +274,6 @@ export function buildReadiness(facts: ProbeFacts): OpenWrtCapabilities {
     }
   })
 
-  const canInstall = ready && pkgManager !== null && isRoot
-  const setupNeeded = canInstall && missingPackages.length > 0
   // A warning is something the user may choose to live with; only a `bad` check
   // on a working router is worth pulling them to the settings page for - with
   // one deliberate exception.
@@ -277,6 +313,7 @@ export function buildReadiness(facts: ProbeFacts): OpenWrtCapabilities {
     hasPppoe,
     hasDnsmasq,
     hasIpRule: facts.hasIpRule,
+    ip: facts.ip,
     services: facts.probed
       ? facts.services
       : { dnsmasq: 'unknown', netifd: 'unknown', fw4: 'unknown' },
@@ -303,6 +340,12 @@ export function buildReadiness(facts: ProbeFacts): OpenWrtCapabilities {
     cards,
     missingPackages,
     setupNeeded,
+    // Only ever true when an install could actually run: an automation tab
+    // offering a form that would refuse is worse than one saying nothing.
+    missingFor: {
+      pppoe: canInstall && missingGroups.has('pppoe'),
+      binding: canInstall && (missingGroups.has('ipfull') || missingGroups.has('dnsmasq'))
+    },
     canInstall
   }
 }

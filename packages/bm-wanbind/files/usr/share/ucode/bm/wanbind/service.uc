@@ -23,7 +23,7 @@ import * as netlink from 'bm.wanbind.netlink';
 import * as reconcile from 'bm.wanbind.reconcile';
 import * as ruleset from 'bm.wanbind.rules';
 
-export const RELEASE = '1.4.0';
+export const RELEASE = '1.4.1';
 
 /**
  * The ubus contract version, separate from the release.
@@ -566,10 +566,18 @@ export function flush(args) {
 };
 
 function method(args, fn) {
+	// Accepted on every method because LuCI's dispatcher appends the session id
+	// to whatever a page sends, and ucode's publish refuses any named argument
+	// the template does not declare. Stripped before the handler runs; the
+	// hotplug hook never sends it, so `lease` is unchanged.
+	args.ubus_rpc_session = '';
+
 	return {
 		call: function(req) {
 			state.served = state.served + 1;
-			return fn(type(req.args) == 'object' ? req.args : {});
+			let given = type(req.args) == 'object' ? req.args : {};
+			delete given.ubus_rpc_session;
+			return fn(given);
 		},
 		args: args
 	};

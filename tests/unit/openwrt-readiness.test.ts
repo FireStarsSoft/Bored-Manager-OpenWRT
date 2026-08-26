@@ -121,6 +121,10 @@ const facts = (patch: Partial<ProbeFacts> = {}): ProbeFacts => ({
   uid: 0,
   overlayFreeKb: 8_192,
   hasIpRule: true,
+  // A router whose `ip` is simply iproute2, with nothing unused beside it.
+  // Flipping `hasIpRule` alone on this therefore describes the plain BusyBox
+  // router; the two ip-full branches supply their own `ip` block.
+  ip: { path: '/usr/sbin/ip', real: '/usr/sbin/ip', fullPresent: false, fullWorks: false },
   services: { dnsmasq: 'running', netifd: 'running', fw4: 'running' },
   foreignRules: [],
   foreignRuleCount: 0,

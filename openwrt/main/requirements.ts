@@ -28,40 +28,11 @@
  */
 import { failedCheck, type ModuleCheckFinding, type ModuleCheckReport } from '@shared/check'
 import type { OkResult } from '@shared/types'
-import { APK_REQUIRED, FW4_MISSING, type OpenWrtCapabilities } from './probe'
+import { FW4_MISSING, installHint, type OpenWrtCapabilities } from './probe'
 
-/**
- * Where to send a user whose router is missing something. The module can now
- * install most of it, so pointing at a shell is only right when it cannot -
- * and then which reason it is decides what the user should do next.
- * `setupNeeded` folds four conditions into one boolean, so a single fallback
- * sentence sent a non-root login, a router with no package manager and a
- * router nobody had probed yet all off to the same shell.
- */
-export function installHint(caps: OpenWrtCapabilities, what: string): string {
-  if (caps.setupNeeded) {
-    return `Open Module settings and use "Install missing packages" - this module installs ${what} for you with the package manager this release ships.`
-  }
-  if (!caps.probed) {
-    return 'Open Module settings and run Check again first, so this page can see what the router actually has.'
-  }
-  if (caps.problem) {
-    return `Something more basic is in the way first: ${caps.problem} Router readiness, in Module settings, has the rest.`
-  }
-  if (!caps.pkgManager) {
-    // Reached only if the gate above ever stops treating a missing apk database
-    // as a blocking problem; the sentence is shared with the checklist card and
-    // the install form either way.
-    return `${APK_REQUIRED} Until that is sorted out, ${what} has to go on at a router shell.`
-  }
-  if (!caps.isRoot) {
-    return `Installing ${what} needs root. Connect this machine entry as root and Module settings can install it for you.`
-  }
-  // Probed, healthy, root, with a package manager - so the checklist believes
-  // nothing is missing while the gate above says otherwise. That is a stale
-  // snapshot rather than a router problem, and re-probing is what fixes it.
-  return `Module settings does not currently list ${what} as missing. Run Check again there to re-read the router.`
-}
+// Written in `probe/text.ts` so the readiness card can say the same thing;
+// re-exported here because this is where every create-form gate looks for it.
+export { installHint }
 
 const UNPROBED_TITLE = 'The router has not been checked yet'
 const UNPROBED_DETAIL =
@@ -125,9 +96,16 @@ const REQUIREMENTS: Record<RequirementKey, RequirementSpec> = {
       'fw4 and nft are both present, but no `inet fw4` table is loaded, so nothing is masquerading and a managed pool would carry no client traffic. Start it with `service firewall start` at a router shell, then run Check again.'
   },
   ipRule: {
-    title: 'The ip command on this router has no rule support',
+    // Not "has no rule support": BusyBox's applet lists rules perfectly well
+    // and refuses only the numeric routing tables, which is the whole of what
+    // binding asks of it. The readiness card carries the three reasons apart;
+    // this is the one sentence a refused apply gets.
+    title: 'This router cannot steer traffic by routing table',
     met: (caps) => caps.hasIpRule,
-    detail: (caps) => installHint(caps, 'ip-full')
+    detail: (caps) =>
+      caps.ip.fullPresent
+        ? `Router readiness, in Module settings, has the reason - iproute2 is on this router and \`ip\` is not resolving to it, or this kernel has no policy routing. Neither is fixed by installing a package.`
+        : installHint(caps, 'ip-full')
   },
   dnsmasq: {
     title: 'dnsmasq is missing on this router',

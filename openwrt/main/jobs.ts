@@ -153,10 +153,22 @@ const JOB_STATE_COLOR: Readonly<Record<JobState, string | undefined>> = {
   cancelled: undefined
 }
 
-/** A running job is only `ok` once it is done; until then nothing has proven out. */
+/**
+ * A running job is only `ok` once it is done; until then nothing has proven out.
+ *
+ * The finished states are read before the failure count, which is the whole
+ * point. `failed > 0` came first, so a finished `partial` tinted its card red
+ * while its own Outcome badge said amber - a three-step install where the last
+ * step could not confirm the result looked like a router that had caught fire.
+ * `partial` is a warning in both places now. A job still *running* with a
+ * failed step behind it stays `bad`: it has not finished, and the count is the
+ * only thing there is to go on.
+ */
 function jobHealth(job: OpenWrtJob, failed: number, warned: number): StatusTone {
-  if (failed > 0 || job.state === 'failed') return 'bad'
-  if (warned > 0 || job.state === 'partial' || job.state === 'cancelled') return 'warn'
+  if (job.state === 'failed') return 'bad'
+  if (job.state === 'partial' || job.state === 'cancelled') return 'warn'
+  if (failed > 0) return 'bad'
+  if (warned > 0) return 'warn'
   return job.state === 'done' ? 'ok' : 'unknown'
 }
 

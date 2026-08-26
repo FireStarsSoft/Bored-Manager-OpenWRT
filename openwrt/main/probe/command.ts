@@ -58,6 +58,12 @@ const PROBE_TOOLS = [
  * consulted after it. Filtering there rather than here is what keeps the answer
  * small on a busy router.
  */
+/**
+ * Where OpenWrt's `ip-full` package puts the real iproute2 binary. The
+ * alternatives symlink at `/sbin/ip` is what is supposed to point here.
+ */
+export const IP_FULL_PATH = '/usr/libexec/ip-full'
+
 export function buildProbeCommand(rulePrefBase: number): string {
   // Interpolated into awk, so it is reduced to an integer first and falls back
   // to the default rather than to nothing: an empty `-v B=` would make the
@@ -113,7 +119,20 @@ export function buildProbeCommand(rulePrefBase: number): string {
     // `route show` and not a rule add: read-only, and it fails on exactly the
     // same argument. An empty numeric table is not an error to iproute2, so a
     // router that has it answers 0 with no output.
-    `echo '===IPRULE==='; if ip -4 rule show >/dev/null 2>&1 && ip -4 route show table 29999 >/dev/null 2>&1; then echo ok; fi`,
+    //
+    // The four lines after it exist because `ok` on its own cannot tell three
+    // very different routers apart, and all three used to be answered with
+    // "install ip-full" - including the one that just did. `ip-full` lands at
+    // `/usr/libexec/ip-full` and is reached through an alternatives symlink at
+    // `/sbin/ip`; when that switch does not happen, `apk add` succeeds, the
+    // binary is there and works, and the router still cannot do policy routing
+    // because the BusyBox applet is still what `ip` means. And a kernel built
+    // without multiple routing tables refuses the numeric table from a full
+    // iproute2 as well, which no package will ever fix.
+    //
+    // Read-only throughout, and `ok` stays a line of its own so the verdict
+    // itself is parsed exactly as it was.
+    `echo '===IPRULE==='; if ip -4 rule show >/dev/null 2>&1 && ip -4 route show table 29999 >/dev/null 2>&1; then echo ok; fi; BM_IP=$(command -v "ip" 2>/dev/null) && { echo "path $BM_IP"; BM_REAL=$(readlink -f "$BM_IP" 2>/dev/null) && [ -n "$BM_REAL" ] && echo "real $BM_REAL"; }; if [ -x ${IP_FULL_PATH} ]; then echo libexec; if ${IP_FULL_PATH} -4 route show table 29999 >/dev/null 2>&1; then echo libexecok; fi; fi`,
     // A binary in PATH is not a running service, and the difference is invisible
     // everywhere else in this module: dnsmasq stopped still answers `command -v`,
     // so the router reported `hasDnsmasq: true`, the lease file went stale, and
@@ -225,6 +244,17 @@ function lines(text: string): string[] {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
+}
+
+/**
+ * The value of a `<key> <value>` line, or `''` when the router did not print
+ * one. A path is taken verbatim after the first space - `/usr/local/my ip` is
+ * an odd place to keep a binary, and truncating it at the space would report a
+ * path that does not exist rather than the one that does.
+ */
+function prefixed(body: readonly string[], key: string): string {
+  const found = body.find((line) => line.startsWith(`${key} `))
+  return found ? found.slice(key.length + 1).trim() : ''
 }
 
 /**
@@ -388,6 +418,7 @@ export async function probeOpenWrt(
     const pkg = new Set(lines(sections.get('PKG') ?? ''))
     const uid = Number(lines(sections.get('IDU') ?? '')[0])
     const service = new Set(lines(sections.get('SERVICE') ?? ''))
+    const ipRuleLines = lines(sections.get('IPRULE') ?? '')
     const conflictBody = lines(sections.get('CONFLICT') ?? '')
     const conflict = new Set(conflictBody)
     const foreign = foreignRules(conflictBody)
@@ -411,7 +442,13 @@ export async function probeOpenWrt(
       pkgDb: { opkg: pkg.has('opkgdb'), apk: pkg.has('apkdb') || pkg.has('apkworld') },
       uid: Number.isFinite(uid) ? uid : -1,
       overlayFreeKb: freeKbFromDf(sections.get('SPACE') ?? ''),
-      hasIpRule: lines(sections.get('IPRULE') ?? '').includes('ok'),
+      hasIpRule: ipRuleLines.includes('ok'),
+      ip: {
+        path: prefixed(ipRuleLines, 'path'),
+        real: prefixed(ipRuleLines, 'real'),
+        fullPresent: ipRuleLines.includes('libexec'),
+        fullWorks: ipRuleLines.includes('libexecok')
+      },
       services: {
         dnsmasq: running('pidof', 'dnsmasq'),
         netifd: running('pidof', 'netifd'),

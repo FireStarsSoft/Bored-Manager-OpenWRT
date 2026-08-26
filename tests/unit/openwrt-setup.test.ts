@@ -29,6 +29,16 @@ const settle = async (rounds = 40): Promise<void> => {
   }
 }
 
+/**
+ * The verify step asks the router a second time after a real delay, so a probe
+ * that was already in flight when `apk add` returned cannot answer it. Nothing
+ * here can be pumped with zero-length rounds; the wait has to be waited out.
+ */
+const settleVerifyRetry = async (): Promise<void> => {
+  await new Promise((resolve) => setTimeout(resolve, 3_500))
+  await settle()
+}
+
 interface Router {
   pppoe: boolean
   ipRule: boolean
@@ -43,6 +53,12 @@ interface Router {
   fail: string[]
   /** stderr the refused command answers with, so a known failure can be told. */
   failStderr: string
+  /**
+   * The `===IPRULE===` detail lines. Left alone this describes a router whose
+   * `ip` simply is iproute2; a test about the alternatives link supplies its
+   * own.
+   */
+  ipDetail: string[]
 }
 
 function router(patch: Partial<Router> = {}): Router {
@@ -58,6 +74,7 @@ function router(patch: Partial<Router> = {}): Router {
     defaultRoute: true,
     fail: [],
     failStderr: 'ERROR: unable to select packages: kmod-pppoe (no such package)',
+    ipDetail: ['path /sbin/ip', 'real /sbin/ip'],
     ...patch
   }
 }
@@ -91,6 +108,7 @@ function probeOutput(state: Router): string {
     `/dev/loop0                8192      2048      ${state.freeKb}  25% /overlay`,
     '===IPRULE===',
     ...(state.ipRule ? ['ok'] : []),
+    ...state.ipDetail,
     '===DONE==='
   ].join('\n')
 }
@@ -475,12 +493,110 @@ describe('openwrt setup apply: the only commands it can produce', () => {
     })
 
     await apply(harness, { token: report.token, values })
-    await settle()
+    await settleVerifyRetry()
 
     const job = lastJobs(harness).finished[0]
     expect(job.state).toBe('partial')
     expect(job.items[4].status).toBe('error')
     expect(job.items[4].message).toContain('PPPoE support still not available')
+    runtime.dispose?.()
+  })
+
+  it('blames the alternatives link, not a reboot, when ip-full is on and unused', async () => {
+    // The case that had no test and produced three identical `partial` jobs in
+    // a row on a real router: `apk add ip-full` succeeds, the binary is on disk
+    // and works when called by its own path, and `/sbin/ip` is still the
+    // BusyBox symlink - so the capability the verify step looks for is still
+    // missing and reinstalling will never bring it back.
+    const state = router({ ipRule: false })
+    const { harness, runtime } = newRouter(state)
+    runtime.applyPollers?.()
+    await settle(6)
+    const values = { ipfull: true }
+    const report = await check(harness, values)
+
+    harness.exec.mockImplementation(async (command: string) => {
+      if (command.includes("echo '===REL==='")) {
+        // Installed, working, and not what `ip` means.
+        state.ipDetail = ['path /sbin/ip', 'real /bin/busybox', 'libexec', 'libexecok']
+        return ok(probeOutput(state))
+      }
+      if (command.includes("echo '===ROUTE==='")) return ok(preflightOutput(state))
+      return ok('installed')
+    })
+
+    await apply(harness, { token: report.token, values })
+    await settleVerifyRetry()
+
+    const job = lastJobs(harness).finished[0]
+    expect(job.state).toBe('partial')
+    const verify = job.items[job.items.length - 1]
+    expect(verify.status).toBe('error')
+    expect(verify.message).toContain('/usr/libexec/ip-full')
+    expect(verify.message).toContain('ln -sf')
+    // The one remedy that cannot possibly help here, and the only one this
+    // step used to offer.
+    expect(verify.message).not.toContain('reboot')
+    runtime.dispose?.()
+  })
+
+  it('says no package can help when the kernel refuses the table', async () => {
+    const state = router({ ipRule: false })
+    const { harness, runtime } = newRouter(state)
+    runtime.applyPollers?.()
+    await settle(6)
+    const values = { ipfull: true }
+    const report = await check(harness, values)
+
+    harness.exec.mockImplementation(async (command: string) => {
+      if (command.includes("echo '===REL==='")) {
+        // iproute2 is what `ip` resolves to, and it still cannot do it.
+        state.ipDetail = ['path /sbin/ip', 'real /usr/libexec/ip-full', 'libexec']
+        return ok(probeOutput(state))
+      }
+      if (command.includes("echo '===ROUTE==='")) return ok(preflightOutput(state))
+      return ok('installed')
+    })
+
+    await apply(harness, { token: report.token, values })
+    await settleVerifyRetry()
+
+    const job = lastJobs(harness).finished[0]
+    const verify = job.items[job.items.length - 1]
+    expect(verify.status).toBe('error')
+    expect(verify.message).toContain('kernel')
+    expect(verify.message).not.toContain('reboot')
+    runtime.dispose?.()
+  })
+
+  it('reads the router twice before calling a capability missing', async () => {
+    // `refreshCapabilities` joins a probe that is already in flight, and the
+    // readiness poller is guaranteed to be running while this page is open. A
+    // tick whose PROBE_COMMAND went out before `apk add` returned would answer
+    // the verify step with what was true before the install, so the step asks
+    // again rather than failing a job the router would disagree with.
+    const state = router({ pppoe: false })
+    const { harness, runtime } = newRouter(state)
+    runtime.applyPollers?.()
+    await settle(6)
+    const values = { pppoe: true }
+    const report = await check(harness, values)
+
+    let probes = 0
+    harness.exec.mockImplementation(async (command: string) => {
+      if (command.includes("echo '===REL==='")) {
+        probes += 1
+        // Stale on the first read after the install, current on the second.
+        return ok(probeOutput({ ...state, pppoe: probes > 1 }))
+      }
+      if (command.includes("echo '===ROUTE==='")) return ok(preflightOutput(state))
+      return ok('installed')
+    })
+
+    await apply(harness, { token: report.token, values })
+    await settleVerifyRetry()
+
+    expect(lastJobs(harness).finished[0].state).toBe('done')
     runtime.dispose?.()
   })
 

@@ -26,6 +26,7 @@ export {
   type ReadinessStatus,
   type ServiceState
 } from './types'
+export { installHint, type InstallContext } from './text'
 export {
   APK_REQUIRED,
   FW4_MISSING,
@@ -36,4 +37,4 @@ export {
   judgeAgent,
   opkgNotSupported
 } from './readiness'
-export { PROBE_COMMAND, buildProbeCommand, freeKbFromDf, probeOpenWrt } from './command'
+export { IP_FULL_PATH, PROBE_COMMAND, buildProbeCommand, freeKbFromDf, probeOpenWrt } from './command'

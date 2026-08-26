@@ -9,6 +9,50 @@ guessing, so it moves only when the shape of a call changes. `configSchema` is
 the shape of what is written to `/etc`, and it is what a downgrade is refused
 on. All three are in [`version.json`](version.json).
 
+## 1.4.1
+
+The one that matters was found on a real router: every LuCI page answered "There
+is no agent on this router" while all three daemons were up and answering
+`ubus call`. The second came out of reading the error path the first unblocked.
+
+### LuCI can actually call the daemons now
+
+LuCI's dispatcher appends `ubus_rpc_session` to every call it forwards, and
+ucode's `publish` refuses any named argument the method's template does not
+declare - so every call from a LuCI page came back `UBUS_STATUS_INVALID_ARGUMENT`
+while the same call typed at a console worked. The one line every view starts
+with, `bm.agent info`, failed first, which is why the pages drew the "no agent"
+notice instead of data.
+
+Every published method on `bm.agent`, `bm.wanbind` and `bm.pppoe` now declares
+`ubus_rpc_session` and strips it before the handler runs, so no handler ever
+sees a session id. The hotplug `lease` call and the console paths never sent
+the field and are unchanged. The contract the module drives is the same shape,
+so `apiVersion` stays 3.
+
+`bm/api.js` also learned the sentence for the dispatcher's own `-32002 Access
+denied`: it means the login predates the ACL file, and the fix is logging out
+and back in, not reinstalling anything.
+
+### Two ubus status codes had each other's sentence
+
+`describe()` answered codes 2 **and** 7 with one sentence about arguments, and
+code 9 with "The router took too long to answer." The numbers are raw ubus status
+values - LuCI's `rpc.js` prints them and nothing else - and its own table says
+what they are: 2 is `INVALID_ARGUMENT`, 7 is `TIMEOUT`, 9 is `UNKNOWN_ERROR`.
+
+So the two that were wrong were wrong in the way that costs the most time. A
+daemon that had stopped answering - a pool with thousands of sessions, say - told
+the operator to go and check the arguments of the call. A handler that threw told
+them the router was slow.
+
+9 has its own sentence now and it names `logread`, because that is the one code
+whose reason exists nowhere else: it is what ucode replies immediately before an
+uncaught exception takes the daemon down with it.
+
+Only reachable at all because of the fix above. Until this release no call from a
+LuCI page got far enough to come back with any of these.
+
 ## 1.4.0
 
 Adds `luci-app-bm`, closes the last gaps between what a router can do with the

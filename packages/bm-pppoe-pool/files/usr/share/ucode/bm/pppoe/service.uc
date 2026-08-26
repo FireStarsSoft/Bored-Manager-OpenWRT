@@ -19,7 +19,7 @@ import * as counters from 'bm.pppoe.counters';
 import * as sections from 'bm.pppoe.sections';
 import * as sessions from 'bm.pppoe.sessions';
 
-export const RELEASE = '1.4.0';
+export const RELEASE = '1.4.1';
 
 /** The ubus contract version, separate from the release. */
 export const API_VERSION = 1;
@@ -831,10 +831,18 @@ export function reconcileNow() {
 };
 
 function method(args, fn) {
+	// Accepted on every method because LuCI's dispatcher appends the session id
+	// to whatever a page sends, and ucode's publish refuses any named argument
+	// the template does not declare. Stripped before the handler runs, so the
+	// pool calls still receive exactly the fields they document.
+	args.ubus_rpc_session = '';
+
 	return {
 		call: function(req) {
 			state.served = state.served + 1;
-			return fn(type(req.args) == 'object' ? req.args : {});
+			let given = type(req.args) == 'object' ? req.args : {};
+			delete given.ubus_rpc_session;
+			return fn(given);
 		},
 		args: args
 	};

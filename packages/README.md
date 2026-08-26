@@ -7,11 +7,10 @@ themselves independently.
 
 | Package | ubus object | Config | What it is for |
 |---|---|---|---|
-| `bm-agent` | `bm.agent` | `/etc/config/bm_agent` | The common ground: a version handshake, readiness in one ubus call, the `bmctl` CLI, and — as later releases land — snapshots, the commit-confirm guard, schema migrations and the update engine |
-
-Two more are planned and not here yet: `bm-pppoe-pool` (`bm.pppoe`) and
-`bm-wanbind` (`bm.wanbind`), plus `luci-app-bm` for the router's own web
-interface.
+| `bm-agent` | `bm.agent` | `/etc/config/bm_agent` | The common ground: a version handshake, readiness in one ubus call, the `bmctl` CLI, snapshots, the commit-confirm guard, schema migrations and the update engine |
+| `bm-pppoe-pool` | `bm.pppoe` | `/etc/config/bm_pppoe` | Pools of PPPoE sessions, dialled and watched on the router: the `bmpppoe` CLI, netifd event tracking, counters and the redial watchdog |
+| `bm-wanbind` | `bm.wanbind` | `/etc/config/bm_wanbind` | One DHCP client, one WAN, decided on the router: the `bmwan` CLI, the lease hotplug hook and the 30-second reconcile |
+| `luci-app-bm` | — | — | The router's own pages: five tabs under Services in LuCI, calling the same three objects above |
 
 ## Why any of this exists
 

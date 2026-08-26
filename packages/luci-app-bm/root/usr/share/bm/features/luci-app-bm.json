@@ -1,6 +1,6 @@
 {
 	"name": "luci-app-bm",
-	"version": "1.4.0",
+	"version": "1.4.1",
 	"ubus": "",
 	"apiVersion": 1,
 	"provides": [ "luci" ],

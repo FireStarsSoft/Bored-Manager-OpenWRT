@@ -17,7 +17,7 @@ import { shQuote, splitSections } from '@shared/shell'
 import type { OkResult } from '@shared/types'
 import type { JobItemSpec, OpenWrtJob } from '../jobs'
 import { isInstallablePackage, packageGroup, type PackageGroup } from '../packages'
-import { SPACE_BAD_KB, freeKbFromDf } from '../probe'
+import { IP_FULL_PATH, SPACE_BAD_KB, freeKbFromDf, type OpenWrtCapabilities } from '../probe'
 import { asRecord, type SetupRuntime } from './runtime'
 
 const CHECK_TIMEOUT_MS = 15_000
@@ -26,6 +26,8 @@ const UPDATE_TIMEOUT_MS = 120_000
 const INSTALL_TIMEOUT_MS = 180_000
 /** apk's database lock is not queued, so a single second attempt is the retry. */
 const LOCK_RETRY_MS = 3_000
+/** How long the verify step waits before asking the router a second time. */
+const VERIFY_RETRY_MS = 3_000
 
 const PREFLIGHT_COMMAND = [
   `echo '===SPACE==='; df -k /overlay 2>/dev/null || df -k / 2>/dev/null`,
@@ -197,6 +199,40 @@ export async function preflight(runtime: SetupRuntime): Promise<PreflightReading
 }
 
 /** Starts the install job and returns its id; progress arrives on `jobs`. */
+/**
+ * Why a package that installed cleanly left its capability missing.
+ *
+ * "The router may need a reboot" was the whole of this sentence, and it is the
+ * one remedy that cannot help the case people actually hit: `ip-full` goes on,
+ * apk reports success, and `/sbin/ip` is still the BusyBox symlink because the
+ * alternatives link was never switched. Running the same job again produced the
+ * same `partial` for the same invisible reason. The probe now knows which of
+ * the three it is, so the failure says so.
+ */
+function stillMissingMessage(groups: readonly PackageGroup[], caps: OpenWrtCapabilities): string {
+  const titles = groups.map((group) => group.title).join(', ')
+  const ipfull = groups.find((group) => group.capability === 'hasIpRule')
+  if (ipfull) {
+    const at = caps.ip.path || '/sbin/ip'
+    if (caps.ip.fullPresent && caps.ip.fullWorks) {
+      return (
+        `${titles}: the package installed and works at ${IP_FULL_PATH}, but ${at} still resolves ` +
+        `to ${caps.ip.real || 'BusyBox'}, so nothing that runs \`ip\` is using it. The install did ` +
+        `its job; the alternatives link did not switch. Relink it at a router shell with ` +
+        `\`ln -sf ${IP_FULL_PATH} ${at}\` and run Check again - reinstalling will not help.`
+      )
+    }
+    if (caps.ip.fullPresent) {
+      return (
+        `${titles}: iproute2 is installed and this kernel still refuses a numeric routing table, ` +
+        `so policy routing is not built into this firmware. No package can add it - WAN binding ` +
+        `needs an image built with multiple routing tables.`
+      )
+    }
+  }
+  return `${titles} still not available after installing; the router may need a reboot`
+}
+
 export function applySetup(runtime: SetupRuntime, raw: unknown): OkResult {
   const payload = asRecord(raw)
   const token = typeof payload.token === 'string' ? payload.token : ''
@@ -298,18 +334,27 @@ export function applySetup(runtime: SetupRuntime, raw: unknown): OkResult {
   items.push({
     name: 'Verify what the router can do now',
     run: async () => {
-      const next = await runtime.deps.reprobe()
-      const stillMissing = plan.groups
-        .map((key) => packageGroup(key))
-        .filter((group): group is PackageGroup => group !== null)
-        .filter((group) => !next[group.capability])
+      const missing = (caps: OpenWrtCapabilities): PackageGroup[] =>
+        plan.groups
+          .map((key) => packageGroup(key))
+          .filter((group): group is PackageGroup => group !== null)
+          .filter((group) => !caps[group.capability])
+
+      let next = await runtime.deps.reprobe()
+      let stillMissing = missing(next)
       if (stillMissing.length) {
-        throw new Error(
-          `${stillMissing
-            .map((group) => group.title)
-            .join(', ')} still not available after installing; the router may need a reboot`
-        )
+        // Asked twice before it is called a failure, the way the agent
+        // installer already does. `refreshCapabilities` joins a probe that is
+        // already in flight, and the readiness poller is guaranteed to be
+        // ticking here - it only runs while a surface showing `capabilities` is
+        // open, which is exactly the page this job was started from. A tick
+        // whose PROBE_COMMAND went on the wire before `apk add` returned would
+        // otherwise answer this step with what was true before the install.
+        await new Promise((resolve) => setTimeout(resolve, VERIFY_RETRY_MS))
+        next = await runtime.deps.reprobe()
+        stillMissing = missing(next)
       }
+      if (stillMissing.length) throw new Error(stillMissingMessage(stillMissing, next))
     }
   })
 

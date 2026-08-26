@@ -116,10 +116,19 @@ export function stats() {
  * than a different one depending on whether bmctl or the app was the caller.
  */
 function method(args, fn) {
+	// Accepted on every method because LuCI's dispatcher appends the session id
+	// to whatever a page sends, and ucode's publish refuses any named argument
+	// the template does not declare - which would turn every LuCI call into
+	// UBUS_STATUS_INVALID_ARGUMENT while `ubus call` over SSH kept working. It
+	// is stripped before the handler runs, so no function below ever sees it.
+	args.ubus_rpc_session = '';
+
 	return {
 		call: function(req) {
 			served++;
-			return fn(type(req.args) == 'object' ? req.args : {});
+			let given = type(req.args) == 'object' ? req.args : {};
+			delete given.ubus_rpc_session;
+			return fn(given);
 		},
 		args: args
 	};
