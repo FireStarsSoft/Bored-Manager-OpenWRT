@@ -33,9 +33,7 @@ Every user-facing label is **PPPoE Dialer**. Package ids stay `bm-pppoe-pool`,
 
 ### Pin
 
-`main/agent/manifest.ts` still pins **2.1.0** until `pkg-v2.2.0` is published
-and `npm run pin:packages` is run against those apk hashes. Installing 2.2.0
-from a local build or a release asset still replaces the stale LuCI files.
+`main/agent/manifest.ts` pins **2.2.0**, the release this module ships against.
 
 ## 3.1.0
 
