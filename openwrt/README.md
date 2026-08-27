@@ -99,7 +99,7 @@ Source, issues and changelog live in
 | Sidebar → OpenWRT → Automation → WAN Binding | Everything about binding in one place: create an instance that assigns every DHCP client on one selected LAN to one free WAN on one selected carrier, one-to-one, and the defaults new instances start from. |
 | Sidebar → OpenWRT → Automation → Jobs | Live progress cards for chunked operations, per-step timings, and finished-job history. |
 | Sidebar → OpenWRT → Automation → Events | Binding, PPPoE and router events in one table. Outside this page they reach the app log and stop there. |
-| Sidebar → OpenWRT → Module settings | Five groups on a rail. **Router readiness** with Install missing packages, **Router packages**, **Jobs** - the install jobs' own progress and finished history, **Display & charts** - the hints toggle and the charts' sample interval, and **Advanced rules**, the numbering and housekeeping both automations share. A router shell sits beside the note about fw4, for the few things the module deliberately will not do for you. |
+| Sidebar → OpenWRT → Module settings | Six groups on a rail. **Router readiness** with Install missing packages, **Router packages**, **Jobs** - the install jobs' own progress and finished history, **Display & charts** - the hints toggle and the charts' sample interval, **Router limits** - conntrack, the neighbour thresholds and fw4's flow offload, read live and applied with a check-then-apply, and **Advanced rules**, the numbering and housekeeping both automations share. A router shell sits beside the note about fw4, for the few things the module deliberately will not do for you. |
 | Overview cards | An optional WAN-pool and binding summary. |
 | History | `openwrt`: aggregate WAN, device, receive, transmit, bound, waiting, load and memory values, charted on the dashboard. |
 
@@ -201,7 +201,7 @@ working iproute2 is sitting beside it unused:
 |---|---|
 | BusyBox `ip`, no iproute2 | the BusyBox paragraph, and the install form's *Policy routing (ip-full)* box |
 | `ip-full` on disk, working when called directly, and `/sbin/ip` still BusyBox | the alternatives link never switched: `ln -sf /usr/libexec/ip-full /sbin/ip` at a router shell, and **no** offer to install it again |
-| `ip-full` on disk and the kernel still refusing a numeric table | policy routing is not built into this firmware; no package adds it |
+| `ip-full` on disk and the kernel still refusing a numeric table | policy routing is not built into this firmware; no package adds it. A table that merely does not exist yet is not this: iproute2's *"FIB table does not exist"* passes the probe, and when `bm-wanbind` is running the row says the verdict is probably the probe being wrong - the daemon binds over netlink and does not consult `/sbin/ip` at all |
 
 The middle row is why this exists. `apk add ip-full` reports success, the binary
 is on disk and answers a numeric table when called by its own path, and `ip`
@@ -240,7 +240,7 @@ does have business doing is saying so before an apply.
 ### What each control needs before it will run
 
 Every method the pages can call is listed in `main/requirements.ts`, and
-`runtime/handlers.ts` routes all forty-five through the one gate that reads it.
+`runtime/handlers.ts` routes all forty-eight through the one gate that reads it.
 Before that, the requirements were two hand-written `if` chains inside the two
 create handlers: an apply would run on a plan its own check had refused, and
 `bindingStart` on an instance created months ago never asked again whether
@@ -257,6 +257,7 @@ whatever BusyBox prints for a subcommand that does not exist.
 | Create a binding instance (`bindingCheck`, `bindingApply`) and Start (`bindingStart`) | Firewall4 present - its ruleset loaded - `ip rule` support - dnsmasq present - dnsmasq running - netifd running |
 | Unassign / Reassign / Pin (`bindingUnassign`, `bindingReassign`, `bindingPin`) | `ip rule` support |
 | Rename an instance (`bindingUpdate`), the Rules editor, job bookkeeping | nothing. None of them touches the router |
+| Router limits (`limitsEffective`, `limitsCheck`, `limitsApply`) | nothing, deliberately. The domain gates itself - no router connected, no slow-sweep reading yet, a conntrack max below the entries in use - because raising a kernel limit is sometimes the fix for the very state a capability gate would refuse on. Who writes is decided per apply: the agent's `tune_set` from packages 2.1.0, SSH before that |
 | Router packages (`agentRows`, `agentInstallCheck`, `agentInstallApply`, `agentUninstallCheck`, `agentUninstallApply`) | nothing, for the same reason the installer needs nothing: these are the flows that put a router into the state everything else asks for. Each does its own checking, in far more detail than a capability flag could carry |
 | Stop and Delete a binding instance (`bindingStop`, `bindingDelete`) | nothing, deliberately. An instance on a router that has since lost `ip-full` is exactly the instance somebody most wants to be able to remove |
 
@@ -881,6 +882,33 @@ replaced the batches every earlier release tested.
     `package` line per package and nothing wrapped around it. Copy it to a
     second router that has never had any of this installed and run
     `uci import < the-file` - it must be accepted.
+
+Items 50 to 53 are what module 3.1.0 and packages 2.1.0 changed together.
+
+50. **A fresh router is not failed for an empty table.** On a stock 25.12.5
+    (QEMU is fine) where `ip -4 route show table 29999` answers *"FIB table
+    does not exist"*, the readiness card must show policy routing **Present**
+    and all three checks green - and `bindingStart` must not refuse over the
+    `ip` binary while `bm-wanbind` is installed. Then check the same card on a
+    genuinely BusyBox-only router: still refused, with the `ip-full` offer.
+51. **Router limits, both writers.** Module settings, Router limits, with
+    packages 2.1.0: check reports usage and the recommendation, apply must go
+    through the agent (`logread -e bm-agent`), and `bmctl tune` must read the
+    same values back. Downgrade to 2.0.x packages, apply again: it must go
+    over SSH, write the same `/etc/sysctl.d/60-bm-scale.conf`, and say so.
+    Reboot; `sysctl net.netfilter.nf_conntrack_max` must hold either way.
+52. **The check refuses what would drop traffic.** With `nf_conntrack_count`
+    high (a busy router, or `conntrack -L` noise), enter a conntrack max
+    below the live count - refused by the count, not by the bounds. Enter
+    gc_thresh1 above the router's own gc_thresh2 with the other fields blank -
+    refused for the inversion the merge would create.
+53. **The router's own pages carry the new surfaces.** In LuCI: Overview shows
+    the Requirements card with a live report and an Install button that runs
+    apk for a missing group; the Updates card asks the release server only on
+    the button; Maintenance holds the snapshots, the updater and Scaling with
+    the two presets. Remove `dnsmasq`, reload the page: the row goes red, the
+    install button puts it back, and `bmctl requirements` agrees at a console
+    throughout.
 
 ## Safety and limitations
 

@@ -301,13 +301,24 @@ function ipRuleCheck(facts: ProbeFacts): CheckSeed {
 
   // Present and still refused, which is not a package problem at all.
   if (facts.ip.fullPresent) {
+    // A router whose own binding daemon is up deserves the caveat: bm-wanbind
+    // writes rules over netlink and never touches the ip binary, so if its
+    // instances are binding clients, this reading is stale or wrong rather
+    // than the kernel being short a feature.
+    const daemonBinds =
+      facts.agent.installed && facts.agent.running && facts.agent.provides.includes('binding')
     return {
       ...base,
       status: 'warn',
       detail:
         `iproute2 is installed at ${IP_FULL_PATH} and this kernel still refuses a numeric routing ` +
         `table, so policy routing is not built into this firmware. No package fixes that: WAN ` +
-        `binding needs an image built with multiple routing tables.`,
+        `binding needs an image built with multiple routing tables.` +
+        (daemonBinds
+          ? ` This router's own bm-wanbind is running, though - it writes rules over netlink ` +
+            `without the ip binary, so if its instances are binding clients, run Check again ` +
+            `and trust what the daemon reports.`
+          : ''),
       install: null
     }
   }

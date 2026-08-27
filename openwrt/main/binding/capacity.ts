@@ -135,7 +135,14 @@ function planDhcp(
   return preparation
 }
 
-/** Kernel-side headroom. All advisory: none of it stops an instance existing. */
+/**
+ * Kernel-side headroom. All advisory: none of it stops an instance existing.
+ *
+ * The remedy is the same page for all three now - Module settings, Router
+ * limits - which reads them live, sizes a recommendation to this router and
+ * applies through the agent or over SSH. The findings still carry the values,
+ * because a report somebody screenshots has to stand on its own.
+ */
 function planKernel(
   probe: RouterPreparationProbe,
   context: CapacityContext,
@@ -149,7 +156,8 @@ function planKernel(
     findings.push({
       level: 'info',
       label: 'Software flow offload is disabled',
-      detail: "For thousands of linear fib rules consider: uci set firewall.@defaults[0].flow_offloading='1'; uci commit firewall; service firewall reload."
+      detail:
+        'For thousands of linear fib rules it cuts per-packet lookups considerably. Module settings, Router limits, has the switch - it commits the firewall config and reloads fw4.'
     })
   }
   const conntrack = probe.sysctl.get('net.netfilter.nf_conntrack_max') ?? 0
@@ -157,7 +165,8 @@ function planKernel(
     findings.push({
       level: 'info',
       label: `nf_conntrack_max is ${conntrack || 'unknown'}`,
-      detail: 'For a large client pool consider: sysctl -w net.netfilter.nf_conntrack_max=262144, then persist it under /etc/sysctl.d/.'
+      detail:
+        'A large client pool wants 262144 or more, or the kernel starts dropping new connections when the table fills. Module settings, Router limits, applies and persists it.'
     })
   }
   const gc1 = probe.sysctl.get('net.ipv4.neigh.default.gc_thresh1') ?? 0
@@ -167,9 +176,8 @@ function planKernel(
     findings.push({
       level: 'info',
       label: `Neighbour thresholds are ${gc1 || '?'}/${gc2 || '?'}/${gc3 || '?'}`,
-      // Its two siblings above both give the command; this one named the
-      // values and left the user to work out where they go.
-      detail: 'For more than 1024 clients consider: sysctl -w net.ipv4.neigh.default.gc_thresh1=2048 net.ipv4.neigh.default.gc_thresh2=4096 net.ipv4.neigh.default.gc_thresh3=8192, then persist them under /etc/sysctl.d/.'
+      detail:
+        'More than 1024 clients wants at least 2048/4096/8192, or the ARP cache refuses new neighbours. Module settings, Router limits, applies and persists them.'
     })
   }
 }

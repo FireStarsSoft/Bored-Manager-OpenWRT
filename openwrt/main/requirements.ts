@@ -130,7 +130,14 @@ const REQUIREMENTS: Record<RequirementKey, RequirementSpec> = {
     // binding asks of it. The readiness card carries the three reasons apart;
     // this is the one sentence a refused apply gets.
     title: 'This router cannot steer traffic by routing table',
-    met: (caps) => caps.hasIpRule,
+    // Met by the binary this module writes through - or by the router's own
+    // binding daemon. With bm-wanbind installed the module never writes an ip
+    // rule itself: every bind goes over ubus and the daemon writes netlink,
+    // so refusing on the module's own `ip` binary would block work the router
+    // is demonstrably doing. The readback the fast sweep does works on the
+    // BusyBox applet either way.
+    met: (caps) =>
+      caps.hasIpRule || (caps.agent.usable && caps.agent.provides.includes('binding')),
     detail: (caps) =>
       caps.ip.fullPresent
         ? `Router readiness, in Module settings, has the reason - iproute2 is on this router and \`ip\` is not resolving to it, or this kernel has no policy routing. Neither is fixed by installing a package.`
@@ -346,6 +353,14 @@ export const FEATURES: Record<string, FeatureSpec | null> = {
   rulesCheck: { kind: 'check', requires: [] },
   rulesApply: { kind: 'action', requires: [] },
   rulesReset: { kind: 'action', requires: [] },
+  // The router-wide scale limits. Reads answer always; the check and apply do
+  // their own gating - no router connected, no slow-sweep answer yet - because
+  // raising conntrack is sometimes the fix for the very state a capability
+  // gate would refuse on, and the write path is chosen per apply (the agent
+  // when it is 2.1.0+, SSH when it is not).
+  limitsEffective: null,
+  limitsCheck: { kind: 'check', requires: [] },
+  limitsApply: { kind: 'action', requires: [] },
   // Job bookkeeping, module-side only.
   jobCancel: { kind: 'action', requires: [] },
   jobsClear: { kind: 'action', requires: [] },

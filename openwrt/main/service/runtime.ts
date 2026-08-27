@@ -54,6 +54,10 @@ export interface SweepRuntime {
   uciTables: Record<string, number>
   pppoeUsers: Record<string, string>
   firewallZones: FirewallZone[]
+  /** The scale limits as the last slow sweep read them off /proc/sys. */
+  sysctl: Record<string, number>
+  /** fw4's flow_offloading flag; null until a slow sweep has answered. */
+  flowOffload: boolean | null
 
   previousAt: number
   previousDev: ProcNetDevSnapshot | null
@@ -96,6 +100,8 @@ export function createSweepRuntime(
     uciTables: {},
     pppoeUsers: {},
     firewallZones: [],
+    sysctl: {},
+    flowOffload: null,
     previousAt: 0,
     previousDev: null,
     previousUptime: 0,
@@ -128,6 +134,8 @@ export function resetRuntime(runtime: SweepRuntime): void {
   runtime.uciTables = {}
   runtime.pppoeUsers = {}
   runtime.firewallZones = []
+  runtime.sysctl = {}
+  runtime.flowOffload = null
   runtime.previousAt = 0
   runtime.previousDev = null
   runtime.previousUptime = 0

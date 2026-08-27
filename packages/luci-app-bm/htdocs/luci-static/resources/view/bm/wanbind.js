@@ -5,6 +5,7 @@
 'require poll';
 'require dom';
 'require bm.api as api';
+'require bm.ui as bmui';
 
 /*
  * One DHCP client, one WAN.
@@ -99,37 +100,6 @@ function cannotFlush(id, why) {
 	]), 'error');
 }
 
-/** One labelled row of a modal form, in LuCI's own shape. */
-function field(label, node, hint) {
-	return E('div', { 'class': 'cbi-value' }, [
-		E('label', { 'class': 'cbi-value-title' }, label),
-		E('div', { 'class': 'cbi-value-field' }, [
-			node,
-			hint ? E('div', { 'class': 'cbi-value-description' }, hint) : ''
-		])
-	]);
-}
-
-function textInput(value, placeholder, width) {
-	return E('input', {
-		'type': 'text',
-		'class': 'cbi-input-text',
-		'value': value ?? '',
-		'placeholder': placeholder ?? '',
-		'style': 'width:%s'.format(width ?? '12em')
-	});
-}
-
-function checkbox(checked) {
-	return E('input', { 'type': 'checkbox', 'class': 'cbi-input-checkbox', 'checked': checked ? '' : null });
-}
-
-/** A whole number from a field, or null when it is not one. */
-function whole(node) {
-	const raw = node.value.trim();
-	return /^[0-9]+$/.test(raw) ? Number(raw) : null;
-}
-
 function whyText(row) {
 	if (row.why === 'held')
 		return _('Held out of the pool by hand');
@@ -151,13 +121,13 @@ return view.extend({
 		const banner = api.guardBanner();
 
 		if (!first.ok) {
-			return E([], [banner, api.notice(
+			return E([], [banner, bmui.notice(
 				_('There is no agent on this router'),
 				_('This page is drawn from what the router reports, and bm-agent did not answer: %s').format(first.error))]);
 		}
 
 		if (!api.has(first.data, 'binding')) {
-			return E([], [banner, api.notice(
+			return E([], [banner, bmui.notice(
 				_('bm-wanbind is not installed'),
 				_('Without it this router binds nobody by itself. The Bored Manager app can still do it over SSH: it works, and it reconciles on a poll rather than on the lease, so a client waits up to one sweep for its WAN instead of a few milliseconds.'),
 				E('p', {}, _('Install it from Router packages in the app, or with "apk add bm-wanbind" on this router.')))]);
@@ -221,15 +191,15 @@ return view.extend({
 			// The refusal first, because it is the one state where nothing
 			// works and nothing else on the row explains why.
 			if (one.reason)
-				dot = api.dot('bad', one.reason);
+				dot = bmui.dot('bad', one.reason);
 			else if (!one.enabled)
-				dot = api.dot('idle', _('switched off'));
+				dot = bmui.dot('idle', _('switched off'));
 			else if (!live)
-				dot = api.dot('bad', _('configured, but the daemon has no state for it'));
+				dot = bmui.dot('bad', _('configured, but the daemon has no state for it'));
 			else if (!live.ready)
-				dot = api.dot('busy', live.reason ?? _('not ready'));
+				dot = bmui.dot('busy', live.reason ?? _('not ready'));
 			else
-				dot = api.dot('ok', _('binding'));
+				dot = bmui.dot('ok', _('binding'));
 
 			return [
 				one.id,
@@ -283,8 +253,8 @@ return view.extend({
 					_('What is configured is still shown. Start it with "/etc/init.d/bm-wanbind start".')
 				])
 				: '',
-			table.render(),
-			E('div', { 'style': 'margin:.5em 0' }, [
+			bmui.tableWrap(table.render()),
+			bmui.toolbar([
 				E('button', {
 					'class': 'btn cbi-button-add',
 					'click': ui.createHandlerFn(self, function() {
@@ -358,54 +328,39 @@ return view.extend({
 
 	/** Remove an instance, rules first and the section after. */
 	askDelete(one, refresh) {
-		const self = this;
-		const field = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:12em' });
+		bmui.confirmTyped({
+			title: _('Delete instance %s').format(one.id),
+			body: [
+				E('p', {}, _('Every client this instance was binding goes back to being routed the way the rest of the router routes, and its fail-closed catch-all goes with it.')),
+				E('p', {}, _('Its ip rules are taken off before the section is removed. After the section is gone nothing knows they were its.'))
+			],
+			expected: one.id,
+			actionLabel: _('Delete it'),
+			run: function() {
+				return flushFirst(one.id).then(why => {
+					if (why) {
+						cannotFlush(one.id, why);
+						return null;
+					}
 
-		ui.showModal(_('Delete instance %s').format(one.id), [
-			E('p', {}, _('Every client this instance was binding goes back to being routed the way the rest of the router routes, and its fail-closed catch-all goes with it.')),
-			E('p', {}, _('Its ip rules are taken off before the section is removed. After the section is gone nothing knows they were its.')),
-			E('p', {}, _('Type the instance name to confirm:')),
-			field,
-			E('div', { 'class': 'right' }, [
-				E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Cancel')),
-				' ',
-				E('button', {
-					'class': 'btn cbi-button-remove',
-					'click': ui.createHandlerFn(self, function() {
-						if (field.value !== one.id) {
+					uci.remove('bm_wanbind', one.id);
+
+					return uci.save()
+						.then(() => uci.apply())
+						.then(() => uci.unload('bm_wanbind'))
+						.then(() => uci.load('bm_wanbind'))
+						.then(() => {
 							ui.addNotification(null, E('p', {},
-								_('That is not the instance name; nothing was deleted.')), 'warning');
-							return Promise.resolve();
-						}
-
-						ui.hideModal();
-
-						return flushFirst(one.id).then(why => {
-							if (why) {
-								cannotFlush(one.id, why);
-								return null;
-							}
-
-							uci.remove('bm_wanbind', one.id);
-
-							return uci.save()
-								.then(() => uci.apply())
-								.then(() => uci.unload('bm_wanbind'))
-								.then(() => uci.load('bm_wanbind'))
-								.then(() => {
-									ui.addNotification(null, E('p', {},
-										_('Instance %s is gone.').format(one.id)), 'info');
-									return refresh();
-								})
-								.catch(error => {
-									ui.addNotification(null, E('p', {},
-										_('The change could not be applied: %s').format(error)), 'error');
-								});
+								_('Instance %s is gone.').format(one.id)), 'info');
+							return refresh();
+						})
+						.catch(error => {
+							ui.addNotification(null, E('p', {},
+								_('The change could not be applied: %s').format(error)), 'error');
 						});
-					})
-				}, _('Delete it'))
-			])
-		]);
+				});
+			}
+		});
 
 		return Promise.resolve();
 	},
@@ -453,17 +408,17 @@ return view.extend({
 			return (found === undefined || found === null || found === '') ? fallback : String(found);
 		}
 
-		const name = textInput(id ?? '', 'home', '10em');
-		const lan = textInput(value('lan', 'lan'), 'lan', '10em');
-		const carrier = textInput(value('carrier', ''), 'eth1', '10em');
-		const sticky = checkbox(flag(existing ? existing.sticky : null, true));
-		const remap = checkbox(flag(existing ? existing.remap : null, true));
-		const prefBase = textInput(value('rule_pref_base', '20000'), '20000', '8em');
-		const catchPref = textInput(value('catch_all_pref', '30000'), '30000', '8em');
-		const catchTable = textInput(value('catch_all_table', '253'), '253', '8em');
-		const warnUptime = textInput(value('wan_warn_uptime', '5'), '5', '6em');
-		const errorGrace = textInput(value('wan_error_grace', '20'), '20', '6em');
-		const releaseGrace = textInput(value('release_grace', '120'), '120', '6em');
+		const name = bmui.textInput(id ?? '', 'home', '10em');
+		const lan = bmui.textInput(value('lan', 'lan'), 'lan', '10em');
+		const carrier = bmui.textInput(value('carrier', ''), 'eth1', '10em');
+		const sticky = bmui.checkbox(flag(existing ? existing.sticky : null, true));
+		const remap = bmui.checkbox(flag(existing ? existing.remap : null, true));
+		const prefBase = bmui.textInput(value('rule_pref_base', '20000'), '20000', '8em');
+		const catchPref = bmui.textInput(value('catch_all_pref', '30000'), '30000', '8em');
+		const catchTable = bmui.textInput(value('catch_all_table', '253'), '253', '8em');
+		const warnUptime = bmui.textInput(value('wan_warn_uptime', '5'), '5', '6em');
+		const errorGrace = bmui.textInput(value('wan_error_grace', '20'), '20', '6em');
+		const releaseGrace = bmui.textInput(value('release_grace', '120'), '120', '6em');
 
 		const status = E('div', { 'style': 'margin:.5em 0' });
 
@@ -488,12 +443,12 @@ return view.extend({
 			if (!carrier.value.trim().length)
 				return refuse(_('Name the carrier device. Without it there are no WANs to hand out.'));
 
-			const base = whole(prefBase);
-			const catchAt = whole(catchPref);
-			const table = whole(catchTable);
-			const warn = whole(warnUptime);
-			const grace = whole(errorGrace);
-			const release = whole(releaseGrace);
+			const base = bmui.whole(prefBase);
+			const catchAt = bmui.whole(catchPref);
+			const table = bmui.whole(catchTable);
+			const warn = bmui.whole(warnUptime);
+			const grace = bmui.whole(errorGrace);
+			const release = bmui.whole(releaseGrace);
 
 			if (base === null || catchAt === null || table === null ||
 				warn === null || grace === null || release === null)
@@ -555,18 +510,18 @@ return view.extend({
 
 		ui.showModal(id ? _('Edit instance %s').format(id) : _('Add an instance'), [
 			E('p', {}, _('One instance is one LAN and one pool of WANs on one carrier device. A router with two independent pools has two of these; most have one.')),
-			field(_('Name'), id ? E('em', {}, id) : name,
+			bmui.field(_('Name'), id ? E('em', {}, id) : name,
 				id ? _('The section name, which every other surface calls this instance by. It cannot be changed.') : _('Letters, digits and underscores.')),
-			field(_('LAN interface'), lan, _('The UCI interface name of the LAN whose clients are bound. Its subnet is read from the router.')),
-			field(_('Carrier device'), carrier, _('The device the WAN pool sits on. Every interface on it or on a VLAN of it is in the pool.')),
-			field(_('Remember each client\'s WAN'), sticky, _('Give a client the same WAN back when it returns, if that WAN is free.')),
-			field(_('Move a client off a failing WAN'), remap, _('Off means it waits for its own WAN to come back.')),
-			field(_('Client rule priority'), prefBase, _('Client rules are written from here upwards. At least %d below the catch-all, which is also the most clients this instance can seat.').format(MIN_PREF_SPAN)),
-			field(_('Catch-all priority'), catchPref, _('Where the fail-closed rule sits. Nothing outside this range is ever touched.')),
-			field(_('Catch-all table'), catchTable, _('The routing table holding "unreachable default". A client with no WAN lands here and is blocked, rather than leaking out of whichever WAN the router would have picked.')),
-			field(_('WAN settle time'), warnUptime, _('Seconds a WAN has to have been up before it is handed to a client. Freshly dialled PPPoE sessions come up before they carry traffic.')),
-			field(_('Failure grace'), errorGrace, _('Seconds a WAN has to have been failing before a client is moved off it.')),
-			field(_('Lease grace'), releaseGrace, _('Seconds a client keeps its WAN after its lease disappears. Covers a reboot, a cable pulled for a minute, and dnsmasq restarting.')),
+			bmui.field(_('LAN interface'), lan, _('The UCI interface name of the LAN whose clients are bound. Its subnet is read from the router.')),
+			bmui.field(_('Carrier device'), carrier, _('The device the WAN pool sits on. Every interface on it or on a VLAN of it is in the pool.')),
+			bmui.field(_('Remember each client\'s WAN'), sticky, _('Give a client the same WAN back when it returns, if that WAN is free.')),
+			bmui.field(_('Move a client off a failing WAN'), remap, _('Off means it waits for its own WAN to come back.')),
+			bmui.field(_('Client rule priority'), prefBase, _('Client rules are written from here upwards. At least %d below the catch-all, which is also the most clients this instance can seat.').format(MIN_PREF_SPAN)),
+			bmui.field(_('Catch-all priority'), catchPref, _('Where the fail-closed rule sits. Nothing outside this range is ever touched.')),
+			bmui.field(_('Catch-all table'), catchTable, _('The routing table holding "unreachable default". A client with no WAN lands here and is blocked, rather than leaking out of whichever WAN the router would have picked.')),
+			bmui.field(_('WAN settle time'), warnUptime, _('Seconds a WAN has to have been up before it is handed to a client. Freshly dialled PPPoE sessions come up before they carry traffic.')),
+			bmui.field(_('Failure grace'), errorGrace, _('Seconds a WAN has to have been failing before a client is moved off it.')),
+			bmui.field(_('Lease grace'), releaseGrace, _('Seconds a client keeps its WAN after its lease disappears. Covers a reboot, a cable pulled for a minute, and dnsmasq restarting.')),
 			id
 				? E('p', {}, _('Changing the LAN or either priority takes this instance\'s rules off before the change and lets the daemon write them again. Bound clients lose their route for a few seconds.'))
 				: '',
@@ -586,7 +541,7 @@ return view.extend({
 
 	paintAssignments(node, result, now, refresh) {
 		if (!result.ok) {
-			dom.content(node, api.section(_('Assignments'), null,
+			dom.content(node, bmui.section(_('Assignments'), null,
 				E('p', { 'class': 'alert-message warning' }, result.error)));
 			return;
 		}
@@ -635,9 +590,9 @@ return view.extend({
 			])
 		]));
 
-		dom.content(node, api.section(_('Assignments'),
+		dom.content(node, bmui.section(_('Assignments'),
 			_('Move puts a client on a different WAN and forgets its sticky choice; Pin keeps it on one; Hold takes it out of the pool until it is let back in.'),
-			table.render()));
+			bmui.tableWrap(table.render())));
 	},
 
 	/**
@@ -688,7 +643,7 @@ return view.extend({
 
 	paintWaiting(node, result, now, refresh) {
 		if (!result.ok) {
-			dom.content(node, api.section(_('Waiting'), null,
+			dom.content(node, bmui.section(_('Waiting'), null,
 				E('p', { 'class': 'alert-message warning' }, result.error)));
 			return;
 		}
@@ -722,10 +677,10 @@ return view.extend({
 		]));
 
 		dom.content(node, [
-			api.section(_('Waiting'),
+			bmui.section(_('Waiting'),
 				_('Clients with no WAN, in the order they asked. A client the pool cannot seat is blocked rather than quietly sent out of whichever WAN the router would have used.'),
-				table.render()),
-			E('div', {}, [
+				bmui.tableWrap(table.render())),
+			bmui.toolbar([
 				E('button', {
 					'class': 'btn cbi-button-neutral',
 					'click': ui.createHandlerFn(self, function() {

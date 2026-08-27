@@ -31,10 +31,21 @@ const ZONES = [
   "firewall.@zone[0].network='lan'"
 ].join('\n')
 
+const SYSCTL = [
+  'net.netfilter.nf_conntrack_max=65536',
+  'net.netfilter.nf_conntrack_count=1234',
+  'net.ipv4.neigh.default.gc_thresh1=128',
+  'net.ipv4.neigh.default.gc_thresh2=512',
+  'net.ipv4.neigh.default.gc_thresh3=1024',
+  'flow_offload=1'
+].join('\n')
+
 interface SlowOutput {
   uci?: string
   /** Omitted means the section never arrived - a cut reply, or `uci` gone. */
   uciOk?: '1' | '0' | null
+  /** Null leaves the section out entirely, the shape of a cut reply. */
+  sysctl?: string | null
 }
 
 function slowOutput(options: SlowOutput = {}): string {
@@ -42,6 +53,7 @@ function slowOutput(options: SlowOutput = {}): string {
   const sentinel = options.uciOk === undefined ? '1' : options.uciOk
   if (sentinel != null) parts.push('===UCIOK===', sentinel)
   parts.push('===FWZONES===', ZONES)
+  if (options.sysctl !== null) parts.push('===SYSCTL===', options.sysctl ?? SYSCTL)
   return parts.join('\n')
 }
 
@@ -49,6 +61,8 @@ interface Probe {
   runSlow(): Promise<void>
   samples: OpenWrtSlowSample[]
   tables(): Record<string, number>
+  sysctl(): Readonly<Record<string, number>>
+  flowOffload(): boolean | null
   reply(output: string): void
   command: string
 }
@@ -76,6 +90,8 @@ function probe(): Probe {
     samples,
     runSlow: () => sweep.runSlow(),
     tables: () => sweep.uciTables,
+    sysctl: () => sweep.sysctl,
+    flowOffload: () => sweep.flowOffload,
     reply: (next) => {
       output = next
     },
@@ -92,6 +108,52 @@ describe('the slow probe asks for a sentinel', () => {
 
     expect(run.command).toContain("echo '===UCIOK==='")
     expect(run.command).toContain('uci -q show network')
+  })
+
+  it('asks for the scale limits in the same trip', async () => {
+    const run = probe()
+    await run.runSlow()
+
+    expect(run.command).toContain("echo '===SYSCTL==='")
+    expect(run.command).toContain('net.netfilter.nf_conntrack_max')
+    expect(run.command).toContain('net.ipv4.neigh.default.gc_thresh3')
+    expect(run.command).toContain('flow_offloading')
+  })
+})
+
+describe('the scale limits the router answered with', () => {
+  it('land on the runtime, flow offload included', async () => {
+    const run = probe()
+
+    await run.runSlow()
+
+    expect(run.sysctl()['net.netfilter.nf_conntrack_max']).toBe(65_536)
+    expect(run.sysctl()['net.netfilter.nf_conntrack_count']).toBe(1_234)
+    expect(run.sysctl()['net.ipv4.neigh.default.gc_thresh3']).toBe(1_024)
+    expect(run.flowOffload()).toBe(true)
+  })
+
+  it('reads an absent flow_offloading option as off, not unknown', async () => {
+    // `uci -q get` of an option that is not set prints nothing, and an absent
+    // flow_offloading is fw4's default: off. Unknown is reserved for the
+    // section never arriving at all.
+    const run = probe()
+    run.reply(slowOutput({ sysctl: 'net.netfilter.nf_conntrack_max=65536\nflow_offload=' }))
+
+    await run.runSlow()
+
+    expect(run.flowOffload()).toBe(false)
+  })
+
+  it('keeps the last good answer over a tick that lost the section', async () => {
+    const run = probe()
+    await run.runSlow()
+    run.reply(slowOutput({ sysctl: null }))
+
+    await run.runSlow()
+
+    expect(run.sysctl()['net.netfilter.nf_conntrack_max']).toBe(65_536)
+    expect(run.flowOffload()).toBe(true)
   })
 })
 

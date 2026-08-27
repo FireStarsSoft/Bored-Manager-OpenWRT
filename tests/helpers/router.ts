@@ -51,6 +51,11 @@ export interface RouterProbeOptions {
    * whether an unused iproute2 sits beside it. Defaults to a router whose `ip`
    * simply is iproute2, so `without: ['ip-full']` on its own still describes
    * the plain BusyBox router it always did.
+   *
+   * Note the shell resolves the FIB question before the parser ever sees it:
+   * a router whose table 29999 is merely empty ("FIB table does not exist")
+   * prints `ok` on the router, so from here it is indistinguishable from one
+   * whose table has routes - which is the point of the fix that made it so.
    */
   ipDetail?: readonly string[]
 }
@@ -76,6 +81,18 @@ export const POOL_AGENT_INFO: Record<string, unknown> = {
   provides: ['pppoe'],
   features: [
     { name: 'bm-pppoe-pool', version: '2.0.0', apiVersion: 2, provides: ['pppoe'] }
+  ]
+}
+
+/** The same agent with the binding daemon beside it, which binds over netlink. */
+export const BINDING_AGENT_INFO: Record<string, unknown> = {
+  ...AGENT_INFO,
+  release: '2.0.1',
+  schema: 2,
+  dataSchema: 2,
+  provides: ['binding'],
+  features: [
+    { name: 'bm-wanbind', version: '2.0.1', apiVersion: 1, provides: ['binding'] }
   ]
 }
 

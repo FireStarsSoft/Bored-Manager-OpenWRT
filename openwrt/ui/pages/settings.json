@@ -819,6 +819,110 @@
           ]
         },
         {
+          "id": "scaling",
+          "label": "Router limits",
+          "icon": "Gauge",
+          "blocks": [
+            {
+              "type": "section",
+              "title": "Kernel scale limits",
+              "columns": 2,
+              "blocks": [
+                {
+                  "type": "checkForm",
+                  "title": "Conntrack and the neighbour table",
+                  "checkMethod": "limitsCheck",
+                  "applyMethod": "limitsApply",
+                  "checkLabel": "Check these values",
+                  "applyLabel": "Apply to the router",
+                  "fields": [
+                    {
+                      "key": "conntrackMax",
+                      "label": "conntrack max",
+                      "input": "number",
+                      "placeholder": "262144",
+                      "initialFrom": {
+                        "kind": "invoke",
+                        "method": "limitsEffective",
+                        "path": "conntrackMax"
+                      }
+                    },
+                    {
+                      "key": "gcThresh1",
+                      "label": "Neighbour gc_thresh1",
+                      "input": "number",
+                      "placeholder": "2048",
+                      "initialFrom": {
+                        "kind": "invoke",
+                        "method": "limitsEffective",
+                        "path": "gcThresh1"
+                      }
+                    },
+                    {
+                      "key": "gcThresh2",
+                      "label": "Neighbour gc_thresh2",
+                      "input": "number",
+                      "placeholder": "4096",
+                      "initialFrom": {
+                        "kind": "invoke",
+                        "method": "limitsEffective",
+                        "path": "gcThresh2"
+                      }
+                    },
+                    {
+                      "key": "gcThresh3",
+                      "label": "Neighbour gc_thresh3",
+                      "input": "number",
+                      "placeholder": "8192",
+                      "initialFrom": {
+                        "kind": "invoke",
+                        "method": "limitsEffective",
+                        "path": "gcThresh3"
+                      }
+                    },
+                    {
+                      "key": "flowOffload",
+                      "label": "Software flow offload (fw4)",
+                      "input": "checkbox",
+                      "initialFrom": {
+                        "kind": "invoke",
+                        "method": "limitsEffective",
+                        "path": "flowOffload"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "conditional",
+                  "when": {
+                    "source": {
+                      "kind": "stream",
+                      "event": "ui",
+                      "path": "hintsOn"
+                    },
+                    "op": "eq",
+                    "value": true
+                  },
+                  "blocks": [
+                    {
+                      "type": "note",
+                      "title": "What each field means",
+                      "lines": [
+                        "These are the two kernel tables that overflow first at thousands of PPPoE sessions or bound clients, and both fail by dropping traffic with one dmesg line to show for it: \"nf_conntrack: table full, dropping packet\" and \"neighbour: arp_cache: neighbour table overflow!\".",
+                        "conntrack max - how many connections the tracking table holds, 16384 to 4194304. Every NATed flow is an entry at roughly 300 bytes of kernel memory; when the table fills, new connections are dropped. The check refuses a value below what is in use right now.",
+                        "Neighbour gc_thresh1/2/3 - the ARP cache staging, 128 to 1048576 and in order. The kernel starts pruning at the first, gets aggressive at the second and refuses new neighbours at the third; keep the third above twice the LAN's device count.",
+                        "Software flow offload - fw4's fastpath for established flows. With thousands of linear ip rules it cuts the per-packet lookups considerably. It is UCI, so applying it commits the firewall config and reloads fw4.",
+                        "The fields open with the router's live values, read by the slow sweep; a blank field means \"leave this as it is\". Check reports the current conntrack usage and a recommendation sized from this router's own clients and sessions, then Apply writes through the router's own bm-agent (packages 2.1.0+) or over SSH, and pins everything in /etc/sysctl.d/60-bm-scale.conf so it survives a reboot.",
+                        "The guard's snapshots deliberately do not cover that file: a restore must never quietly shrink a capacity fix. The same values can be set on the router itself with \"bmctl tune\", or from its LuCI pages under Maintenance."
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
           "id": "rules",
           "label": "Advanced rules",
           "icon": "Layers",

@@ -17,6 +17,7 @@ import { BindingEngine } from '../binding'
 import { ConfigStore, RulesEditor } from '../config'
 import { EventLog } from '../events'
 import { Jobs } from '../jobs'
+import { LimitsManager } from '../limits'
 import { PppoeManager } from '../pppoe'
 import { Queries } from '../queries'
 import { FastSweep } from '../service'
@@ -43,6 +44,7 @@ export interface OpenWrtRuntime {
   queries: Queries
   rules: RulesEditor
   setup: SetupManager
+  limits: LimitsManager
   latch: CapabilityLatch
 }
 
@@ -217,6 +219,22 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
     event: (kind, text) => events.record('router', kind, text)
   })
 
+  // The scale limits: read off the slow sweep, sized from what the two
+  // automations are actually carrying, written by the agent when it is new
+  // enough to own the write and over SSH when it is not.
+  const limits = new LimitsManager({
+    ctx,
+    agentDeps: { ctx, capability: () => latch.capabilities.agent },
+    current: () => ({ sysctl: service.sysctl, flowOffload: service.flowOffload }),
+    scale: () => ({
+      clients: service.latest?.leases.length ?? 0,
+      sessions: pppoe.latest.interfaces
+    }),
+    afterApply: () => {
+      void service.runSlow()
+    }
+  })
+
   return {
     ctx,
     config,
@@ -230,6 +248,7 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
     queries,
     rules,
     setup,
+    limits,
     latch
   }
 }
@@ -266,6 +285,8 @@ export function resetRuntime(runtime: OpenWrtRuntime): void {
   runtime.pppoe.reset()
   runtime.binding.reset()
   runtime.rules.clear()
+  // A limits token froze values read off one router; the next one is not it.
+  runtime.limits.clear()
   runtime.store.reset()
   runtime.config.reset()
   emitUi(runtime)
@@ -286,6 +307,7 @@ export function disposeRuntime(runtime: OpenWrtRuntime): void {
   runtime.pppoe.dispose()
   runtime.binding.dispose()
   runtime.rules.clear()
+  runtime.limits.clear()
   runtime.store.dispose()
   runtime.config.dispose()
 }

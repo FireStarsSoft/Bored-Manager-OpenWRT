@@ -9,6 +9,90 @@ guessing, so it moves only when the shape of a call changes. `configSchema` is
 the shape of what is written to `/etc`, and it is what a downgrade is refused
 on. All three are in [`version.json`](version.json).
 
+## 2.1.0
+
+The router explains itself, tunes itself, and got its own face lifted.
+`apiVersion` stays **3** and `configSchema` stays **2** - the new ubus methods
+are additions, not changes of shape, and bumping the API number would make
+every 3.0.x module in the field read the new agent as unusable and lose the
+pool daemon with it. A module that wants the new calls gates them on the
+agent's release instead, and an old module simply never makes them.
+
+### The requirements report, and the installer behind it
+
+`bm.agent requirements` asks, live and in one shell, for everything every
+feature needs: the PPPoE dialing stack (pppd, the plugin, the kernel module),
+policy routing by numeric table, dnsmasq and whether it is running, fw4 and
+whether its ruleset is loaded, the release key and usign, and the CA bundle.
+Each row answers ok, missing, or unknown - never a guess - and names the fix.
+
+It exists because a requirement that fails silently is a feature that breaks
+silently: a router that loses `ppp` in a sysupgrade keeps its pools listed and
+dials nothing, and the only witness used to be the app's readiness page,
+invisible from the router's own LuCI. Now it is the first card on Overview.
+
+`install_packages` closes the gaps a package can close. It takes a **group
+key** into a fixed table - `pppoe`, `ipfull`, `dnsmasq`, the same allowlist
+the app's installer has always used - so a package name never crosses the
+call, runs `apk update` first with its failure tolerated, and hands back apk's
+own sentence when the add fails. `bmctl requirements` and
+`bmctl install-group` are the same functions at a console.
+
+The policy-routing row uses the FIB-tolerant test the module's probe learned
+in 3.1.0: a numeric table that merely does not exist yet is iproute2 saying
+the kernel parsed the table and looked it up, which is the capability under
+test - not a kernel without multiple routing tables.
+
+### The scale limits are the router's to hold now
+
+Two kernel tables overflow first when a router grows to thousands of PPPoE
+sessions or bound clients, and both fail by dropping traffic with one line in
+dmesg that nothing surfaced: conntrack ("nf_conntrack: table full, dropping
+packet") and the neighbour cache ("neighbour: arp_cache: neighbour table
+overflow!"). The app has *reported* them since 2.x; nothing could apply them.
+
+`tune_get` reads them live - conntrack max and count, the three neighbour
+thresholds, fw4's flow offload - and `tune_set` applies an allowlisted subset:
+bounds checked, the threshold trio held in order, every write to /proc/sys
+verified by reading it back, and the result pinned in
+`/etc/sysctl.d/60-bm-scale.conf`, which OpenWrt's sysctl init replays at boot.
+Flow offload is the one non-sysctl in the set: it is UCI, so it commits the
+firewall config and reloads fw4.
+
+The drop-in is runtime-owned the way `/etc/bm/` is: no package ships it, apk
+never touches it, uninstalling leaves it. The guard's snapshots deliberately
+do not cover it either - a restore that quietly shrank conntrack back would
+undo a capacity fix nobody asked it to touch. `bmctl tune` reads and writes
+the same values at a console.
+
+### The LuCI app is one design instead of five pages
+
+Every tab was styling itself inline, and two of them - pppoe and wanbind -
+had grown copy-pasted form helpers that had already started to drift. There
+is one stylesheet now (`bm/ui.css`, theme-neutral: translucent neutrals for
+chrome, colour only for status, and never colour alone - every pill and dot
+carries its word) and one component library (`bm.ui`: cards, pills, tiles,
+the labelled form row, the findings list, the type-the-name delete modal),
+and all four tabs are built from it.
+
+Four tabs, because **Backup and Restore and Updates merged into
+Maintenance** - they are one errand, looking after the router underneath the
+features - and Maintenance gained the **Scaling** section that drives
+`tune_get`/`tune_set` with presets sized for 1,000 and 4,000 clients.
+
+**Overview answers the question it used to shrug at.** Beside the three
+daemon cards sit two new ones: **Requirements**, every row of the report with
+an Install button on the ones a package can fix, and **Updates**, which shows
+what is installed and what happened last time, asks the release server only
+when the button is pressed, and offers Update now - under the countdown -
+when something newer is published. Nothing on the page phones home on its
+own.
+
+The ACL grows by exactly the four methods: `requirements` and `tune_get` on
+the read side, `install_packages` and `tune_set` on the write side. And a
+LuCI page that calls a method the running agent has never heard of now gets a
+sentence naming the packages update, rather than "ubus code 3".
+
 ## 2.0.1
 
 The release key. Nothing else moves: the pool model, `apiVersion` and

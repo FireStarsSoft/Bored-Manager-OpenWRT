@@ -23,7 +23,7 @@ import * as netlink from 'bm.wanbind.netlink';
 import * as reconcile from 'bm.wanbind.reconcile';
 import * as ruleset from 'bm.wanbind.rules';
 
-export const RELEASE = '2.0.1';
+export const RELEASE = '2.1.0';
 
 /**
  * The ubus contract version, separate from the release.

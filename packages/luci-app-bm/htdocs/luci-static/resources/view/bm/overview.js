@@ -1,24 +1,28 @@
 'use strict';
 'require view';
+'require ui';
 'require poll';
 'require dom';
 'require bm.api as api';
+'require bm.ui as bmui';
 
 /*
- * What this router is doing, on one page.
+ * What this router is doing, on one page - and what it is missing, on the
+ * same page.
  *
- * The three cards are the three daemons, and a card is drawn for a daemon that
- * is not installed too - saying so, with what it would do. A router with only
- * bm-agent is a normal, working router, and a page that simply left out the
- * two missing cards would be telling somebody there is nothing else rather
- * than that there is something else they have not installed.
+ * The three cards are the three daemons, and a card is drawn for a daemon
+ * that is not installed too - saying so, with what it would do. Beside them
+ * sit the two cards that used to have no surface on the router at all:
+ * Requirements, which asks the agent live which of the pieces every feature
+ * needs are present and offers the fixed-list installer for the ones a
+ * package can fix; and Updates, which shows what is installed and checks for
+ * a release only when asked. Both exist for the same reason: a requirement
+ * that fails silently is a feature that breaks silently, and the app's
+ * readiness page is invisible from the router's own LuCI.
  *
- * "Recent activity" is built from the snapshot history rather than from a log.
- * Every snapshot carries the reason it was taken - a guard arming, an update,
- * a restore, somebody pressing the button - so the list is the router's own
- * record of the things that changed it, and it costs no permission beyond the
- * one this page already needs. The full log is `logread -e bm-` at a console,
- * and the page says so rather than pretending this is the same thing.
+ * "Recent activity" is built from the snapshot history rather than from a
+ * log. Every snapshot carries the reason it was taken, so the list is the
+ * router's own record of the things that changed it.
  */
 
 /** Five minutes of throughput at the five-second poll. */
@@ -29,16 +33,9 @@ const history = [];
 const SVG = 'http://www.w3.org/2000/svg';
 
 /**
- * A line, drawn rather than described.
- *
- * Built with createElementNS because E() calls createElement, which would
- * produce an HTML element named "svg" - present in the DOM, styled by nothing,
- * and drawing nothing at all.
- *
- * `currentColor` and a non-scaling stroke, so it takes the theme's text colour
- * and stays one pixel wide however wide the box gets. There is no axis and no
- * number on it on purpose: the figure above says what the value is, and this
- * only says which way it has been going.
+ * A line, drawn rather than described. Built with createElementNS because
+ * E() calls createElement, which would produce an HTML element named "svg" -
+ * present in the DOM, styled by nothing, and drawing nothing at all.
  */
 function sparkline(values) {
 	if (values.length < 2)
@@ -53,7 +50,7 @@ function sparkline(values) {
 	const svg = document.createElementNS(SVG, 'svg');
 	svg.setAttribute('viewBox', '0 0 240 40');
 	svg.setAttribute('preserveAspectRatio', 'none');
-	svg.setAttribute('style', 'width:100%;height:40px;opacity:.8');
+	svg.setAttribute('class', 'bm-spark');
 	svg.setAttribute('aria-hidden', 'true');
 
 	const line = document.createElementNS(SVG, 'polyline');
@@ -69,42 +66,33 @@ function sparkline(values) {
 
 /** One daemon, whether or not it is there. */
 function daemonCard(title, what, info, stats, missingText) {
-	const body = [];
-
 	if (!info) {
-		body.push(E('p', {}, missingText));
-	}
-	else {
-		const now = api.routerNow(info);
-
-		body.push(E('div', {}, api.dot(info.enabled === false ? 'idle' : 'ok',
-			info.enabled === false ? _('running, but switched off in its config') : _('running'))));
-		body.push(E('div', { 'style': 'margin-top:.4em;opacity:.85' }, [
-			E('div', {}, _('Version %s, ubus API %d').format(info.release ?? '?', info.apiVersion | 0)),
-			E('div', {}, _('Up %s').format(api.duration(info.uptime))),
-			E('div', {}, stats && (stats.rssKb | 0) >= 0
-				? _('Memory %s').format(api.size((stats.rssKb | 0) * 1024))
-				: _('Memory not reported')),
-			now ? E('div', { 'style': 'opacity:.7' }, _('Router clock: %s').format(api.when(now))) : ''
-		]));
+		return bmui.card({
+			title: title,
+			pill: bmui.pill('idle', _('not answering')),
+			sub: what,
+			body: E('p', { 'class': 'bm-small' }, missingText)
+		});
 	}
 
-	return E('div', {
-		'style': 'flex:1 1 16em;min-width:14em;padding:.75em 1em;border:1px solid rgba(128,128,128,.35);border-radius:4px'
-	}, [
-		E('h4', { 'style': 'margin:0 0 .2em' }, title),
-		E('div', { 'style': 'opacity:.7;font-size:.9em;margin-bottom:.5em' }, what),
-		E('div', {}, body)
-	]);
+	const now = api.routerNow(info);
+	const off = info.enabled === false;
+
+	return bmui.card({
+		title: title,
+		pill: off ? bmui.pill('warn', _('switched off')) : bmui.pill('ok', _('running')),
+		sub: what,
+		body: bmui.kv([
+			[_('Version'), _('%s, ubus API %d').format(info.release ?? '?', info.apiVersion | 0)],
+			[_('Uptime'), api.duration(info.uptime)],
+			[_('Memory'), stats && (stats.rssKb | 0) >= 0 ? api.size((stats.rssKb | 0) * 1024) : _('not reported')],
+			[_('Router clock'), now ? api.when(now) : '-']
+		])
+	});
 }
 
 /**
  * The snapshot history, read as a list of things that happened.
- *
- * `before-restore-<id>` is the one reason that is not a sentence, so it is
- * turned into one here rather than shown raw: it is written by the restore
- * path itself and would otherwise be the only row on the page that reads like
- * a filename.
  */
 function activityText(entry) {
 	const reason = String(entry.reason ?? '');
@@ -132,7 +120,7 @@ return view.extend({
 		if (!first.ok) {
 			return E([], [
 				banner,
-				api.notice(
+				bmui.notice(
 					_('There is no agent on this router'),
 					_('These pages are drawn from what bm-agent reports, and it did not answer: %s').format(first.error),
 					E('p', {}, _('Install bm-agent from the Bored Manager app, or check it with "/etc/init.d/bm-agent status" at a console.'))
@@ -140,10 +128,12 @@ return view.extend({
 			]);
 		}
 
-		const cards = E('div', { 'style': 'display:flex;flex-wrap:wrap;gap:1em;margin-bottom:1em' });
+		const cards = E('div', { 'class': 'bm-cards' });
+		const health = E('div', { 'class': 'bm-cards' });
 		const figures = E('div', {});
 		const graph = E('div', {});
 		const activity = E('div', {});
+		const self = this;
 
 		function refresh() {
 			return api.ask(api.calls.agentInfo).then(agentResult => {
@@ -183,7 +173,7 @@ return view.extend({
 							pppoe ? pool : null, poolStats,
 							pppoe
 								? _('bm-pppoe-pool is installed but is not answering. Check "logread -e bm-pppoe".')
-								: _('bm-pppoe-pool is not installed. Without it, pools are written by the app over SSH, a chunk per round trip.'))
+								: _('bm-pppoe-pool is not installed. Without it this router dials no pools.'))
 					]);
 
 					// Sessions.
@@ -204,7 +194,7 @@ return view.extend({
 						held += one.held | 0;
 					}
 
-					dom.content(figures, api.figures([
+					dom.content(figures, bmui.tiles([
 						[_('PPPoE sessions up'), pppoe ? '%d'.format(up) : '-'],
 						[_('Dialing'), pppoe ? '%d'.format(dialing) : '-'],
 						[_('In error'), pppoe ? '%d'.format(broken) : '-'],
@@ -218,7 +208,7 @@ return view.extend({
 						while (history.length > SAMPLES)
 							history.shift();
 
-						dom.content(graph, api.section(
+						dom.content(graph, bmui.section(
 							_('Throughput, last five minutes'),
 							_('The sum of every pool on this router, sampled each time this page refreshes.'),
 							sparkline(history)));
@@ -227,7 +217,7 @@ return view.extend({
 						dom.content(graph, null);
 					}
 
-					dom.content(activity, api.section(
+					dom.content(activity, bmui.section(
 						_('Recent activity'),
 						_('Built from the snapshot history, which is the router\'s own record of what changed it. The full log is "logread -e bm-" at a console.'),
 						snapshots.length
@@ -247,16 +237,174 @@ return view.extend({
 		poll.add(refresh, 5);
 		refresh();
 
+		dom.content(health, [this.requirementsCard(), this.updatesCard(first.data)]);
+
 		return E([], [
 			banner,
 			E('h2', {}, _('Bored Manager')),
 			E('div', { 'class': 'cbi-map-descr' },
-				_('What the three router daemons are doing. The app drives the same calls; nothing here is a second opinion.')),
+				_('What the three router daemons are doing, what every feature needs, and where updates come from. The app drives the same calls; nothing here is a second opinion.')),
 			cards,
+			health,
 			figures,
 			graph,
 			activity
 		]);
+	},
+
+	/**
+	 * Every requirement, asked live, with the installer beside the rows a
+	 * package can fix.
+	 *
+	 * Asked on load and on demand rather than on the poll: the report forks a
+	 * shell on the router, and a page left open must not do that every five
+	 * seconds for a list that changes when somebody installs something.
+	 */
+	requirementsCard() {
+		const body = E('div', {}, E('p', { 'class': 'spinning' }, _('Asking the router...')));
+		const self = this;
+
+		function refresh() {
+			return api.ask(api.calls.requirements).then(result => {
+				if (!result.ok) {
+					dom.content(body, E('p', { 'class': 'alert-message warning' }, result.error));
+					return null;
+				}
+
+				const data = result.data ?? {};
+
+				if (data.asked === false) {
+					dom.content(body, E('p', { 'class': 'bm-muted' },
+						_('The agent could not ask the shell, so nothing here is known. Check "logread -e bm-agent".')));
+					return null;
+				}
+
+				dom.content(body, (data.rows ?? []).map(row => self.requirementRow(row, refresh)));
+				return null;
+			});
+		}
+
+		refresh();
+
+		return bmui.card({
+			title: _('Requirements'),
+			sub: _('What every feature needs from this router, asked live. A missing piece is a feature that breaks - this row is where it says so first.'),
+			body: body,
+			footer: E('button', {
+				'class': 'btn cbi-button-neutral',
+				'click': ui.createHandlerFn(this, function() {
+					dom.content(body, E('p', { 'class': 'spinning' }, _('Asking the router...')));
+					return refresh();
+				})
+			}, _('Re-check'))
+		});
+	},
+
+	requirementRow(row, refresh) {
+		const pill = row.ok === true
+			? bmui.pill('ok', _('ok'))
+			: (row.ok === false ? bmui.pill('bad', _('missing')) : bmui.pill('idle', _('unknown')));
+
+		const fixable = row.ok === false && typeof row.group === 'string' && row.group;
+
+		return E('div', { 'class': 'bm-req-row' }, [
+			E('div', {}, pill),
+			E('div', { 'class': 'bm-req-body' }, [
+				E('div', { 'class': 'bm-req-label' }, row.label),
+				E('div', { 'class': 'bm-req-detail' }, row.detail ?? '')
+			]),
+			fixable
+				? E('div', { 'class': 'bm-req-action' }, E('button', {
+					'class': 'btn cbi-button-action',
+					'click': ui.createHandlerFn(this, function() {
+						if (!confirm(_('Install %s with apk now? This runs "apk update" first and can take a minute.').format(row.label)))
+							return Promise.resolve();
+
+						return api.run(api.calls.installPackages, { group: row.group },
+							_('Installed. Re-checking what the router has now.')).then(refresh);
+					})
+				}, _('Install')))
+				: ''
+		]);
+	},
+
+	/**
+	 * Updates, without phoning home: what is installed and what happened last
+	 * time are read off the router; the release server is asked only when the
+	 * button is pressed. The full flow - dry run, rollback, the step list -
+	 * lives on the Maintenance tab.
+	 */
+	updatesCard(info) {
+		const body = E('div', {});
+		const self = this;
+
+		function paint(latest) {
+			const rows = [
+				[_('Installed'), info.release ?? '?'],
+				[_('Latest'), latest ? (latest.latest ?? '?') : _('not asked yet')]
+			];
+
+			const children = [bmui.kv(rows)];
+
+			return api.ask(api.calls.updateStatus).then(result => {
+				const last = result.ok ? result.data : null;
+
+				if (last && (last.at | 0))
+					children.push(E('p', { 'class': 'bm-small bm-muted' },
+						_('Last update: %s, %s to %s.').format(api.when(last.at), last.from ?? '?', last.to ?? '?')));
+
+				if (latest && latest.newer === true) {
+					children.push(E('p', {}, [
+						bmui.pill('warn', _('update available')),
+						' ',
+						_('%s is published and signed by key %s.').format(latest.latest ?? '?', latest.key ?? '?')
+					]));
+					children.push(E('button', {
+						'class': 'btn cbi-button-apply',
+						'click': ui.createHandlerFn(self, function() {
+							if (!confirm(_('Install %s now, under the countdown? The services being replaced include the ones binding clients and dialling pools.').format(latest.latest)))
+								return Promise.resolve();
+
+							return api.run(api.calls.updateApply, { dry_run: false, guard: true, timeout: 180 },
+								_('Installing. The countdown at the top of the page is running: keep the change once this router is still reachable.'));
+						})
+					}, _('Update now')));
+				}
+				else if (latest) {
+					children.push(E('p', { 'class': 'bm-muted' },
+						latest.ok === false
+							? (latest.reason ?? _('The check failed and the router did not say why.'))
+							: _('Up to date.')));
+				}
+
+				dom.content(body, children);
+				return null;
+			});
+		}
+
+		paint(null);
+
+		return bmui.card({
+			title: _('Updates'),
+			sub: _('This router asks the release server only when somebody presses the button; nothing here runs on its own. The full flow, including rollback, is on the Maintenance tab.'),
+			body: body,
+			footer: [
+				E('a', { 'class': 'btn', 'href': L.url('admin/services/bm/maintenance') }, _('Maintenance')),
+				E('button', {
+					'class': 'btn cbi-button-action',
+					'click': ui.createHandlerFn(this, function() {
+						dom.content(body, E('p', { 'class': 'spinning' }, _('Asking the release server...')));
+						return api.ask(api.calls.updateCheck).then(result => {
+							if (!result.ok) {
+								dom.content(body, E('p', { 'class': 'alert-message warning' }, result.error));
+								return null;
+							}
+							return paint(result.data ?? {});
+						});
+					})
+				}, _('Check for updates'))
+			]
+		});
 	},
 
 	handleSave: null,

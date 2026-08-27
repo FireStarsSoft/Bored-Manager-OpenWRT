@@ -8,6 +8,75 @@ From 3.0.0, PPPoE pools also need the router packages at **2.x** - the rest of
 the module does not. Which release a module build installs is pinned in
 `main/agent/manifest.ts`.
 
+## 3.1.0
+
+Needs the same Bored Manager **0.4.1** and OpenWrt **25.12 or newer**. Router
+packages **2.1.0** for the new agent calls; every new surface also works
+without them, over SSH, and says which half is doing the writing.
+
+### A healthy router was failing the policy-routing probe
+
+The probe proves policy routing by dumping a numeric table:
+`ip -4 route show table 29999`. The kernel creates FIB tables lazily, so on a
+router where nothing has written to a high-numbered table yet - a fresh
+OpenWrt 25.12.5 under QEMU, for one - modern iproute2 answers that dump with
+exit 1 and `Error: ipv4: FIB table does not exist.` The probe required exit 0,
+read the refusal as BusyBox-or-worse, and the readiness card said *"the kernel
+refuses numeric routing tables - no package fixes that"* about firmware whose
+own `bm-wanbind` was binding clients over netlink at that very moment. Two of
+three readiness checks passed; the third was wrong.
+
+The fragment now captures stderr and treats that one exact sentence - matched
+case-insensitively, from the PATH `ip` and the libexec binary separately - as
+the pass it is: the kernel *parsed the numeric table and looked it up*, which
+is the capability under test. BusyBox's `invalid argument` stays a failure,
+and a kernel genuinely without `CONFIG_IP_MULTIPLE_TABLES` still fails
+`ip -4 rule show` itself. The QEMU router reads 3/3 ready.
+
+### The module and the router agree about WAN binding now
+
+Same root, second symptom: with `bm-wanbind` installed and binding, the module
+still gated `bindingStart` and friends on its own `ip` probe - so LuCI said
+"binding" while the app refused to start an instance over a binary the daemon
+path never uses. The `ipRule` requirement is met by *either* half now: the
+local `ip` passing the numeric-table test, or a usable agent whose features
+provide `binding` - the daemon writes rules over netlink and does not care
+what `/sbin/ip` links to. And on a router where the kernel-refuses verdict
+does still come up while the daemon is running, the readiness row says out
+loud that the verdict is probably the probe being wrong, instead of sending
+somebody to reflash working firmware.
+
+### Router limits: the scale advice became a page that applies it
+
+Since 2.x the binding capacity check has *named* the values a big deployment
+needs - conntrack, the neighbour thresholds, flow offload - and left the user
+a shell. Vietnamese ISP-scale routers hit exactly those two tables first:
+conntrack full drops new connections, neighbour overflow drops ARP, both with
+one dmesg line to show for it.
+
+**Module settings, Router limits** reads them live (the slow sweep carries a
+`===SYSCTL===` section now, five sysctls and fw4's `flow_offloading` in the
+same trip it already made), sizes a recommendation from what this router is
+actually carrying - leases and pool sessions, floored at 262144/2048/4096/8192
+so an idle router is never told to shrink - and applies through
+check-then-apply with the same token discipline as the rules editor. The check
+refuses a conntrack max below the entries in use right now (legal bounds
+cannot catch that; only the live count can), refuses an inverted threshold
+trio merged against what the router holds, and reports current usage with a
+warning from 80%.
+
+Who writes is decided per apply: the router's own `bm-agent` (packages 2.1.0+,
+`tune_set`) or SSH when it is older - both pin the same
+`/etc/sysctl.d/60-bm-scale.conf`, so the reboot story is one file whichever
+half wrote it. The guard's snapshots deliberately do not cover that file: a
+restore must never quietly shrink a capacity fix. The three capacity findings
+now point at the page instead of printing raw `sysctl -w` lines, and the
+create-instance hint about "the module deliberately does not write them" now
+says where the deliberate place is.
+
+`limitsEffective`, `limitsCheck` and `limitsApply` bring the method table to
+forty-eight, all through the same requirements gate.
+
 ## 3.0.1
 
 Needs the same Bored Manager **0.4.1** and OpenWrt **25.12 or newer**. Router

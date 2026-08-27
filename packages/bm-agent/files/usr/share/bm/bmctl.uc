@@ -14,6 +14,8 @@ import { info, stats } from 'bm.agent';
 import { run as configCommand, USAGE as CONFIG_USAGE } from 'bm.cliconfig';
 import { compatibility } from 'bm.meta';
 import { plan, run } from 'bm.migrate';
+import { install as installPackages, report as requirementsReport } from 'bm.requirements';
+import { apply as tuneApply, current as tuneCurrent } from 'bm.tune';
 import { apply as applyUpdate, check as checkUpdate, last as lastUpdate, rollback } from 'bm.update';
 import { API_VERSION, CONFIG_SCHEMA, RELEASE } from 'bm.version';
 
@@ -33,6 +35,14 @@ const USAGE = 'usage: bmctl <command> [--json] [--dry-run]\n' +
 	'                    --no-guard   do not arm the countdown first\n' +
 	'                    --timeout N  how long the countdown runs\n' +
 	'  rollback        reinstall the package set this router had before\n' +
+	'  requirements    what this router has of what every feature needs\n' +
+	'  install-group   close one gap: bmctl install-group pppoe|ipfull|dnsmasq\n' +
+	'                    --dry-run  say which packages, install nothing\n' +
+	'  tune            the scale limits. Bare: read them. With key=value\n' +
+	'                    pairs: apply and persist, e.g.\n' +
+	'                    bmctl tune conntrack_max=262144 gc_thresh3=16384\n' +
+	'                    keys: conntrack_max gc_thresh1 gc_thresh2 gc_thresh3\n' +
+	'                          flow_offload (0/1, fw4 software offload)\n' +
 	'  help            this text\n';
 
 // Present as a separate question from `info`, because "the files are installed"
@@ -335,6 +345,114 @@ if (command == 'rollback') {
 			result.guard.timeout);
 	}
 
+	exit(0);
+}
+
+if (command == 'requirements') {
+	let found = requirementsReport();
+
+	if (asJson) {
+		printf('%J\n', found);
+		exit(0);
+	}
+
+	if (!found.asked) {
+		printf('the shell could not be asked, so nothing here is known\n');
+		exit(1);
+	}
+
+	for (let entry in found.rows) {
+		let mark = entry.ok == null ? '?' : (entry.ok ? 'ok' : '!!');
+		printf('%-3s %-32s %s\n', mark, entry.label, entry.detail);
+		if (entry.ok == false && entry.group)
+			printf('    fix: bmctl install-group %s\n', entry.group);
+	}
+
+	exit(0);
+}
+
+if (command == 'install-group') {
+	let group = length(args) > 1 ? args[1] : '';
+	let result = installPackages({ group: group, dry_run: dryRun });
+
+	if (asJson) {
+		printf('%J\n', result);
+		exit(result.ok ? 0 : 1);
+	}
+
+	if (!result.ok) {
+		printf('%s\n', result.reason);
+		exit(1);
+	}
+
+	if (result.dryRun) {
+		printf('would install: %s\n', join(', ', result.packages));
+		exit(0);
+	}
+
+	printf('installed %s\n', join(', ', result.packages));
+	printf('run `bmctl requirements` to see what changed\n');
+	exit(0);
+}
+
+if (command == 'tune') {
+	// Pairs come as plain arguments (`tune conntrack_max=262144`), so the
+	// option parser above stays untouched and word order stays free.
+	let wanted = {};
+	let bad = null;
+
+	for (let raw in slice(args, 1)) {
+		let pair = match(raw, /^([a-z0-9_]+)=([0-9]+)$/);
+		if (!pair) {
+			bad = raw;
+			continue;
+		}
+
+		if (pair[1] == 'flow_offload')
+			wanted.flow_offload = pair[2] != '0';
+		else
+			wanted[pair[1]] = int(pair[2]);
+	}
+
+	if (bad != null) {
+		warn('bmctl tune: cannot read "' + bad + '" - expected key=value with a numeric value\n');
+		exit(1);
+	}
+
+	if (!length(keys(wanted))) {
+		let state = tuneCurrent();
+
+		if (asJson) {
+			printf('%J\n', state);
+			exit(0);
+		}
+
+		for (let key in sort(keys(state.values))) {
+			let value = state.values[key];
+			printf('%-18s %s\n', key, value == null ? 'unknown' : sprintf('%s', value));
+		}
+		printf('\npersisted in %s: %J\n', state.file, state.persisted);
+		exit(0);
+	}
+
+	let result = tuneApply(wanted);
+
+	if (asJson) {
+		printf('%J\n', result);
+		exit(result.ok ? 0 : 1);
+	}
+
+	if (!result.ok) {
+		printf('%s\n', result.reason);
+		exit(1);
+	}
+
+	printf('applied %J\n', result.applied);
+	if (result.persisted)
+		printf('persisted in %s, replayed at every boot\n', result.file);
+	if (result.flowOffload != null)
+		printf('flow offload %s%s\n', result.flowOffload ? 'on' : 'off',
+			result.reloaded ? ', firewall reloaded' : ' - reload the firewall to apply it');
 	exit(0);
 }
 

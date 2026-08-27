@@ -2,56 +2,31 @@
 	"admin/services/bm": {
 		"title": "Bored Manager",
 		"order": 60,
-		"action": {
-			"type": "firstchild"
-		},
-		"depends": {
-			"acl": [ "luci-app-bm" ]
-		}
+		"action": { "type": "firstchild" },
+		"depends": { "acl": [ "luci-app-bm" ] }
 	},
 
 	"admin/services/bm/overview": {
 		"title": "Overview",
 		"order": 10,
-		"action": {
-			"type": "view",
-			"path": "bm/overview"
-		}
+		"action": { "type": "view", "path": "bm/overview" }
 	},
 
 	"admin/services/bm/pppoe": {
 		"title": "PPPoE Pools",
 		"order": 20,
-		"action": {
-			"type": "view",
-			"path": "bm/pppoe"
-		}
+		"action": { "type": "view", "path": "bm/pppoe" }
 	},
 
 	"admin/services/bm/wanbind": {
 		"title": "WAN Binding",
 		"order": 30,
-		"action": {
-			"type": "view",
-			"path": "bm/wanbind"
-		}
+		"action": { "type": "view", "path": "bm/wanbind" }
 	},
 
-	"admin/services/bm/backup": {
-		"title": "Backup and Restore",
+	"admin/services/bm/maintenance": {
+		"title": "Maintenance",
 		"order": 40,
-		"action": {
-			"type": "view",
-			"path": "bm/backup"
-		}
-	},
-
-	"admin/services/bm/updates": {
-		"title": "Updates",
-		"order": 50,
-		"action": {
-			"type": "view",
-			"path": "bm/updates"
-		}
+		"action": { "type": "view", "path": "bm/maintenance" }
 	}
 }

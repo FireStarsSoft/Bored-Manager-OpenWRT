@@ -1513,3 +1513,174 @@ msgstr "router không nói lý do"
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:59
 msgid "up"
 msgstr "đang lên"
+
+# ---- 2.1.0: shared components, the Overview requirements/updates cards,
+# ---- and the Maintenance tab with its Scaling section.
+
+msgid "Type %s to confirm:"
+msgstr "Gõ %s để xác nhận:"
+
+msgid "That does not match; nothing was done."
+msgstr "Không khớp; chưa có gì được thực hiện."
+
+msgid "The bm-agent on this router does not have that call yet. Update the router packages to 2.1.0 or newer."
+msgstr "bm-agent trên router này chưa có lời gọi đó. Hãy cập nhật các gói router lên 2.1.0 trở lên."
+
+msgid "not answering"
+msgstr "không phản hồi"
+
+msgid "Version"
+msgstr "Phiên bản"
+
+msgid "%s, ubus API %d"
+msgstr "%s, ubus API %d"
+
+msgid "Uptime"
+msgstr "Thời gian chạy"
+
+msgid "Memory"
+msgstr "Bộ nhớ"
+
+msgid "not reported"
+msgstr "không báo cáo"
+
+msgid "Router clock"
+msgstr "Đồng hồ router"
+
+msgid "bm-pppoe-pool is not installed. Without it this router dials no pools."
+msgstr "bm-pppoe-pool chưa được cài. Thiếu nó, router này không quay số pool nào."
+
+msgid "What the three router daemons are doing, what every feature needs, and where updates come from. The app drives the same calls; nothing here is a second opinion."
+msgstr "Ba daemon trên router đang làm gì, mỗi tính năng cần gì, và bản cập nhật đến từ đâu. Ứng dụng gọi đúng những lệnh này; ở đây không có ý kiến thứ hai."
+
+msgid "Requirements"
+msgstr "Yêu cầu hệ thống"
+
+msgid "What every feature needs from this router, asked live. A missing piece is a feature that breaks - this row is where it says so first."
+msgstr "Những gì mỗi tính năng cần từ router này, hỏi trực tiếp. Thiếu một mảnh là một tính năng sẽ hỏng - hàng này là nơi nói ra điều đó trước tiên."
+
+msgid "Asking the router..."
+msgstr "Đang hỏi router..."
+
+msgid "The agent could not ask the shell, so nothing here is known. Check \"logread -e bm-agent\"."
+msgstr "Agent không hỏi được shell nên chưa biết gì ở đây. Kiểm tra \"logread -e bm-agent\"."
+
+msgid "Re-check"
+msgstr "Kiểm tra lại"
+
+msgid "ok"
+msgstr "ổn"
+
+msgid "missing"
+msgstr "thiếu"
+
+msgid "unknown"
+msgstr "chưa rõ"
+
+msgid "Install"
+msgstr "Cài đặt"
+
+msgid "Install %s with apk now? This runs \"apk update\" first and can take a minute."
+msgstr "Cài %s bằng apk ngay? Lệnh chạy \"apk update\" trước và có thể mất một phút."
+
+msgid "Installed. Re-checking what the router has now."
+msgstr "Đã cài. Đang kiểm tra lại xem router hiện có gì."
+
+msgid "This router asks the release server only when somebody presses the button; nothing here runs on its own. The full flow, including rollback, is on the Maintenance tab."
+msgstr "Router chỉ hỏi máy chủ phát hành khi có người bấm nút; không gì ở đây tự chạy. Quy trình đầy đủ, gồm cả rollback, nằm ở thẻ Bảo trì."
+
+msgid "not asked yet"
+msgstr "chưa hỏi"
+
+msgid "Last update: %s, %s to %s."
+msgstr "Cập nhật gần nhất: %s, %s lên %s."
+
+msgid "update available"
+msgstr "có bản cập nhật"
+
+msgid "%s is published and signed by key %s."
+msgstr "%s đã được phát hành và ký bằng khóa %s."
+
+msgid "Install %s now, under the countdown? The services being replaced include the ones binding clients and dialling pools."
+msgstr "Cài %s ngay, dưới đồng hồ đếm ngược? Các dịch vụ bị thay thế gồm cả những dịch vụ đang gán client và quay số pool."
+
+msgid "Installing. The countdown at the top of the page is running: keep the change once this router is still reachable."
+msgstr "Đang cài. Đồng hồ đếm ngược ở đầu trang đang chạy: hãy giữ thay đổi khi chắc chắn router vẫn truy cập được."
+
+msgid "The check failed and the router did not say why."
+msgstr "Kiểm tra thất bại và router không nói lý do."
+
+msgid "Up to date."
+msgstr "Đã là bản mới nhất."
+
+msgid "Maintenance"
+msgstr "Bảo trì"
+
+msgid "The router's own safety net and upkeep: the snapshots it can put back without anybody being able to reach it, the updater it runs only when asked, and the kernel limits that decide how far it scales."
+msgstr "Lưới an toàn và việc bảo dưỡng của chính router: các ảnh chụp cấu hình nó tự khôi phục được khi không ai với tới, trình cập nhật chỉ chạy khi được yêu cầu, và các giới hạn kernel quyết định nó mở rộng được tới đâu."
+
+msgid "Snapshots"
+msgstr "Ảnh chụp cấu hình"
+
+msgid "Snapshots, updates and tuning are bm-agent's, and it did not answer: %s"
+msgstr "Ảnh chụp, cập nhật và tinh chỉnh là của bm-agent, và nó không trả lời: %s"
+
+msgid "What an update does, step by step"
+msgstr "Một lần cập nhật làm gì, từng bước"
+
+msgid "Last update: %s, %s to %s. Packages: %s."
+msgstr "Cập nhật gần nhất: %s, %s lên %s. Gói: %s."
+
+msgid "Scaling"
+msgstr "Mở rộng quy mô"
+
+msgid "The two kernel tables that overflow first at thousands of sessions or clients, and the fw4 flow offload that keeps rule lookups off the CPU. Values apply immediately and persist across reboots."
+msgstr "Hai bảng kernel tràn đầu tiên khi lên tới hàng nghìn phiên hoặc client, và flow offload của fw4 giúp CPU khỏi tra rule từng gói tin. Giá trị áp dụng ngay và giữ nguyên qua khởi động lại."
+
+msgid "Up to 1,000 clients"
+msgstr "Tới 1.000 client"
+
+msgid "Up to 4,000 clients"
+msgstr "Tới 4.000 client"
+
+msgid "Connection tracking: %s of %s entries in use."
+msgstr "Theo dõi kết nối: đang dùng %s trên %s mục."
+
+msgid "%d%% full"
+msgstr "%d%% đầy"
+
+msgid "%d%% used"
+msgstr "%d%% đã dùng"
+
+msgid "The conntrack table is nearly full. When it fills, the kernel drops new connections with only a dmesg line to show for it - raise the limit below."
+msgstr "Bảng conntrack sắp đầy. Khi đầy, kernel bỏ rơi kết nối mới và chỉ để lại một dòng dmesg - hãy nâng giới hạn bên dưới."
+
+msgid "conntrack max"
+msgstr "conntrack max"
+
+msgid "Entries the connection-tracking table can hold. Roughly 300 bytes of kernel memory each; 262144 suits a few thousand busy clients."
+msgstr "Số mục bảng theo dõi kết nối chứa được. Mỗi mục tốn khoảng 300 byte bộ nhớ kernel; 262144 hợp với vài nghìn client bận rộn."
+
+msgid "Neighbour thresholds"
+msgstr "Ngưỡng bảng neighbour"
+
+msgid "gc_thresh1/2/3 of the ARP cache. The kernel refuses new neighbours at the third; keep it above twice the expected client count, and the three in order."
+msgstr "gc_thresh1/2/3 của bộ đệm ARP. Kernel từ chối neighbour mới ở ngưỡng thứ ba; giữ nó trên gấp đôi số client dự kiến, và ba số theo đúng thứ tự."
+
+msgid "Software flow offload"
+msgstr "Flow offload phần mềm"
+
+msgid "fw4 fastpath for established flows. Cuts per-packet rule lookups at thousands of linear fib rules; committed to the firewall config and reloaded."
+msgstr "Đường tắt của fw4 cho các luồng đã thiết lập. Giảm tra rule từng gói tin khi có hàng nghìn fib rule tuyến tính; được ghi vào cấu hình firewall và nạp lại."
+
+msgid "conntrack max is 16384 to 4194304 and each threshold 128 to 1048576, whole numbers only."
+msgstr "conntrack max từ 16384 đến 4194304 và mỗi ngưỡng từ 128 đến 1048576, chỉ nhận số nguyên."
+
+msgid "Apply and persist"
+msgstr "Áp dụng và lưu bền"
+
+msgid "Applied, and pinned under /etc/sysctl.d/ so it survives a reboot."
+msgstr "Đã áp dụng và ghim dưới /etc/sysctl.d/ nên giữ nguyên qua khởi động lại."
+
+msgid "Persisted in %s. The guard's snapshots deliberately do not cover this file, so a restore never quietly shrinks a capacity fix. At a console: \"bmctl tune\"."
+msgstr "Lưu bền trong %s. Ảnh chụp của guard cố ý không bao phủ file này, nên một lần khôi phục không bao giờ âm thầm thu nhỏ một chỉnh sửa dung lượng. Tại console: \"bmctl tune\"."

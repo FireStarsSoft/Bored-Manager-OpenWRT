@@ -82,6 +82,16 @@ export {
   type WanbindStats,
   type WanbindWaiting
 } from './wanbind'
+export {
+  TUNE_AGENT_RELEASE,
+  agentAtLeast,
+  tuneGet,
+  tuneSet,
+  type TuneApplied,
+  type TuneState,
+  type TuneValues,
+  type TuneWanted
+} from './tune'
 export { armGuard, cancelGuard, confirmGuard, underGuard, type GuardState } from './guard'
 export { guardedJobs, type JobStarter } from './jobs'
 export { AgentManager, type PackageRow } from './manager'

@@ -84,6 +84,19 @@ const calls = {
 	updateRollback: declare(AGENT, 'update_rollback', { guard: true, timeout: 0 }),
 	updateStatus: declare(AGENT, 'update_status'),
 
+	// What this router has of what every feature needs, and the allowlisted
+	// installer behind the rows. `group` is a key into the agent's own fixed
+	// table (pppoe / ipfull / dnsmasq); a package name never crosses this call.
+	requirements: declare(AGENT, 'requirements'),
+	installPackages: declare(AGENT, 'install_packages', { group: '', dry_run: false }),
+
+	// The router-wide limits that decide whether thousands of sessions fit:
+	// conntrack, the neighbour-cache thresholds, and fw4's flow offload.
+	tuneGet: declare(AGENT, 'tune_get'),
+	tuneSet: declare(AGENT, 'tune_set', {
+		conntrack_max: 0, gc_thresh1: 0, gc_thresh2: 0, gc_thresh3: 0, flow_offload: false
+	}),
+
 	wanbindInfo: declare(WANBIND, 'info'),
 	wanbindStats: declare(WANBIND, 'stats'),
 	wanbindAssignments: declare(WANBIND, 'assignments', { instance: '' }),
@@ -129,6 +142,10 @@ function describe(error) {
 	// daemon that is simply not answering.
 	if (/ubus code 2\b/.test(text))
 		return _('The router rejected the arguments of that call.');
+	// A method the running agent has never heard of: the packages predate it.
+	// Said as the fix rather than as a fault, because the router is fine.
+	if (/ubus code 3\b/.test(text))
+		return _('The bm-agent on this router does not have that call yet. Update the router packages to 2.1.0 or newer.');
 	if (/ubus code 7\b/.test(text))
 		return _('The router took too long to answer.');
 	// What a handler that threw replies with, immediately before the exception
@@ -281,69 +298,6 @@ return baseclass.extend({
 		if (value < 1000) return '%d bit/s'.format(Math.round(value));
 		if (value < 1000000) return '%.1f kbit/s'.format(value / 1000);
 		return '%.2f Mbit/s'.format(value / 1000000);
-	},
-
-	/**
-	 * A coloured dot and a word.
-	 *
-	 * The dot repeats what the word says rather than replacing it: a status
-	 * conveyed by colour alone is a status that is not there for a reader who
-	 * cannot see the difference, and LuCI's own tables read the same way.
-	 */
-	dot(kind, label) {
-		const colour = {
-			ok: '#37c837',
-			busy: '#ffb300',
-			bad: '#e04b4b',
-			idle: '#a0a0a0'
-		}[kind] ?? '#a0a0a0';
-
-		return E('span', {}, [
-			E('span', {
-				'style': 'display:inline-block;width:.6em;height:.6em;border-radius:50%%;background:%s;margin-right:.45em'.format(colour)
-			}),
-			label
-		]);
-	},
-
-	/**
-	 * The block that goes where a table would have been.
-	 *
-	 * Never an empty box. A page that shows nothing and explains nothing is the
-	 * one thing this whole project has been trying not to build.
-	 */
-	notice(title, text, children) {
-		return E('div', { 'class': 'cbi-section' }, [
-			E('h3', {}, title),
-			E('p', {}, text),
-			children ?? ''
-		]);
-	},
-
-	/** A titled block with a one-line explanation under the heading. */
-	section(title, description, children) {
-		return E('div', { 'class': 'cbi-section' }, [
-			title ? E('h3', {}, title) : '',
-			description ? E('div', { 'class': 'cbi-section-descr' }, description) : '',
-			children ?? ''
-		]);
-	},
-
-	/**
-	 * The row of big numbers at the top of a page.
-	 *
-	 * Flex with wrap rather than a grid with a fixed column count, so it
-	 * becomes one column on a phone without a media query of its own.
-	 */
-	figures(items) {
-		return E('div', {
-			'style': 'display:flex;flex-wrap:wrap;gap:1em;margin-bottom:1em'
-		}, items.map(item => E('div', {
-			'style': 'flex:1 1 10em;min-width:10em;padding:.75em 1em;border:1px solid rgba(128,128,128,.35);border-radius:4px'
-		}, [
-			E('div', { 'style': 'font-size:1.6em;line-height:1.2' }, item[1]),
-			E('div', { 'style': 'opacity:.75;font-size:.9em' }, item[0])
-		])));
 	},
 
 	/**

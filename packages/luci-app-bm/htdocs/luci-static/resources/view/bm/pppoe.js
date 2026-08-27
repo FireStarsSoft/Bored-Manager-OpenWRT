@@ -4,6 +4,7 @@
 'require poll';
 'require dom';
 'require bm.api as api';
+'require bm.ui as bmui';
 
 /*
  * The PPPoE pools: one card per pool, one row per VLAN, and nothing hidden.
@@ -38,71 +39,12 @@ const state = {
 };
 
 function stateDot(status) {
-	if (status === 'up') return api.dot('ok', _('up'));
-	if (status === 'dialing') return api.dot('busy', _('dialing'));
-	if (status === 'error') return api.dot('bad', _('error'));
-	if (status === 'unwritten') return api.dot('bad', _('unwritten'));
-	if (status === 'stopped') return api.dot('idle', _('stopped'));
-	return api.dot('idle', _('down'));
-}
-
-/** One labelled row of a modal form, in LuCI's own shape. */
-function field(label, node, hint) {
-	return E('div', { 'class': 'cbi-value' }, [
-		E('label', { 'class': 'cbi-value-title' }, label),
-		E('div', { 'class': 'cbi-value-field' }, [
-			node,
-			hint ? E('div', { 'class': 'cbi-value-description' }, hint) : ''
-		])
-	]);
-}
-
-function textInput(value, placeholder, width, disabled) {
-	return E('input', {
-		'type': 'text',
-		'class': 'cbi-input-text',
-		'value': value ?? '',
-		'placeholder': placeholder ?? '',
-		'disabled': disabled ? '' : null,
-		'style': 'width:%s'.format(width ?? '14em')
-	});
-}
-
-function passwordInput(placeholder) {
-	return E('input', {
-		'type': 'password',
-		'class': 'cbi-input-password',
-		'value': '',
-		'placeholder': placeholder ?? '',
-		'style': 'width:14em'
-	});
-}
-
-function checkInput(checked) {
-	return E('input', { 'type': 'checkbox', 'checked': checked ? '' : null });
-}
-
-function selectInput(options, value) {
-	return E('select', { 'class': 'cbi-input-select' }, options.map(entry =>
-		E('option', { 'value': entry[0], 'selected': entry[0] === value ? '' : null }, entry[1])));
-}
-
-function groupHeading(text) {
-	return E('h4', { 'style': 'margin:1.2em 0 .4em' }, text);
-}
-
-function riskNote(text) {
-	return E('div', { 'class': 'alert-message warning', 'style': 'margin:.5em 0' }, text);
-}
-
-/** A whole number from a field, or null when it is not one. */
-function whole(node, low, high) {
-	const raw = String(node.value ?? '').trim();
-	if (!/^[0-9]+$/.test(raw))
-		return null;
-
-	const value = Number(raw);
-	return (value >= low && value <= high) ? value : null;
+	if (status === 'up') return bmui.dot('ok', _('up'));
+	if (status === 'dialing') return bmui.dot('busy', _('dialing'));
+	if (status === 'error') return bmui.dot('bad', _('error'));
+	if (status === 'unwritten') return bmui.dot('bad', _('unwritten'));
+	if (status === 'stopped') return bmui.dot('idle', _('stopped'));
+	return bmui.dot('idle', _('down'));
 }
 
 /*
@@ -220,19 +162,6 @@ function compressVlans(vlans) {
 	return parts.join(',');
 }
 
-/** The findings list, exactly as the daemon worded it. */
-function findingsList(findings) {
-	const colours = { error: '#e04b4b', warning: '#ffb300', info: '#888', pass: '#37c837' };
-
-	return E('div', { 'style': 'max-height:18em;overflow:auto;margin:.5em 0' },
-		(findings ?? []).map(one => E('div', { 'style': 'margin:.35em 0' }, [
-			E('strong', { 'style': 'color:%s;margin-right:.5em'.format(colours[one.level] ?? '#888') },
-				(one.level ?? '').toUpperCase()),
-			one.label ?? '',
-			one.detail ? E('div', { 'style': 'opacity:.7;font-size:.92em;margin-left:.5em' }, one.detail) : ''
-		])));
-}
-
 return view.extend({
 	load() {
 		return api.ask(api.calls.agentInfo);
@@ -242,13 +171,13 @@ return view.extend({
 		const banner = api.guardBanner();
 
 		if (!first.ok) {
-			return E([], [banner, api.notice(
+			return E([], [banner, bmui.notice(
 				_('There is no agent on this router'),
 				_('This page is drawn from what the router reports, and bm-agent did not answer: %s').format(first.error))]);
 		}
 
 		if (!api.has(first.data, 'pppoe')) {
-			return E([], [banner, api.notice(
+			return E([], [banner, bmui.notice(
 				_('bm-pppoe-pool is not installed'),
 				_('Without it this router dials no pools. Install it from Router packages in the Bored Manager app, or with "apk add bm-pppoe-pool" on this router.'))]);
 		}
@@ -301,7 +230,7 @@ return view.extend({
 		}
 
 		if ((info.apiVersion | 0) < 2) {
-			dom.content(node, api.notice(
+			dom.content(node, bmui.notice(
 				_('bm-pppoe-pool %s is too old for this page').format(info.release ?? '?'),
 				_('This page drives the pool-of-VLANs model, which arrived with 2.0.0 (API 2). Update the router packages from the Bored Manager app, or with "apk add bm-pppoe-pool" against a 2.x feed.')));
 			return;
@@ -322,7 +251,7 @@ return view.extend({
 		}
 
 		const blocks = [
-			api.figures([
+			bmui.tiles([
 				[_('Pools'), '%d'.format(pools.length)],
 				[_('Interfaces'), '%d'.format(tally.members)],
 				[_('Up'), '%d'.format(tally.up)],
@@ -341,7 +270,7 @@ return view.extend({
 			blocks.push(this.legacyBlock(legacy));
 
 		if (!pools.length) {
-			blocks.push(api.notice(
+			blocks.push(bmui.notice(
 				_('This router has no pools yet'),
 				_('Create one with the button above, from the Bored Manager app, or with "bmpppoe create" at a console.')));
 		}
@@ -362,14 +291,13 @@ return view.extend({
 	toolbar() {
 		const self = this;
 
-		return E('div', { 'style': 'margin:.5em 0' }, [
+		return bmui.toolbar([
 			E('button', {
 				'class': 'btn cbi-button-add',
 				'click': ui.createHandlerFn(self, function() {
 					return self.openEditor(null);
 				})
 			}, _('Create a pool')),
-			' ',
 			E('button', {
 				'class': 'btn cbi-button-neutral',
 				'click': ui.createHandlerFn(self, function() {
@@ -404,7 +332,7 @@ return view.extend({
 		return E('div', { 'class': 'alert-message warning' }, [
 			E('h4', {}, _('Pools from the old model')),
 			E('p', {}, _('These were created by an earlier release as numbered session runs. This release neither edits nor watches them: delete each one and create it again as a pool of VLANs. Deleting removes its interfaces exactly as the old release would have.')),
-			table.render()
+			bmui.tableWrap(table.render())
 		]);
 	},
 
@@ -422,11 +350,10 @@ return view.extend({
 			? _('per-VLAN MACs')
 			: _('carrier MAC');
 
-		const header = E('div', { 'style': 'display:flex;flex-wrap:wrap;align-items:baseline;gap:.75em' }, [
-			E('h3', { 'style': 'margin:0' }, pool.label && pool.label.length ? '%s (%s)'.format(pool.label, pool.id) : pool.id),
+		const header = E('div', { 'class': 'bm-pool-head' }, [
+			E('h3', {}, pool.label && pool.label.length ? '%s (%s)'.format(pool.label, pool.id) : pool.id),
 			E('span', {
-				'style': 'padding:.1em .55em;border-radius:1em;font-size:.85em;color:#fff;background:%s'
-					.format(pool.mode === 'multi' ? '#7a5195' : '#336699')
+				'class': 'bm-pill bm-mode--%s'.format(pool.mode === 'multi' ? 'multi' : 'single')
 			}, pool.mode === 'multi' ? _('shared account') : _('per-VLAN accounts')),
 			E('span', { 'style': 'opacity:.8' }, _('on %s').format(pool.carrier)),
 			E('span', { 'style': 'opacity:.8' }, account),
@@ -454,20 +381,16 @@ return view.extend({
 			}, label);
 		}
 
-		const buttons = E('div', { 'style': 'margin:.5em 0' }, [
+		const buttons = bmui.toolbar([
 			bulk('up', _('Start all'), null),
-			' ',
 			bulk('down', _('Stop all'), _('Stop all %d interface(s)? Anybody using them loses their connection.')),
-			' ',
 			bulk('redial', _('Redial all'), _('Redial all %d interface(s)? Each one drops and dials again.')),
-			' ',
 			E('button', {
 				'class': 'btn cbi-button-action',
 				'click': ui.createHandlerFn(self, function() {
 					return self.openEditor(pool);
 				})
 			}, _('Edit')),
-			' ',
 			E('button', {
 				'class': 'btn cbi-button-remove',
 				'click': ui.createHandlerFn(self, function() {
@@ -497,7 +420,7 @@ return view.extend({
 			this.rowActions(row)
 		]));
 
-		return E('div', { 'class': 'cbi-section' }, [header, buttons, table.render()]);
+		return E('div', { 'class': 'cbi-section bm-section' }, [header, buttons, bmui.tableWrap(table.render())]);
 	},
 
 	rowActions(row) {
@@ -549,31 +472,31 @@ return view.extend({
 		const self = this;
 
 		// ---- identity
-		const modeSelect = selectInput(MODES, creating ? 'multi' : pool.mode);
+		const modeSelect = bmui.selectInput(MODES, creating ? 'multi' : pool.mode);
 		if (!creating) modeSelect.disabled = true;
 
-		const idInput = textInput(creating ? '' : pool.id, 'fpt1', '10em', !creating);
-		const labelInput = textInput(creating ? '' : (pool.label ?? ''), _('optional'), '18em');
-		const prefixInput = textInput(creating ? '' : pool.prefix, 'fpt', '6em', !creating);
+		const idInput = bmui.textInput(creating ? '' : pool.id, 'fpt1', '10em', !creating);
+		const labelInput = bmui.textInput(creating ? '' : (pool.label ?? ''), _('optional'), '18em');
+		const prefixInput = bmui.textInput(creating ? '' : pool.prefix, 'fpt', '6em', !creating);
 
 		const carrierOptions = carriers.map(one => [one.name, '%s%s'.format(one.name, one.up ? '' : _(' (down)'))]);
 		const currentCarrier = creating ? (carrierOptions.length ? carrierOptions[0][0] : '') : pool.carrier;
 		if (currentCarrier && !carrierOptions.some(entry => entry[0] === currentCarrier))
 			carrierOptions.unshift([currentCarrier, currentCarrier]);
 		const carrierSelect = carrierOptions.length
-			? selectInput(carrierOptions, currentCarrier)
-			: textInput(currentCarrier, 'eth1', '10em');
+			? bmui.selectInput(carrierOptions, currentCarrier)
+			: bmui.textInput(currentCarrier, 'eth1', '10em');
 
-		const macSelect = selectInput([
+		const macSelect = bmui.selectInput([
 			['auto', _('auto - one derived MAC per VLAN')],
 			['inherit', _('inherit - every VLAN keeps the carrier MAC')]
 		], creating ? 'auto' : pool.mac_mode);
 
-		const tableBaseInput = textInput(creating ? '10000' : '%d'.format(pool.table_base | 0), '10000', '8em');
+		const tableBaseInput = bmui.textInput(creating ? '10000' : '%d'.format(pool.table_base | 0), '10000', '8em');
 
 		// ---- accounts and members
-		const usernameInput = textInput(creating ? '' : (pool.username ?? ''), 'user@isp', '14em');
-		const passwordInputNode = passwordInput(creating ? '' : _('unchanged if left empty'));
+		const usernameInput = bmui.textInput(creating ? '' : (pool.username ?? ''), 'user@isp', '14em');
+		const passwordInputNode = bmui.passwordInput(creating ? '' : _('unchanged if left empty'));
 
 		const memberVlans = creating ? [] : (pool.memberList ?? []).map(one => one.vlan | 0);
 		const vlanBox = E('textarea', {
@@ -594,32 +517,32 @@ return view.extend({
 		}, memberLines);
 
 		// ---- general
-		const serviceInput = textInput(creating ? '' : (pool.service ?? ''), _('auto'), '12em');
-		const acInput = textInput(creating ? '' : (pool.ac ?? ''), _('auto'), '12em');
-		const acMacInput = textInput(creating ? '' : (pool.ac_mac ?? ''), _('auto'), '12em');
+		const serviceInput = bmui.textInput(creating ? '' : (pool.service ?? ''), _('auto'), '12em');
+		const acInput = bmui.textInput(creating ? '' : (pool.ac ?? ''), _('auto'), '12em');
+		const acMacInput = bmui.textInput(creating ? '' : (pool.ac_mac ?? ''), _('auto'), '12em');
 
 		// ---- advanced
-		const mtuInput = textInput(creating || !(pool.mtu | 0) ? '' : '%d'.format(pool.mtu), '1492', '6em');
+		const mtuInput = bmui.textInput(creating || !(pool.mtu | 0) ? '' : '%d'.format(pool.mtu), '1492', '6em');
 		const keepalive = String((creating ? '' : pool.keepalive) ?? '').match(/^([0-9]+)(?:[ ,]([0-9]+))?$/);
-		const kaFailInput = textInput(keepalive ? keepalive[1] : '', '5', '5em');
-		const kaIntInput = textInput(keepalive && keepalive[2] ? keepalive[2] : '', '1', '5em');
-		const ipv6Select = selectInput([
+		const kaFailInput = bmui.textInput(keepalive ? keepalive[1] : '', '5', '5em');
+		const kaIntInput = bmui.textInput(keepalive && keepalive[2] ? keepalive[2] : '', '1', '5em');
+		const ipv6Select = bmui.selectInput([
 			['0', _('Disabled')], ['auto', _('Automatic')], ['1', _('Manual')]
 		], creating ? '0' : (pool.ipv6 ?? '0'));
-		const peerdnsCheck = checkInput(creating ? false : pool.peerdns === true);
-		const dnsInput = textInput(creating ? '' : (pool.dns ?? []).join(' '), '1.1.1.1 8.8.8.8', '20em');
-		const defaultrouteCheck = checkInput(creating ? true : pool.defaultroute !== false);
-		const hostUniqInput = textInput(creating ? '' : (pool.host_uniq ?? ''), _('empty unless the ISP requires it'), '14em');
-		const demandInput = textInput(creating || !(pool.demand | 0) ? '' : '%d'.format(pool.demand), '0', '6em');
-		const padiAttemptsInput = textInput(creating || !(pool.padi_attempts | 0) ? '' : '%d'.format(pool.padi_attempts), _('default'), '6em');
-		const padiTimeoutInput = textInput(creating || !(pool.padi_timeout | 0) ? '' : '%d'.format(pool.padi_timeout), _('default'), '6em');
-		const pppdInput = textInput(creating ? '' : (pool.pppd_options ?? ''), '', '24em');
+		const peerdnsCheck = bmui.checkbox(creating ? false : pool.peerdns === true);
+		const dnsInput = bmui.textInput(creating ? '' : (pool.dns ?? []).join(' '), '1.1.1.1 8.8.8.8', '20em');
+		const defaultrouteCheck = bmui.checkbox(creating ? true : pool.defaultroute !== false);
+		const hostUniqInput = bmui.textInput(creating ? '' : (pool.host_uniq ?? ''), _('empty unless the ISP requires it'), '14em');
+		const demandInput = bmui.textInput(creating || !(pool.demand | 0) ? '' : '%d'.format(pool.demand), '0', '6em');
+		const padiAttemptsInput = bmui.textInput(creating || !(pool.padi_attempts | 0) ? '' : '%d'.format(pool.padi_attempts), _('default'), '6em');
+		const padiTimeoutInput = bmui.textInput(creating || !(pool.padi_timeout | 0) ? '' : '%d'.format(pool.padi_timeout), _('default'), '6em');
+		const pppdInput = bmui.textInput(creating ? '' : (pool.pppd_options ?? ''), '', '24em');
 
 		// ---- firewall
-		const zoneInput = textInput(creating ? 'bmwanpool' : pool.zone, 'bmwanpool', '10em');
-		const masqCheck = checkInput(creating ? true : pool.masq !== false);
-		const mtuFixCheck = checkInput(creating ? true : pool.mtu_fix !== false);
-		const lanForwardCheck = checkInput(creating ? true : pool.lan_forward !== false);
+		const zoneInput = bmui.textInput(creating ? 'bmwanpool' : pool.zone, 'bmwanpool', '10em');
+		const masqCheck = bmui.checkbox(creating ? true : pool.masq !== false);
+		const mtuFixCheck = bmui.checkbox(creating ? true : pool.mtu_fix !== false);
+		const lanForwardCheck = bmui.checkbox(creating ? true : pool.lan_forward !== false);
 
 		const status = E('div', { 'style': 'margin:.5em 0' });
 		const buttons = E('div', { 'class': 'right' });
@@ -627,15 +550,15 @@ return view.extend({
 		// Which member editor is on show follows the mode. `conditional`
 		// rendering by hand, because the two modes ask for different things.
 		const multiBlock = E('div', {}, [
-			field(_('Username'), usernameInput, _('The one account every VLAN dials with.')),
-			field(_('Password'), passwordInputNode,
+			bmui.field(_('Username'), usernameInput, _('The one account every VLAN dials with.')),
+			bmui.field(_('Password'), passwordInputNode,
 				creating ? '' : _('Leave empty to keep the stored password.')),
-			field(_('VLANs'), vlanBox,
+			bmui.field(_('VLANs'), vlanBox,
 				_('Ranges and numbers: 101-150,200. VLAN 0 means untagged, straight over the carrier, at most once.'))
 		]);
 
 		const singleBlock = E('div', {}, [
-			field(_('Members'), memberBox,
+			bmui.field(_('Members'), memberBox,
 				_('One per line: VLAN, username, password - separated by a comma, a tab, a semicolon, a pipe or spaces. # starts a comment. On an edit, an empty password keeps the stored one.'))
 		]);
 
@@ -669,9 +592,9 @@ return view.extend({
 			spec.carrier = carrierValue();
 			spec.mac_mode = macSelect.value;
 
-			const tableBase = whole(tableBaseInput, 1, 65535);
+			const tableBase = bmui.whole(tableBaseInput, 1, 65535);
 			if (tableBase === null) {
-				dom.content(status, riskNote(_('The table base has to be 1 to 65535.')));
+				dom.content(status, bmui.riskNote(_('The table base has to be 1 to 65535.')));
 				return null;
 			}
 			spec.table_base = tableBase;
@@ -683,7 +606,7 @@ return view.extend({
 
 				const parsed = parseVlans(vlanBox.value);
 				if (parsed.errors.length) {
-					dom.content(status, riskNote(parsed.errors.slice(0, 5).join('; ')));
+					dom.content(status, bmui.riskNote(parsed.errors.slice(0, 5).join('; ')));
 					return null;
 				}
 				spec.members = parsed.vlans.map(vlan => ({ vlan: vlan }));
@@ -691,7 +614,7 @@ return view.extend({
 			else {
 				const parsed = parseMembers(memberBox.value);
 				if (parsed.errors.length) {
-					dom.content(status, riskNote(parsed.errors.slice(0, 5).join('; ')));
+					dom.content(status, bmui.riskNote(parsed.errors.slice(0, 5).join('; ')));
 					return null;
 				}
 				spec.members = parsed.members;
@@ -703,9 +626,9 @@ return view.extend({
 
 			const mtuRaw = mtuInput.value.trim();
 			if (mtuRaw.length) {
-				const mtu = whole(mtuInput, 576, 9200);
+				const mtu = bmui.whole(mtuInput, 576, 9200);
 				if (mtu === null) {
-					dom.content(status, riskNote(_('MTU has to be 576 to 9200, or empty for the default.')));
+					dom.content(status, bmui.riskNote(_('MTU has to be 576 to 9200, or empty for the default.')));
 					return null;
 				}
 				spec.mtu = mtu;
@@ -727,12 +650,12 @@ return view.extend({
 			spec.dns = dnsInput.value.trim().length ? dnsInput.value.trim().split(/\s+/) : [];
 			spec.defaultroute = defaultrouteCheck.checked;
 			spec.host_uniq = hostUniqInput.value.trim();
-			spec.demand = demandInput.value.trim().length ? (whole(demandInput, 0, 86400) ?? -1) : 0;
-			spec.padi_attempts = padiAttemptsInput.value.trim().length ? (whole(padiAttemptsInput, 0, 100) ?? -1) : 0;
-			spec.padi_timeout = padiTimeoutInput.value.trim().length ? (whole(padiTimeoutInput, 0, 300) ?? -1) : 0;
+			spec.demand = demandInput.value.trim().length ? (bmui.whole(demandInput, 0, 86400) ?? -1) : 0;
+			spec.padi_attempts = padiAttemptsInput.value.trim().length ? (bmui.whole(padiAttemptsInput, 0, 100) ?? -1) : 0;
+			spec.padi_timeout = padiTimeoutInput.value.trim().length ? (bmui.whole(padiTimeoutInput, 0, 300) ?? -1) : 0;
 
 			if (spec.demand < 0 || spec.padi_attempts < 0 || spec.padi_timeout < 0) {
-				dom.content(status, riskNote(_('Demand and the PADI numbers have to be whole numbers.')));
+				dom.content(status, bmui.riskNote(_('Demand and the PADI numbers have to be whole numbers.')));
 				return null;
 			}
 
@@ -754,20 +677,20 @@ return view.extend({
 
 			return api.ask(api.calls.poolCheck, spec).then(function(result) {
 				if (!result.ok) {
-					dom.content(status, riskNote(result.error));
+					dom.content(status, bmui.riskNote(result.error));
 					return null;
 				}
 
 				const data = result.data ?? {};
 				if (data.ok === false && !Array.isArray(data.findings)) {
-					dom.content(status, riskNote(data.reason ?? _('The router would not say why.')));
+					dom.content(status, bmui.riskNote(data.reason ?? _('The router would not say why.')));
 					return null;
 				}
 
 				const passed = data.ok === true;
 
 				dom.content(status, [
-					findingsList(data.findings),
+					bmui.findingsList(data.findings),
 					passed
 						? E('div', { 'class': 'right' }, [
 							E('button', {
@@ -784,7 +707,7 @@ return view.extend({
 								})
 							}, creating ? _('Create it') : _('Apply to the whole pool'))
 						])
-						: riskNote(_('Fix the errors above and check again; nothing has been written.'))
+						: bmui.riskNote(_('Fix the errors above and check again; nothing has been written.'))
 				]);
 
 				return null;
@@ -805,47 +728,47 @@ return view.extend({
 				? _('Every field below can also be changed later, except the id, the mode and the prefix.')
 				: _('Changes apply to every interface in the pool in one pass. Nothing is written until the check passes and you apply.')),
 
-			field(_('Mode'), modeSelect, creating
+			bmui.field(_('Mode'), modeSelect, creating
 				? _('Shared account: one login, many VLANs, one derived MAC per VLAN. One account per VLAN: each line has its own login.')
 				: _('The mode of a pool cannot change; delete it and create a new one.')),
-			field(_('Pool id'), idInput, creating
+			bmui.field(_('Pool id'), idInput, creating
 				? _('Lowercase letters, digits and underscores. This is what you delete it by.')
 				: _('Fixed for the life of the pool.')),
-			field(_('Label'), labelInput, _('Only for people; shown wherever the pool is.')),
-			field(_('Prefix'), prefixInput, creating
+			bmui.field(_('Label'), labelInput, _('Only for people; shown wherever the pool is.')),
+			bmui.field(_('Prefix'), prefixInput, creating
 				? _('1-4 characters. Interface names derive from it: prefix fpt, VLAN 101 dials as fpt101 on pppoe-fpt101.')
 				: _('Fixed: every interface is named by it.')),
-			field(_('Carrier'), carrierSelect, _('The physical uplink. Changing it later redials the whole pool.')),
-			field(_('MAC mode'), macSelect, _('auto derives 02:xx:xx:xx:VV:VV from the carrier MAC, the pool id and the VLAN - stable across reboots. Shared-account pools require it.')),
-			field(_('Table base'), tableBaseInput, _('Each member routes in table base + VLAN. Changing it later strands binding rules until bm-wanbind\'s next pass.')),
+			bmui.field(_('Carrier'), carrierSelect, _('The physical uplink. Changing it later redials the whole pool.')),
+			bmui.field(_('MAC mode'), macSelect, _('auto derives 02:xx:xx:xx:VV:VV from the carrier MAC, the pool id and the VLAN - stable across reboots. Shared-account pools require it.')),
+			bmui.field(_('Table base'), tableBaseInput, _('Each member routes in table base + VLAN. Changing it later strands binding rules until bm-wanbind\'s next pass.')),
 
 			multiBlock,
 			singleBlock,
 
-			groupHeading(_('General')),
-			field(_('Service name'), serviceInput, _('Empty means autodetect.')),
-			field(_('Access concentrator'), acInput, _('Empty means autodetect.')),
-			field(_('AC MAC address'), acMacInput, _('Empty means autodetect.')),
+			bmui.groupHeading(_('General')),
+			bmui.field(_('Service name'), serviceInput, _('Empty means autodetect.')),
+			bmui.field(_('Access concentrator'), acInput, _('Empty means autodetect.')),
+			bmui.field(_('AC MAC address'), acMacInput, _('Empty means autodetect.')),
 
-			groupHeading(_('Advanced')),
-			field(_('MTU'), mtuInput, _('Empty uses the pppd default of 1492. Above 1492 needs an ISP that supports RFC 4638.')),
-			field(_('LCP echo failure / interval'), E('span', {}, [kaFailInput, ' / ', kaIntInput]),
+			bmui.groupHeading(_('Advanced')),
+			bmui.field(_('MTU'), mtuInput, _('Empty uses the pppd default of 1492. Above 1492 needs an ISP that supports RFC 4638.')),
+			bmui.field(_('LCP echo failure / interval'), E('span', {}, [kaFailInput, ' / ', kaIntInput]),
 				_('Presume the peer dead after this many missed echoes sent this many seconds apart. Empty leaves pppd\'s default.')),
-			field(_('IPv6'), ipv6Select, ''),
-			field(_('Use ISP DNS servers'), peerdnsCheck, _('Off means the servers below are used instead.')),
-			field(_('DNS servers'), dnsInput, _('Space separated. Only used while ISP DNS is off.')),
-			field(_('Default route'), defaultrouteCheck, _('Each session installs its default route into its own table.')),
-			field(_('Host-Uniq'), hostUniqInput, _('Raw hex bytes. Leave empty unless the ISP requires it.')),
-			field(_('Inactivity timeout'), demandInput, _('Seconds of idle before hanging up; 0 keeps sessions up.')),
-			field(_('PADI attempts'), padiAttemptsInput, ''),
-			field(_('PADI timeout'), padiTimeoutInput, ''),
-			field(_('Extra pppd options'), pppdInput, _('Passed to pppd verbatim. A wrong word here fails every session in the pool.')),
+			bmui.field(_('IPv6'), ipv6Select, ''),
+			bmui.field(_('Use ISP DNS servers'), peerdnsCheck, _('Off means the servers below are used instead.')),
+			bmui.field(_('DNS servers'), dnsInput, _('Space separated. Only used while ISP DNS is off.')),
+			bmui.field(_('Default route'), defaultrouteCheck, _('Each session installs its default route into its own table.')),
+			bmui.field(_('Host-Uniq'), hostUniqInput, _('Raw hex bytes. Leave empty unless the ISP requires it.')),
+			bmui.field(_('Inactivity timeout'), demandInput, _('Seconds of idle before hanging up; 0 keeps sessions up.')),
+			bmui.field(_('PADI attempts'), padiAttemptsInput, ''),
+			bmui.field(_('PADI timeout'), padiTimeoutInput, ''),
+			bmui.field(_('Extra pppd options'), pppdInput, _('Passed to pppd verbatim. A wrong word here fails every session in the pool.')),
 
-			groupHeading(_('Firewall')),
-			field(_('Zone'), zoneInput, _('Created and owned by the router\'s pool daemon; pools may share one. Changing it later moves every membership.')),
-			field(_('Masquerade'), masqCheck, ''),
-			field(_('MTU fix (MSS clamping)'), mtuFixCheck, ''),
-			field(_('Allow LAN to reach this zone'), lanForwardCheck, _('Writes one forwarding from the LAN zone.')),
+			bmui.groupHeading(_('Firewall')),
+			bmui.field(_('Zone'), zoneInput, _('Created and owned by the router\'s pool daemon; pools may share one. Changing it later moves every membership.')),
+			bmui.field(_('Masquerade'), masqCheck, ''),
+			bmui.field(_('MTU fix (MSS clamping)'), mtuFixCheck, ''),
+			bmui.field(_('Allow LAN to reach this zone'), lanForwardCheck, _('Writes one forwarding from the LAN zone.')),
 
 			E('p', { 'style': 'opacity:.75' },
 				_('VLAN 0 dials untagged on the bare carrier; VLANs 1-4094 add an 802.1Q tag, and the upstream must answer on that exact VLAN - a wrong tag looks like a PADO timeout. A shared account carries as many sessions as the ISP allows: try two or three VLANs before pasting the full list.')),
@@ -865,33 +788,23 @@ return view.extend({
 	 */
 	confirmDelete(pool) {
 		const self = this;
-		const nameField = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:12em' });
-		const forceCheck = checkInput(false);
+		const forceCheck = bmui.checkbox(false);
 
-		ui.showModal(_('Delete pool %s').format(pool.id), [
-			E('p', {}, _('This removes all %d interface(s), their VLAN devices, their routing tables and their firewall memberships. Anybody dialling through them loses their connection.').format(pool.members | 0)),
-			pool.legacy ? E('p', {}, _('This is an old-model pool: its numbered sessions are removed exactly as the release that made them would have.')) : '',
-			E('p', {}, _('The router refuses while a bm-wanbind instance hands clients to this carrier, unless forced.')),
-			field(_('Force'), forceCheck, _('Delete even while a binder instance uses this carrier.')),
-			E('p', {}, _('Type the pool id to confirm:')),
-			nameField,
-			E('div', { 'class': 'right' }, [
-				E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Cancel')),
-				' ',
-				E('button', {
-					'class': 'btn cbi-button-remove',
-					'click': ui.createHandlerFn(self, function() {
-						if (nameField.value !== pool.id) {
-							ui.addNotification(null, E('p', {}, _('That is not the pool id; nothing was deleted.')), 'warning');
-							return Promise.resolve();
-						}
-						ui.hideModal();
-						return api.run(api.calls.poolDelete, { id: pool.id, force: forceCheck.checked },
-							_('Pool %s is gone.').format(pool.id)).then(() => self.refresh());
-					})
-				}, _('Delete it'))
-			])
-		]);
+		bmui.confirmTyped({
+			title: _('Delete pool %s').format(pool.id),
+			body: [
+				E('p', {}, _('This removes all %d interface(s), their VLAN devices, their routing tables and their firewall memberships. Anybody dialling through them loses their connection.').format(pool.members | 0)),
+				pool.legacy ? E('p', {}, _('This is an old-model pool: its numbered sessions are removed exactly as the release that made them would have.')) : '',
+				E('p', {}, _('The router refuses while a bm-wanbind instance hands clients to this carrier, unless forced.')),
+				bmui.field(_('Force'), forceCheck, _('Delete even while a binder instance uses this carrier.'))
+			],
+			expected: pool.id,
+			actionLabel: _('Delete it'),
+			run: function() {
+				return api.run(api.calls.poolDelete, { id: pool.id, force: forceCheck.checked },
+					_('Pool %s is gone.').format(pool.id)).then(() => self.refresh());
+			}
+		});
 
 		return Promise.resolve();
 	},
@@ -900,24 +813,24 @@ return view.extend({
 	settingsBlock(settings) {
 		const self = this;
 
-		const interval = textInput('%d'.format(settings.counter_interval | 0), '5', '6em');
-		const redialAfter = textInput('%d'.format(settings.redial_after | 0), '120', '6em');
-		const redialBatch = textInput('%d'.format(settings.redial_batch | 0), '20', '6em');
+		const interval = bmui.textInput('%d'.format(settings.counter_interval | 0), '5', '6em');
+		const redialAfter = bmui.textInput('%d'.format(settings.redial_after | 0), '120', '6em');
+		const redialBatch = bmui.textInput('%d'.format(settings.redial_batch | 0), '20', '6em');
 
-		return api.section(_('Daemon settings'),
+		return bmui.section(_('Daemon settings'),
 			_('The watchdog redials sessions netifd has given up on. 0 seconds turns it off and leaves every retry to netifd.'),
 			E('div', {}, [
-				field(_('Counter interval (s)'), interval, _('1 to 300. How often /proc/net/dev is read and the dump corrected.')),
-				field(_('Redial after (s)'), redialAfter, _('0 to 86400. How long a session may stay down before the watchdog redials it.')),
-				field(_('Redial batch'), redialBatch, _('1 to 500. The most redials one watchdog pass starts.')),
+				bmui.field(_('Counter interval (s)'), interval, _('1 to 300. How often /proc/net/dev is read and the dump corrected.')),
+				bmui.field(_('Redial after (s)'), redialAfter, _('0 to 86400. How long a session may stay down before the watchdog redials it.')),
+				bmui.field(_('Redial batch'), redialBatch, _('1 to 500. The most redials one watchdog pass starts.')),
 				E('div', { 'class': 'right' }, [
 					E('button', {
 						'class': 'btn cbi-button-apply',
 						'click': ui.createHandlerFn(self, function() {
 							const values = {
-								counter_interval: whole(interval, 1, 300),
-								redial_after: whole(redialAfter, 0, 86400),
-								redial_batch: whole(redialBatch, 1, 500)
+								counter_interval: bmui.whole(interval, 1, 300),
+								redial_after: bmui.whole(redialAfter, 0, 86400),
+								redial_batch: bmui.whole(redialBatch, 1, 500)
 							};
 
 							if (values.counter_interval === null || values.redial_after === null || values.redial_batch === null) {

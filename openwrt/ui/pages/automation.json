@@ -2052,9 +2052,9 @@
                                         {
                                           "type": "note",
                                           "lines": [
-                                            "At that size the check reports conntrack, neighbour-table and flow-offload findings. This module deliberately does not write them: they are router-wide sysctls, they affect every service on the box, and getting one wrong takes the router off the network rather than one instance.",
-                                            "The shell below runs on the router itself. The check names the exact values; set them in /etc/sysctl.conf so they survive a reboot.",
-                                            "The dnsmasq lease limits the same check reports are the exception - those the module can raise for you, by the checkbox on the create form below."
+                                            "At that size the check reports conntrack, neighbour-table and flow-offload findings. They are router-wide values that affect every service on the box, so they are applied from one deliberate place rather than silently during a create: Module settings, Router limits, which reads them live, sizes a recommendation to this router, applies through the router's own agent or over SSH, and persists them under /etc/sysctl.d/ so they survive a reboot.",
+                                            "The dnsmasq lease limits the same check reports are handled right here - the checkbox on the create form below raises them for you.",
+                                            "The shell below runs on the router itself, for anything beyond what those two cover."
                                           ]
                                         }
                                       ]

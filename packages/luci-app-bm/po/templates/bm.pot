@@ -1507,3 +1507,174 @@ msgstr ""
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:59
 msgid "up"
 msgstr ""
+
+# ---- 2.1.0: shared components, the Overview requirements/updates cards,
+# ---- and the Maintenance tab with its Scaling section.
+
+msgid "Type %s to confirm:"
+msgstr ""
+
+msgid "That does not match; nothing was done."
+msgstr ""
+
+msgid "The bm-agent on this router does not have that call yet. Update the router packages to 2.1.0 or newer."
+msgstr ""
+
+msgid "not answering"
+msgstr ""
+
+msgid "Version"
+msgstr ""
+
+msgid "%s, ubus API %d"
+msgstr ""
+
+msgid "Uptime"
+msgstr ""
+
+msgid "Memory"
+msgstr ""
+
+msgid "not reported"
+msgstr ""
+
+msgid "Router clock"
+msgstr ""
+
+msgid "bm-pppoe-pool is not installed. Without it this router dials no pools."
+msgstr ""
+
+msgid "What the three router daemons are doing, what every feature needs, and where updates come from. The app drives the same calls; nothing here is a second opinion."
+msgstr ""
+
+msgid "Requirements"
+msgstr ""
+
+msgid "What every feature needs from this router, asked live. A missing piece is a feature that breaks - this row is where it says so first."
+msgstr ""
+
+msgid "Asking the router..."
+msgstr ""
+
+msgid "The agent could not ask the shell, so nothing here is known. Check \"logread -e bm-agent\"."
+msgstr ""
+
+msgid "Re-check"
+msgstr ""
+
+msgid "ok"
+msgstr ""
+
+msgid "missing"
+msgstr ""
+
+msgid "unknown"
+msgstr ""
+
+msgid "Install"
+msgstr ""
+
+msgid "Install %s with apk now? This runs \"apk update\" first and can take a minute."
+msgstr ""
+
+msgid "Installed. Re-checking what the router has now."
+msgstr ""
+
+msgid "This router asks the release server only when somebody presses the button; nothing here runs on its own. The full flow, including rollback, is on the Maintenance tab."
+msgstr ""
+
+msgid "not asked yet"
+msgstr ""
+
+msgid "Last update: %s, %s to %s."
+msgstr ""
+
+msgid "update available"
+msgstr ""
+
+msgid "%s is published and signed by key %s."
+msgstr ""
+
+msgid "Install %s now, under the countdown? The services being replaced include the ones binding clients and dialling pools."
+msgstr ""
+
+msgid "Installing. The countdown at the top of the page is running: keep the change once this router is still reachable."
+msgstr ""
+
+msgid "The check failed and the router did not say why."
+msgstr ""
+
+msgid "Up to date."
+msgstr ""
+
+msgid "Maintenance"
+msgstr ""
+
+msgid "The router's own safety net and upkeep: the snapshots it can put back without anybody being able to reach it, the updater it runs only when asked, and the kernel limits that decide how far it scales."
+msgstr ""
+
+msgid "Snapshots"
+msgstr ""
+
+msgid "Snapshots, updates and tuning are bm-agent's, and it did not answer: %s"
+msgstr ""
+
+msgid "What an update does, step by step"
+msgstr ""
+
+msgid "Last update: %s, %s to %s. Packages: %s."
+msgstr ""
+
+msgid "Scaling"
+msgstr ""
+
+msgid "The two kernel tables that overflow first at thousands of sessions or clients, and the fw4 flow offload that keeps rule lookups off the CPU. Values apply immediately and persist across reboots."
+msgstr ""
+
+msgid "Up to 1,000 clients"
+msgstr ""
+
+msgid "Up to 4,000 clients"
+msgstr ""
+
+msgid "Connection tracking: %s of %s entries in use."
+msgstr ""
+
+msgid "%d%% full"
+msgstr ""
+
+msgid "%d%% used"
+msgstr ""
+
+msgid "The conntrack table is nearly full. When it fills, the kernel drops new connections with only a dmesg line to show for it - raise the limit below."
+msgstr ""
+
+msgid "conntrack max"
+msgstr ""
+
+msgid "Entries the connection-tracking table can hold. Roughly 300 bytes of kernel memory each; 262144 suits a few thousand busy clients."
+msgstr ""
+
+msgid "Neighbour thresholds"
+msgstr ""
+
+msgid "gc_thresh1/2/3 of the ARP cache. The kernel refuses new neighbours at the third; keep it above twice the expected client count, and the three in order."
+msgstr ""
+
+msgid "Software flow offload"
+msgstr ""
+
+msgid "fw4 fastpath for established flows. Cuts per-packet rule lookups at thousands of linear fib rules; committed to the firewall config and reloaded."
+msgstr ""
+
+msgid "conntrack max is 16384 to 4194304 and each threshold 128 to 1048576, whole numbers only."
+msgstr ""
+
+msgid "Apply and persist"
+msgstr ""
+
+msgid "Applied, and pinned under /etc/sysctl.d/ so it survives a reboot."
+msgstr ""
+
+msgid "Persisted in %s. The guard's snapshots deliberately do not cover this file, so a restore never quietly shrinks a capacity fix. At a console: \"bmctl tune\"."
+msgstr ""

@@ -65,6 +65,16 @@ export class FastSweep {
     return this.runtime.firewallZones
   }
 
+  /** The scale limits as the last slow sweep read them; {} before the first. */
+  get sysctl(): Readonly<Record<string, number>> {
+    return this.runtime.sysctl
+  }
+
+  /** fw4's flow_offloading flag; null until a slow sweep has answered. */
+  get flowOffload(): boolean | null {
+    return this.runtime.flowOffload
+  }
+
   forceDumpNextTick(): void {
     forceDumpNextTick(this.runtime)
   }

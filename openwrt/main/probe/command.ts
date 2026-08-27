@@ -117,22 +117,36 @@ export function buildProbeCommand(rulePrefBase: number): string {
     // and the sweep retried it every two seconds forever.
     //
     // `route show` and not a rule add: read-only, and it fails on exactly the
-    // same argument. An empty numeric table is not an error to iproute2, so a
-    // router that has it answers 0 with no output.
+    // same argument.
     //
-    // The four lines after it exist because `ok` on its own cannot tell three
-    // very different routers apart, and all three used to be answered with
-    // "install ip-full" - including the one that just did. `ip-full` lands at
-    // `/usr/libexec/ip-full` and is reached through an alternatives symlink at
-    // `/sbin/ip`; when that switch does not happen, `apk add` succeeds, the
-    // binary is there and works, and the router still cannot do policy routing
-    // because the BusyBox applet is still what `ip` means. And a kernel built
-    // without multiple routing tables refuses the numeric table from a full
-    // iproute2 as well, which no package will ever fix.
+    // An *empty* numeric table is not a success to modern iproute2, though,
+    // and assuming it was is the false negative that called a healthy QEMU
+    // 25.12.5 router "no policy routing in this firmware". The kernel creates
+    // FIB tables lazily, so a table nothing has written yet does not exist,
+    // and iproute2 answers the dump with exit 1 and
+    //
+    //     Error: ipv4: FIB table does not exist.
+    //
+    // - which is proof the kernel *parsed the numeric table and looked it up*:
+    // exactly the capability being probed. So stderr is captured rather than
+    // discarded, and that sentence counts as a pass. BusyBox still says
+    // `invalid argument` and still fails; a kernel without multiple routing
+    // tables fails `ip -4 rule show` itself, which stays the gate in front of
+    // the verdict.
+    //
+    // The four lines after `ok` exist because `ok` on its own cannot tell
+    // three very different routers apart, and all three used to be answered
+    // with "install ip-full" - including the one that just did. `ip-full`
+    // lands at `/usr/libexec/ip-full` and is reached through an alternatives
+    // symlink at `/sbin/ip`; when that switch does not happen, `apk add`
+    // succeeds, the binary is there and works, and the router still cannot do
+    // policy routing because the BusyBox applet is still what `ip` means. And
+    // a kernel built without multiple routing tables refuses the numeric
+    // table from a full iproute2 as well, which no package will ever fix.
     //
     // Read-only throughout, and `ok` stays a line of its own so the verdict
     // itself is parsed exactly as it was.
-    `echo '===IPRULE==='; if ip -4 rule show >/dev/null 2>&1 && ip -4 route show table 29999 >/dev/null 2>&1; then echo ok; fi; BM_IP=$(command -v "ip" 2>/dev/null) && { echo "path $BM_IP"; BM_REAL=$(readlink -f "$BM_IP" 2>/dev/null) && [ -n "$BM_REAL" ] && echo "real $BM_REAL"; }; if [ -x ${IP_FULL_PATH} ]; then echo libexec; if ${IP_FULL_PATH} -4 route show table 29999 >/dev/null 2>&1; then echo libexecok; fi; fi`,
+    `echo '===IPRULE==='; BM_T=$(ip -4 route show table 29999 2>&1); BM_TR=$?; if ip -4 rule show >/dev/null 2>&1; then if [ $BM_TR -eq 0 ] || printf '%s' "$BM_T" | grep -qi 'fib table does not exist'; then echo ok; fi; fi; BM_IP=$(command -v "ip" 2>/dev/null) && { echo "path $BM_IP"; BM_REAL=$(readlink -f "$BM_IP" 2>/dev/null) && [ -n "$BM_REAL" ] && echo "real $BM_REAL"; }; if [ -x ${IP_FULL_PATH} ]; then echo libexec; BM_F=$(${IP_FULL_PATH} -4 route show table 29999 2>&1); BM_FR=$?; if [ $BM_FR -eq 0 ] || printf '%s' "$BM_F" | grep -qi 'fib table does not exist'; then echo libexecok; fi; fi`,
     // A binary in PATH is not a running service, and the difference is invisible
     // everywhere else in this module: dnsmasq stopped still answers `command -v`,
     // so the router reported `hasDnsmasq: true`, the lease file went stale, and

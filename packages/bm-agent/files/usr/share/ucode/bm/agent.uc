@@ -12,8 +12,10 @@ import { API_VERSION, CONFIG_SCHEMA, RELEASE } from 'bm.version';
 import { list as featureList, provides } from 'bm.features';
 import { schema as diskSchema } from 'bm.meta';
 import { arm, cancel, confirm, status as guardStatus } from 'bm.guard';
+import { install as installPackages, report as requirementsReport } from 'bm.requirements';
 import { diff, restore } from 'bm.restore';
 import { bundle as snapshotBundle, list as snapshots, meta as snapshotMeta, remove as removeSnapshot, take } from 'bm.snapshot';
+import { apply as tuneApply, current as tuneCurrent } from 'bm.tune';
 import { apply as applyUpdate, check as checkUpdate, last as lastUpdate, rollback } from 'bm.update';
 
 const STARTED = time();
@@ -219,5 +221,36 @@ export const methods = {
 	update_status: method({}, () => {
 		let previous = lastUpdate();
 		return previous ? previous : { at: 0, from: RELEASE, to: RELEASE, packages: [] };
-	})
+	}),
+
+	// What this router has of what every feature needs, asked live - so a
+	// requirement that stops being met is a row somebody sees, not a feature
+	// that breaks with its reason in dmesg.
+	requirements: method({}, () => requirementsReport()),
+
+	// The allowlisted installer behind those rows. `group` is a key into a
+	// fixed table in bm.requirements; a package name never crosses this call.
+	install_packages: method({ group: '', dry_run: false }, (args) =>
+		installPackages({ group: text(args.group), dry_run: args.dry_run === true })),
+
+	// The router-wide limits that decide whether thousands of sessions fit:
+	// conntrack and the neighbour thresholds, plus fw4's flow offload.
+	tune_get: method({}, () => tuneCurrent()),
+
+	tune_set: method(
+		{ conntrack_max: 0, gc_thresh1: 0, gc_thresh2: 0, gc_thresh3: 0, flow_offload: false },
+		(args) => {
+			// Only what the caller actually sent reaches the allowlist: a field
+			// ubus never carried is absent here, and 0 is below every floor, so
+			// neither can quietly reset a limit to nothing.
+			let wanted = {};
+			for (let key in [ 'conntrack_max', 'gc_thresh1', 'gc_thresh2', 'gc_thresh3' ]) {
+				if (type(args[key]) == 'int' && args[key] > 0)
+					wanted[key] = args[key];
+			}
+			if (type(args.flow_offload) == 'bool')
+				wanted.flow_offload = args.flow_offload;
+
+			return tuneApply(wanted);
+		})
 };

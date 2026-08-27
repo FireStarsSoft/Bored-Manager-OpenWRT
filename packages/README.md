@@ -7,10 +7,10 @@ themselves independently.
 
 | Package | ubus object | Config | What it is for |
 |---|---|---|---|
-| `bm-agent` | `bm.agent` | `/etc/config/bm_agent` | The common ground: a version handshake, readiness in one ubus call, the `bmctl` CLI, snapshots, the commit-confirm guard, schema migrations and the update engine |
+| `bm-agent` | `bm.agent` | `/etc/config/bm_agent` | The common ground: a version handshake, readiness in one ubus call, the requirements report and its allowlisted installer, the scale limits (`tune_get`/`tune_set`), the `bmctl` CLI, snapshots, the commit-confirm guard, schema migrations and the update engine |
 | `bm-pppoe-pool` | `bm.pppoe` | `/etc/config/bm_pppoe` | Pools of PPPoE sessions - one member per VLAN - owned end to end on the router: the record, the network sections, the firewall zone, the derived MACs, the `bmpppoe` CLI, counters and the redial watchdog |
 | `bm-wanbind` | `bm.wanbind` | `/etc/config/bm_wanbind` | One DHCP client, one WAN, decided on the router: the `bmwan` CLI, the lease hotplug hook and the 30-second reconcile |
-| `luci-app-bm` | — | — | The router's own pages: five tabs under Services in LuCI, calling the same three objects above |
+| `luci-app-bm` | — | — | The router's own pages: four tabs under Services in LuCI, calling the same three objects above |
 
 ## Why any of this exists
 
@@ -56,11 +56,12 @@ packages/
   luci-app-bm/
     Makefile           built through luci.mk rather than package.mk
     root/              installed verbatim onto the router, as files/ is elsewhere
-      usr/share/luci/menu.d/       the five tabs under Services
+      usr/share/luci/menu.d/       the four tabs under Services
       usr/share/rpcd/acl.d/        which ubus calls a LuCI session may make
       usr/share/bm/features/       how the agent learns the app is installed
     htdocs/luci-static/resources/
       bm/api.js                    the rpc declares, and the guard banner
+      bm/ui.js, bm/ui.css          the shared components and the one stylesheet
       view/bm/*.js                 one file per tab
     po/                            i18n; po/vi is Vietnamese
 ```
@@ -109,6 +110,8 @@ end at the same daemon call.
 | Pin, move, hold, release a client | yes | `bmwan pin` / `reassign` / `unassign` / `release` | yes |
 | Snapshot, compare, restore, download | yes | `bmctl config ...` | yes |
 | Check for updates, update, roll back | yes | `bmctl check-update` / `update` / `rollback` | yes |
+| See what every feature needs, install the missing piece | Overview → Requirements | `bmctl requirements` / `install-group` | yes, the readiness page |
+| Raise the kernel scale limits | Maintenance → Scaling | `bmctl tune conntrack_max=...` | yes, Router limits |
 
 Two things are only in the app, and neither is a router capability: installing
 the packages in the first place, and installing them from a file on your own

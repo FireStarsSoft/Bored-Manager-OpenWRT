@@ -60,7 +60,7 @@ function railIds(spec: Node): string[] {
 describe('every page is grouped by a rail', () => {
   const EXPECTED: Record<string, string[]> = {
     'pages/dashboard.json': ['overview', 'history', 'devices', 'interfaces'],
-    'pages/settings.json': ['readiness', 'packages', 'jobs', 'display', 'rules'],
+    'pages/settings.json': ['readiness', 'packages', 'jobs', 'display', 'scaling', 'rules'],
     'pages/automation.json': ['pppoe', 'binding', 'jobs', 'events']
   }
 

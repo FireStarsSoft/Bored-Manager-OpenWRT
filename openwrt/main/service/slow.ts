@@ -12,6 +12,7 @@ import { splitSections } from '@shared/shell'
 import {
   parseFirewallZones,
   parsePppoeLogErrors,
+  parseSysctlReport,
   parseUciIp4Tables,
   parseUciPppoeUsers,
   pickLanZone
@@ -82,6 +83,14 @@ export async function sampleSlow(runtime: SweepRuntime, generation: number): Pro
   // last good answer stops a single hiccup from silently moving the pool's
   // forwarding back to the assumed `lan`.
   if (zones.length > 0) runtime.firewallZones = zones
+  // The scale limits. Same keep-the-last-answer rule: an empty section is a
+  // tick that hiccuped, not a kernel that lost conntrack.
+  const sysctlText = sections.get('SYSCTL') ?? ''
+  if (sysctlText.trim().length > 0) {
+    const limits = parseSysctlReport(sysctlText)
+    runtime.sysctl = limits.values
+    runtime.flowOffload = limits.flowOffload
+  }
   const sample: OpenWrtSlowSample = {
     t: Date.now(),
     log,

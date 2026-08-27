@@ -137,5 +137,12 @@ export const SLOW_COMMAND = [
   // Which zone LAN clients are in. Filtered down to the three keys the reader
   // uses: a full `uci show firewall` on a router with per-host rules is far
   // larger than anything else this probe collects.
-  `echo '===FWZONES==='; uci -q show firewall 2>/dev/null | grep -E '=zone$|\\.name=|\\.network=' || true`
+  `echo '===FWZONES==='; uci -q show firewall 2>/dev/null | grep -E '=zone$|\\.name=|\\.network=' || true`,
+  // The scale limits, live. These are what the Router limits page shows and
+  // what the conntrack-headroom warning is computed from; reading them here
+  // costs five sysctl calls on the slow cadence rather than a probe of their
+  // own. `flow_offload` rides along because it is the third lever the same
+  // page pulls - it is UCI rather than a sysctl, and an absent option means
+  // fw4's default, which is off.
+  `echo '===SYSCTL==='; for k in net.netfilter.nf_conntrack_max net.netfilter.nf_conntrack_count net.ipv4.neigh.default.gc_thresh1 net.ipv4.neigh.default.gc_thresh2 net.ipv4.neigh.default.gc_thresh3; do printf '%s=%s\\n' "$k" "$(sysctl -n "$k" 2>/dev/null)"; done; printf 'flow_offload=%s\\n' "$(uci -q get firewall.@defaults[0].flow_offloading 2>/dev/null)"`
 ].join('; ')

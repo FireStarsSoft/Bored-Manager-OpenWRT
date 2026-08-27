@@ -87,6 +87,7 @@ export function registerHandlers(runtime: OpenWrtRuntime): void {
     events,
     jobs,
     latch,
+    limits,
     pppoe,
     queries,
     rules,
@@ -251,6 +252,16 @@ export function registerHandlers(runtime: OpenWrtRuntime): void {
   handle('rulesCheck', (values: unknown) => rules.check(values))
   handle('rulesApply', (payload: unknown) => rules.apply(payload))
   handle('rulesReset', () => rules.reset())
+
+  // The router-wide scale limits: read live off the slow sweep, applied by
+  // the agent when it is new enough and over SSH when it is not. The domain
+  // does its own gating - no router, no sweep answer yet - because raising
+  // conntrack is sometimes the fix for the very state a capability gate
+  // would refuse on.
+  handle('limitsEffective', () => limits.effective())
+  handle('limitsCheck', (values: unknown) => limits.check(values))
+  handle('limitsApply', (payload: unknown) => limits.apply(payload))
+
   handle('jobCancel', (id: unknown) => jobs.cancel(id))
   handle('jobsClear', () => jobs.clearFinished())
 }

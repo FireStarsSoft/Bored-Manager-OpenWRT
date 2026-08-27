@@ -1,0 +1,248 @@
+/*
+ * One stylesheet for every Bored Manager tab.
+ *
+ * Loaded once by bm/ui.js. Colours for meaning only - ok, warn, bad, idle -
+ * and translucent neutrals for everything else, so the same sheet reads
+ * correctly on every LuCI theme, light or dark, without naming any theme's
+ * variables. Status is never colour alone: every pill and dot carries its
+ * word, so the meaning survives for a reader who cannot see the difference.
+ */
+
+/* ---------------------------------------------------------------- cards */
+
+.bm-cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(16em, 1fr));
+	gap: 1em;
+	margin: 0 0 1em;
+	align-items: stretch;
+}
+
+.bm-card {
+	border: 1px solid rgba(128, 128, 128, .35);
+	border-radius: 8px;
+	padding: .9em 1.1em;
+	background: rgba(128, 128, 128, .06);
+	min-width: 0;
+}
+
+.bm-card-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: .6em;
+	flex-wrap: wrap;
+	margin-bottom: .35em;
+}
+
+.bm-card-title {
+	margin: 0;
+	font-size: 1.05em;
+	font-weight: 600;
+}
+
+.bm-card-sub {
+	opacity: .7;
+	font-size: .88em;
+	margin: 0 0 .6em;
+}
+
+.bm-card-body { font-size: .95em; }
+
+.bm-card-body > div { margin: .15em 0; }
+
+/* ----------------------------------------------------------------- pills */
+
+.bm-pill {
+	display: inline-block;
+	padding: .12em .65em;
+	border-radius: 1em;
+	font-size: .82em;
+	line-height: 1.5;
+	border: 1px solid rgba(128, 128, 128, .45);
+	background: rgba(128, 128, 128, .15);
+	white-space: nowrap;
+	vertical-align: middle;
+}
+
+.bm-pill--ok    { color: #1d7d1d; border-color: rgba(55, 200, 55, .6);  background: rgba(55, 200, 55, .14); }
+.bm-pill--warn  { color: #8a6100; border-color: rgba(255, 179, 0, .6);  background: rgba(255, 179, 0, .16); }
+.bm-pill--bad   { color: #b02a2a; border-color: rgba(224, 75, 75, .6);  background: rgba(224, 75, 75, .14); }
+.bm-pill--idle  { color: inherit; opacity: .75; }
+
+/* Dark themes: the tinted text above can sink into the tint, so lift it. */
+@media (prefers-color-scheme: dark) {
+	.bm-pill--ok   { color: #7ee87e; }
+	.bm-pill--warn { color: #ffd35c; }
+	.bm-pill--bad  { color: #ff9a9a; }
+}
+
+/* ------------------------------------------------------------------ dots */
+
+.bm-dot {
+	display: inline-block;
+	width: .6em;
+	height: .6em;
+	border-radius: 50%;
+	margin-right: .45em;
+	background: #a0a0a0;
+	vertical-align: baseline;
+}
+
+.bm-dot--ok   { background: #37c837; }
+.bm-dot--busy { background: #ffb300; }
+.bm-dot--bad  { background: #e04b4b; }
+.bm-dot--idle { background: #a0a0a0; }
+
+/* ----------------------------------------------------------------- tiles */
+
+.bm-tiles {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(9.5em, 1fr));
+	gap: .75em;
+	margin: 0 0 1em;
+}
+
+.bm-tile {
+	border: 1px solid rgba(128, 128, 128, .3);
+	border-radius: 8px;
+	padding: .65em .9em;
+	background: rgba(128, 128, 128, .05);
+	min-width: 0;
+}
+
+.bm-tile-value {
+	font-size: 1.55em;
+	line-height: 1.2;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.bm-tile-label {
+	opacity: .72;
+	font-size: .86em;
+	margin-top: .1em;
+}
+
+/* ---------------------------------------------------------- requirements */
+
+.bm-req-row {
+	display: flex;
+	gap: .7em;
+	align-items: flex-start;
+	padding: .5em 0;
+	border-top: 1px solid rgba(128, 128, 128, .18);
+}
+
+.bm-req-row:first-child { border-top: 0; }
+
+.bm-req-body { flex: 1 1 auto; min-width: 0; }
+
+.bm-req-label { font-weight: 600; }
+
+.bm-req-detail {
+	opacity: .75;
+	font-size: .9em;
+	margin-top: .1em;
+}
+
+.bm-req-action { flex: 0 0 auto; }
+
+/* --------------------------------------------------------------- layout */
+
+.bm-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: .5em;
+	align-items: center;
+	margin: .6em 0;
+}
+
+.bm-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: .5em;
+	justify-content: flex-end;
+	margin-top: .6em;
+}
+
+.bm-kv { margin: 0; }
+
+.bm-kv > div {
+	display: flex;
+	gap: .8em;
+	padding: .18em 0;
+}
+
+.bm-kv > div > span:first-child {
+	flex: 0 0 11em;
+	opacity: .7;
+}
+
+.bm-muted { opacity: .7; }
+
+.bm-small { font-size: .88em; }
+
+.bm-empty {
+	padding: 1.2em;
+	text-align: center;
+	opacity: .75;
+	border: 1px dashed rgba(128, 128, 128, .4);
+	border-radius: 8px;
+	margin: .6em 0;
+}
+
+/* One scroll container per wide table, so a phone scrolls the table and not
+ * the whole page. LuCI's ui.Table renders div.table inside. */
+.bm-table-wrap { overflow-x: auto; }
+
+/* -------------------------------------------------------------- findings */
+
+.bm-findings {
+	max-height: 18em;
+	overflow: auto;
+	margin: .5em 0;
+}
+
+.bm-finding { margin: .35em 0; }
+
+.bm-finding-level {
+	font-weight: 700;
+	font-size: .8em;
+	margin-right: .5em;
+	letter-spacing: .04em;
+}
+
+.bm-finding-level--error   { color: #e04b4b; }
+.bm-finding-level--warning { color: #cf9000; }
+.bm-finding-level--info    { color: #888; }
+.bm-finding-level--pass    { color: #37c837; }
+
+.bm-finding-detail {
+	opacity: .7;
+	font-size: .92em;
+	margin-left: .5em;
+}
+
+/* ------------------------------------------------------- section polish */
+
+.bm-section h3 { margin-top: 0; }
+
+.bm-spark {
+	width: 100%;
+	height: 40px;
+	opacity: .8;
+}
+
+.bm-pool-head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: .75em;
+}
+
+.bm-pool-head h3 { margin: 0; }
+
+.bm-mode--multi  { color: #fff; background: #7a5195; border-color: #7a5195; }
+.bm-mode--single { color: #fff; background: #336699; border-color: #336699; }

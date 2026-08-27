@@ -294,6 +294,35 @@ export function parseUciIp4Tables(text: string): Record<string, number> {
   return out
 }
 
+/**
+ * The `===SYSCTL===` section of the slow probe: `key=value` lines for the
+ * scale limits, plus one `flow_offload=` line carrying fw4's UCI flag.
+ *
+ * `flowOffload` reads false for an empty value on purpose: `uci -q get` of an
+ * absent option prints nothing, and an absent `flow_offloading` is fw4's
+ * default, which is off. Null is reserved for "the section never arrived",
+ * which the caller keeps as unknown.
+ */
+export function parseSysctlReport(text: string): {
+  values: Record<string, number>
+  flowOffload: boolean | null
+} {
+  const values = Object.create(null) as Record<string, number>
+  let flowOffload: boolean | null = null
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.trim().match(/^([A-Za-z0-9._]+)=(.*)$/)
+    if (!match) continue
+    if (match[1] === 'flow_offload') {
+      const raw = match[2].trim().replace(/^'+|'+$/g, '')
+      flowOffload = raw === '1'
+      continue
+    }
+    const value = integer(match[2].trim(), -1)
+    if (value >= 0) values[match[1]] = value
+  }
+  return { values, flowOffload }
+}
+
 /** Read PPPoE usernames for cached table rows; passwords are deliberately ignored. */
 export function parseUciPppoeUsers(text: string): Record<string, string> {
   const out = Object.create(null) as Record<string, string>

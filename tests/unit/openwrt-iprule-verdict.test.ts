@@ -104,6 +104,37 @@ describe('the three reasons a router cannot steer by routing table', () => {
     expect(check.detail).not.toContain('ln -sf')
   })
 
+  it('doubts itself out loud when the binding daemon is running anyway', () => {
+    // bm-wanbind writes rules over netlink and never touches the ip binary,
+    // so a kernel-refuses verdict on a router whose daemon is binding clients
+    // is almost certainly the probe being wrong, not the kernel being short a
+    // feature - and the row has to say so rather than sending somebody to
+    // reflash working firmware.
+    const caps = buildReadiness(
+      facts({
+        hasIpRule: false,
+        ip: {
+          path: '/sbin/ip',
+          real: '/usr/libexec/ip-full',
+          fullPresent: true,
+          fullWorks: false
+        },
+        agent: {
+          ...facts().agent,
+          provides: ['binding'],
+          features: [
+            { name: 'bm-wanbind', version: '2.0.1', apiVersion: 1, provides: ['binding'] }
+          ]
+        }
+      })
+    )
+    const check = iprule(caps)
+
+    expect(check.status).toBe('warn')
+    expect(check.detail).toContain('bm-wanbind is running')
+    expect(check.detail).toContain('netlink')
+  })
+
   it('names the binary it found when policy routing works', () => {
     const check = iprule(buildReadiness(facts({ ip: { path: '/usr/sbin/ip', real: '/usr/libexec/ip-full', fullPresent: true, fullWorks: true } })))
 

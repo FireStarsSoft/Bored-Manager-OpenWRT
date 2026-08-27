@@ -29,7 +29,7 @@ import * as legacy from 'bm.pppoe.legacy';
 import * as sections from 'bm.pppoe.sections';
 import * as sessions from 'bm.pppoe.sessions';
 
-export const RELEASE = '2.0.1';
+export const RELEASE = '2.1.0';
 
 /** The ubus contract version, separate from the release. 2 is the pool-of-
  * members model; a module built for 1 refuses it and says to update. */

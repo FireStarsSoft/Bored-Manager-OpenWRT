@@ -6,7 +6,12 @@ import type { OkResult } from '@shared/types'
 import activate from '../../openwrt/main/index'
 import { FEATURES } from '../../openwrt/main/requirements'
 import { moduleHarness, sharedModuleConfig } from '../helpers/module-harness'
-import { isProbeCommand, routerProbeOutput, type RouterProbeOptions } from '../helpers/router'
+import {
+  BINDING_AGENT_INFO,
+  isProbeCommand,
+  routerProbeOutput,
+  type RouterProbeOptions
+} from '../helpers/router'
 
 /**
  * One gate, in front of every method.
@@ -122,6 +127,20 @@ describe('what the gate stops', () => {
     expect((result as OkResult).ok).toBe(false)
     expect(errorOf(result)).toContain('steer traffic by routing table')
     expect(errorOf(result)).toContain('Install missing packages')
+    owrt.dispose()
+  })
+
+  it('does not hold binding to the ip binary when the router binds itself', async () => {
+    // With bm-wanbind installed, the module never writes an ip rule of its
+    // own - every bind is a ubus call and the daemon writes netlink. So a
+    // router whose `ip` binary fails the numeric-table test (BusyBox, or a
+    // probe misreading) must not have its daemon-driven binding refused over
+    // a binary nothing on this path uses.
+    const owrt = await router({ without: ['ip-full'], agent: BINDING_AGENT_INFO })
+
+    const result = await owrt.call('bindingStart', 'bind_1')
+
+    expect(errorOf(result)).not.toContain('steer traffic by routing table')
     owrt.dispose()
   })
 

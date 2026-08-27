@@ -2,7 +2,7 @@
   "apiVersion": 2,
   "id": "openwrt",
   "name": "OpenWRT",
-  "version": "3.0.1",
+  "version": "3.1.0",
   "description": "Manage an OpenWRT router over SSH without its web UI: live dashboard, router-owned PPPoE pools and one-to-one LAN device to WAN binding.",
   "author": "Bored Manager",
   "minAppVersion": "0.4.1",
@@ -36,6 +36,7 @@
     "bindingWaitingRows", "bindingEventRows", "eventRows", "bindingStart", "bindingStop",
     "bindingUpdate", "bindingDelete", "bindingUnassign", "bindingReassign", "bindingPin",
     "rulesEffective", "rulesCheck", "rulesApply", "rulesReset",
+    "limitsEffective", "limitsCheck", "limitsApply",
     "jobCancel", "jobsClear",
     "agentRows", "agentInstallCheck", "agentInstallApply",
     "agentUninstallCheck", "agentUninstallApply"

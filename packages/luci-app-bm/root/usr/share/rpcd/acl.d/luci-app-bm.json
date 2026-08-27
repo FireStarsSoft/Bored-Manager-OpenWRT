@@ -11,7 +11,9 @@
 					"config_diff",
 					"config_export",
 					"guard_status",
-					"update_status"
+					"update_status",
+					"requirements",
+					"tune_get"
 				],
 				"bm.wanbind": [
 					"info",
@@ -44,7 +46,9 @@
 					"guard_cancel",
 					"update_check",
 					"update_apply",
-					"update_rollback"
+					"update_rollback",
+					"install_packages",
+					"tune_set"
 				],
 				"bm.wanbind": [
 					"pin",
