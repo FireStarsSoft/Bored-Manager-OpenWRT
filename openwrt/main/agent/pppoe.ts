@@ -39,6 +39,7 @@ export interface PoolSpec {
   label?: string
   prefix?: string
   carrier?: string
+  carrier_mode?: 'vlan' | 'direct'
   mac_mode?: 'auto' | 'inherit'
   username?: string
   password?: string
@@ -89,6 +90,7 @@ export interface PoolInfoEntry {
   label: string
   prefix: string
   carrier: string
+  carrier_mode?: 'vlan' | 'direct'
   mac_mode: 'auto' | 'inherit'
   username: string
   hasPassword: boolean

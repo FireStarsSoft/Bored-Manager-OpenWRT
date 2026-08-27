@@ -5,7 +5,7 @@
 # nothing this file could usefully contain before somebody creates one.
 #
 # Pools are added from the app, from LuCI (Services -> Bored Manager -> PPPoE
-# Pools), or with `bmpppoe create ID --from FILE` at a console - all three end
+# Dialer), or with `bmpppoe create ID --from FILE` at a console - all three end
 # up in the same daemon call and produce the same sections.
 #
 # This file is the record and the record is the truth. The interfaces live in
@@ -41,14 +41,22 @@ config pppoe 'main'
 	option redial_batch '20'
 
 # One pool, written by the daemon. `mode multi` shares one account across
-# every VLAN (and requires mac_mode auto, so each session presents its own
-# MAC); `mode single` carries one account per member section instead.
+# every member; `mode single` carries one account per member section instead.
+#
+# `carrier_mode` picks what a member number means. `vlan` (the default) tags
+# each member as an 802.1Q VLAN on the carrier; `direct` dials the carrier
+# itself, untagged, and the numbers are plain slots. `mac_mode auto` derives
+# one MAC per member (a tagged device in vlan mode, a macvlan - kmod-macvlan -
+# in direct mode); `mac_mode inherit` keeps the carrier's own MAC everywhere,
+# and direct mode then derives a Host-Uniq per slot so the sessions can be
+# told apart. Every combination is allowed - match it to what the ISP expects.
 #
 #config pool 'fpt1'
 #	option mode 'multi'
 #	option label 'FPT line 1'
 #	option prefix 'fpt'
 #	option carrier 'eth4'
+#	option carrier_mode 'vlan'
 #	option mac_mode 'auto'
 #	option username 'user@isp'
 #	option password 'secret'
@@ -62,10 +70,11 @@ config pppoe 'main'
 #	option lan_forward '1'
 #	option created '1756000000'
 #
-# One member per VLAN. The section name is <pool>_<vlan>, but the options are
-# what the daemon reads. VLAN 0 means untagged, straight over the carrier;
-# at most one of those per pool. In mode single each member carries its own
-# username and password here.
+# One member per number. The section name is <pool>_<number>, but the options
+# are what the daemon reads. In vlan mode, VLAN 0 means untagged, straight
+# over the carrier, at most once per pool; in direct mode the numbers are
+# slots 1-4094. In mode single each member carries its own username and
+# password here.
 #
 #config member 'fpt1_101'
 #	option pool 'fpt1'

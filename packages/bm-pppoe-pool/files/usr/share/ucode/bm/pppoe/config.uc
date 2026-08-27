@@ -6,11 +6,13 @@
 // them, and given only the router, "delete this pool" would have no answer
 // beyond "delete every PPPoE interface", which is not the same thing.
 //
-// A pool is a mode, a carrier, one account or one account per member, and a
-// list of VLANs. Everything else about a member - its section name, its tagged
-// device, its routing table, its MAC - is computed from those by the functions
-// here, never stored per member and never guessed anywhere else. Two spellings
-// of one rule is how a delete misses a section.
+// A pool is a mode, a carrier mode, a carrier, one account or one account per
+// member, and a list of member numbers - VLAN ids when the carrier mode is
+// `vlan`, plain slot numbers when it is `direct`. Everything else about a
+// member - its section name, the device it dials over, its routing table, its
+// MAC, its Host-Uniq - is computed from those by the functions here, never
+// stored per member and never guessed anywhere else. Two spellings of one
+// rule is how a delete misses a section.
 //
 // This file also holds the one validation gate. `pool_check`, `pool_create`,
 // `pool_set` and every UI in front of them call the same `check()`, so a spec
@@ -207,6 +209,47 @@ export function deviceFor(carrier, vlan) {
 	return (vlan >= 1 && vlan <= 4094) ? sprintf('%s.%d', carrier, vlan) : carrier;
 };
 
+/** The macvlan a direct-mode member rides when the pool derives MACs. */
+export function directDeviceFor(carrier, slot) {
+	return sprintf('%sm%d', carrier, slot);
+};
+
+/**
+ * What a member dials over, whichever carrier mode the pool runs. The one
+ * spelling both reconcilers, the session rows and the carrier list quote.
+ *
+ * `vlan` mode: the tagged device, or the bare carrier for VLAN 0. `direct`
+ * mode: one macvlan per slot when mac_mode derives MACs, the bare carrier
+ * itself when the slots share the carrier's own MAC.
+ */
+export function memberDeviceFor(one, vlan) {
+	if (one.carrierMode == 'direct')
+		return one.macMode == 'auto' ? directDeviceFor(one.carrier, vlan) : one.carrier;
+
+	return deviceFor(one.carrier, vlan);
+};
+
+/**
+ * The Host-Uniq a direct-mode member dials with: hex, unique per slot.
+ *
+ * Direct-mode sessions may share one MAC on one wire, and the Host-Uniq tag
+ * is what lets each pppd pick its own PADO out of the broadcast replies. A
+ * base the user set is kept and a two-byte slot suffix appended; an empty
+ * base derives from the pool id. Deterministic, so it is never stored.
+ */
+export function hostUniqFor(base, poolId, slot) {
+	let stem = type(base) == 'string' ? lc(trim(base)) : '';
+	if (length(stem))
+		return stem + sprintf('%04x', slot);
+
+	let raw = sprintf('%s:%d', poolId, slot);
+	let out = '';
+	for (let i = 0; i < length(raw); i++)
+		out += sprintf('%02x', ord(raw, i));
+
+	return out;
+};
+
 /** The member record section in bm_pppoe: `<pool>_<vlan>`. */
 export function memberSection(poolId, vlan) {
 	return sprintf('%s_%d', poolId, vlan);
@@ -337,6 +380,7 @@ function poolFromSection(section, members) {
 		label: text(section.label),
 		prefix: text(section.prefix),
 		carrier: text(section.carrier),
+		carrierMode: text(section.carrier_mode) == 'direct' ? 'direct' : 'vlan',
 		macMode: text(section.mac_mode) == 'inherit' ? 'inherit' : 'auto',
 		username: text(section.username),
 		password: text(section.password),
@@ -519,6 +563,7 @@ export function fromSpec(id, spec) {
 		label: text(spec.label),
 		prefix: text(spec.prefix),
 		carrier: text(spec.carrier),
+		carrierMode: text(spec.carrier_mode) == 'direct' ? 'direct' : 'vlan',
 		macMode: text(spec.mac_mode) == 'inherit' ? 'inherit' : 'auto',
 		username: text(spec.username),
 		password: text(spec.password),
@@ -567,6 +612,7 @@ export function toSpec(one) {
 		label: one.label,
 		prefix: one.prefix,
 		carrier: one.carrier,
+		carrier_mode: one.carrierMode,
 		mac_mode: one.macMode,
 		username: one.username,
 		hasPassword: length(one.password) > 0,
@@ -609,6 +655,9 @@ export function mergeSpec(previous, spec) {
 		label: exists(spec, 'label') ? text(spec.label) : previous.label,
 		prefix: exists(spec, 'prefix') && length(text(spec.prefix)) ? text(spec.prefix) : previous.prefix,
 		carrier: exists(spec, 'carrier') && length(text(spec.carrier)) ? text(spec.carrier) : previous.carrier,
+		carrierMode: exists(spec, 'carrier_mode') && length(text(spec.carrier_mode))
+			? (text(spec.carrier_mode) == 'direct' ? 'direct' : 'vlan')
+			: previous.carrierMode,
 		macMode: exists(spec, 'mac_mode') && length(text(spec.mac_mode))
 			? (text(spec.mac_mode) == 'inherit' ? 'inherit' : 'auto')
 			: previous.macMode,
@@ -740,6 +789,8 @@ function macsOf(one, carrierMac) {
  *   liveUp     `{ sectionName: true }` for members currently up, for the
  *              "this change redials" warnings
  *   others     every other pool record (callers pass pools() minus this id)
+ *   macvlanReady  whether the macvlan kernel module is loaded, or null when
+ *              nobody could ask - only direct + mac_mode auto cares
  */
 export function check(one, opts) {
 	let findings = [];
@@ -749,6 +800,8 @@ export function check(one, opts) {
 	let sections = opts ? opts.sections : null;
 	let liveUp = opts && opts.liveUp ? opts.liveUp : {};
 	let others = opts && type(opts.others) == 'array' ? opts.others : [];
+	let macvlanReady = opts && exists(opts, 'macvlanReady') ? opts.macvlanReady : null;
+	let direct = one.carrierMode == 'direct';
 
 	// ---- identity
 	if (!validPoolId(one.id))
@@ -761,6 +814,11 @@ export function check(one, opts) {
 	else if (previous && one.mode != previous.mode) {
 		finding(findings, 'error', 'The mode of a pool cannot change',
 			'A pool is created as ' + previous.mode + ' and stays that way. Delete it and create a new one to switch.');
+	}
+
+	if (previous && one.carrierMode != previous.carrierMode) {
+		finding(findings, 'error', 'The carrier mode of a pool cannot change',
+			'The member numbers mean VLAN ids in one mode and slots in the other, and every derived name follows. Delete the pool and create a new one to switch.');
 	}
 
 	if (length(one.label) && !safeValue(one.label))
@@ -801,7 +859,7 @@ export function check(one, opts) {
 
 	// ---- members
 	if (!length(one.members)) {
-		finding(findings, 'error', 'List at least one VLAN',
+		finding(findings, 'error', direct ? 'List at least one slot' : 'List at least one VLAN',
 			'A pool without members is a pool with nothing to dial.');
 	}
 	else if (length(one.members) > MEMBER_MAX) {
@@ -811,6 +869,12 @@ export function check(one, opts) {
 	let seen = {};
 	let untagged = 0;
 	for (let member in one.members) {
+		if (direct && (member.vlan < 1 || member.vlan > 4094)) {
+			finding(findings, 'error', 'A slot has to be 1 to 4094',
+				'Direct mode numbers its sessions: the slot names the interface, its device and its routing table.');
+			continue;
+		}
+
 		if (member.vlan < 0 || member.vlan > 4094) {
 			finding(findings, 'error', 'A VLAN has to be 0 to 4094',
 				'VLAN 0 means untagged: the pool dials straight over the carrier.');
@@ -819,19 +883,21 @@ export function check(one, opts) {
 
 		let key = sprintf('%d', member.vlan);
 		if (exists(seen, key))
-			finding(findings, 'error', 'VLAN ' + key + ' is listed twice');
+			finding(findings, 'error', (direct ? 'Slot ' : 'VLAN ') + key + ' is listed twice');
 		seen[key] = true;
 
 		if (member.vlan == 0)
 			untagged++;
 	}
 
-	if (untagged > 1)
+	if (!direct && untagged > 1)
 		finding(findings, 'error', 'Only one untagged member (VLAN 0) fits in a pool: there is only one bare carrier');
 
-	// ---- cross-pool: (carrier, vlan) is unique on the router
+	// ---- cross-pool: (carrier, member number) is unique per carrier mode.
+	// A vlan pool and a direct pool on one carrier never collide - one owns
+	// tagged devices, the other slots - so only same-mode pools are compared.
 	for (let other in others) {
-		if (other.id == one.id || other.carrier != one.carrier)
+		if (other.id == one.id || other.carrier != one.carrier || other.carrierMode != one.carrierMode)
 			continue;
 
 		let theirs = {};
@@ -841,8 +907,10 @@ export function check(one, opts) {
 		for (let member in one.members) {
 			if (exists(theirs, sprintf('%d', member.vlan))) {
 				finding(findings, 'error',
-					sprintf('VLAN %d on %s already belongs to pool %s', member.vlan, one.carrier, other.id),
-					'One VLAN on one carrier can only be dialled by one pool - its member owns the tagged device and its MAC.');
+					sprintf('%s %d on %s already belongs to pool %s', direct ? 'Slot' : 'VLAN', member.vlan, one.carrier, other.id),
+					direct
+						? 'Two direct pools on one carrier must not share a slot number - the slot names the per-member device and Host-Uniq.'
+						: 'One VLAN on one carrier can only be dialled by one pool - its member owns the tagged device and its MAC.');
 			}
 		}
 	}
@@ -855,20 +923,15 @@ export function check(one, opts) {
 		if (!length(one.password) || !safeValue(one.password))
 			finding(findings, 'error', 'Mode multi needs the shared account password');
 
-		if (one.macMode != 'auto') {
-			finding(findings, 'error', 'Mode multi requires mac_mode auto',
-				'Every session presents the same account, so each VLAN must present its own MAC - the BRAS separates them by it.');
-		}
-
 		if (length(one.members)) {
 			finding(findings, 'warning',
 				sprintf('%d session(s) will share one account', length(one.members)),
-				'Confirm the ISP allows concurrent sessions on this account, and try 2-3 VLANs before creating the full list.');
+				'Confirm the ISP allows concurrent sessions on this account, and try 2-3 members before creating the full list.');
 		}
 
-		if (untagged && length(one.members) > 1) {
+		if (untagged && length(one.members) > 1 && one.macMode == 'auto') {
 			finding(findings, 'warning', 'The untagged member (VLAN 0) inherits the carrier MAC',
-				'A pool that must give every session its own MAC should not carry an untagged member next to tagged ones.');
+				'A pool that gives every session its own MAC carries the one untagged member on the carrier\'s own.');
 		}
 	}
 	else if (one.mode == 'single') {
@@ -902,6 +965,28 @@ export function check(one, opts) {
 		if (length(one.username) || length(one.password)) {
 			finding(findings, 'info', 'The pool-level account is ignored in mode single',
 				'Each member carries its own; the shared fields are only used by mode multi.');
+		}
+	}
+
+	// ---- MAC posture. Every combination is allowed - ISPs differ on what
+	// they accept, so the gate explains consequences instead of refusing.
+	if (one.macMode == 'inherit') {
+		if (direct) {
+			finding(findings, 'warning', 'Every session shares the carrier MAC on one wire',
+				'Sessions are told apart by their PPPoE session ids and a per-slot Host-Uniq the daemon derives. If the ISP caps sessions per MAC, switch mac_mode to auto and each slot dials from its own macvlan.');
+		}
+		else if (one.mode == 'multi' && length(one.members) > 1) {
+			finding(findings, 'warning', 'Every VLAN presents the carrier MAC',
+				'Most BRAS treat each VLAN as its own circuit, so a shared MAC usually works. If the ISP separates sessions by MAC, switch mac_mode to auto.');
+		}
+	}
+	else if (direct) {
+		finding(findings, 'info', 'One macvlan and one derived MAC per slot',
+			'The MACs are locally administered (02:...) and stable across redials. An ISP that filters unknown MACs wants mac_mode inherit instead.');
+
+		if (macvlanReady === false) {
+			finding(findings, 'warning', 'The macvlan kernel module does not seem to be loaded',
+				'mac_mode auto in direct carrier mode rides one macvlan per slot. Install kmod-macvlan (the Requirements page offers it) or the devices will not come up.');
 		}
 	}
 
@@ -950,10 +1035,10 @@ export function check(one, opts) {
 				finding(findings, 'error', netdev + ' is longer than Linux allows for an interface name');
 			}
 
-			let device = deviceFor(one.carrier, member.vlan);
+			let device = memberDeviceFor(one, member.vlan);
 			if (length(device) > IFNAMSIZ) {
 				finding(findings, 'error', device + ' is longer than Linux allows for an interface name',
-					'The carrier name plus the VLAN digits has to fit in 15 characters.');
+					'The carrier name plus the member digits has to fit in 15 characters.');
 			}
 		}
 
@@ -1018,6 +1103,10 @@ export function check(one, opts) {
 
 	if (length(one.hostUniq) && !match(one.hostUniq, /^([0-9a-fA-F]{2})+$/))
 		finding(findings, 'error', 'Host-Uniq has to be raw hex bytes, such as dead12beef34');
+	else if (direct && length(one.hostUniq)) {
+		finding(findings, 'info', 'Host-Uniq is extended per slot in direct mode',
+			'Every session appends a two-byte slot suffix to the value, so concurrent replies on one wire can be told apart.');
+	}
 
 	for (let server in one.dns) {
 		if (!validDns(server))
@@ -1113,8 +1202,14 @@ export function check(one, opts) {
 	}
 
 	// ---- the standing note every report carries
-	finding(findings, 'info', 'Tagged and untagged',
-		'VLAN 0 dials untagged on the bare carrier. VLANs 1-4094 add an 802.1Q tag: the upstream must answer on that exact VLAN, and a wrong tag looks like a PADO timeout.');
+	if (direct) {
+		finding(findings, 'info', 'Direct carrier mode',
+			'Every member dials the carrier itself, untagged - the flow for an ISP handoff that answers PPPoE without 802.1Q. mac_mode auto gives each slot its own macvlan and MAC; inherit shares the carrier MAC and lets Host-Uniq tell the sessions apart.');
+	}
+	else {
+		finding(findings, 'info', 'Tagged and untagged',
+			'VLAN 0 dials untagged on the bare carrier. VLANs 1-4094 add an 802.1Q tag: the upstream must answer on that exact VLAN, and a wrong tag looks like a PADO timeout.');
+	}
 
 	let ok = true;
 	for (let one_ in findings) {
@@ -1154,6 +1249,7 @@ export function remember(one) {
 			uci.set(PACKAGE, one.id, 'label', one.label);
 		uci.set(PACKAGE, one.id, 'prefix', one.prefix);
 		uci.set(PACKAGE, one.id, 'carrier', one.carrier);
+		uci.set(PACKAGE, one.id, 'carrier_mode', one.carrierMode);
 		uci.set(PACKAGE, one.id, 'mac_mode', one.macMode);
 
 		if (one.mode == 'multi') {

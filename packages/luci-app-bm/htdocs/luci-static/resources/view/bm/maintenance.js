@@ -6,6 +6,14 @@
 'require bm.api as api';
 'require bm.ui as bmui';
 
+function asRows(value) {
+	return Array.isArray(value) ? value : [];
+}
+
+function asRecord(value) {
+	return (value && typeof value === 'object' && !Array.isArray(value)) ? value : {};
+}
+
 /*
  * Keeping the router healthy, on one tab: the snapshots and the way back,
  * the updater, and the scale limits.
@@ -125,7 +133,7 @@ return view.extend({
 			return;
 		}
 
-		const rows = result.data.snapshots ?? [];
+		const rows = asRows(asRecord(result.data).snapshots);
 		const self = this;
 
 		const table = new ui.Table([
@@ -228,15 +236,15 @@ return view.extend({
 				return;
 			}
 
-			const data = result.data;
-			const packages = data.packages ?? [];
+			const data = asRecord(result.data);
+			const packages = asRows(data.packages);
 
 			const body = packages.length
 				? packages.map(one => E('div', { 'style': 'margin-bottom:1em' }, [
 					E('h5', {}, one.package),
 					E('pre', { 'style': 'max-height:14em;overflow:auto;white-space:pre-wrap' },
-						(one.restores ?? []).map(line => '+ ' + line + '\n').join('') +
-						(one.discards ?? []).map(line => '- ' + line + '\n').join(''))
+						asRows(one.restores).map(line => '+ ' + line + '\n').join('') +
+						asRows(one.discards).map(line => '- ' + line + '\n').join(''))
 				]))
 				: [E('p', {}, _('Nothing has changed since this snapshot was taken.'))];
 
@@ -261,17 +269,19 @@ return view.extend({
 		return api.ask(api.calls.configRestore, { id: entry.id, dry_run: true }).then(result => {
 			const title = _('Restore the snapshot from %s').format(api.when(entry.at));
 
-			if (!result.ok || result.data.ok === false) {
+			const dry = asRecord(result.data);
+
+			if (!result.ok || dry.ok === false) {
 				ui.showModal(title, [
 					E('p', { 'class': 'alert-message warning' },
-						result.ok ? (result.data.reason ?? _('The router would not do it.')) : result.error),
+						result.ok ? (dry.reason ?? _('The router would not do it.')) : result.error),
 					E('div', { 'class': 'right' }, E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Close')))
 				]);
 				return;
 			}
 
-			const changes = result.data.changes | 0;
-			const packages = (result.data.packages ?? []).map(one => one.package);
+			const changes = dry.changes | 0;
+			const packages = asRows(dry.packages).map(one => one.package);
 
 			ui.showModal(title, [
 				E('p', {}, changes
@@ -300,17 +310,18 @@ return view.extend({
 
 	/** What actually came back, and whether every service took it. */
 	reportRestore(data) {
-		const failed = (data.reloaded ?? []).filter(one => one.ok !== true).map(one => one.service);
+		const payload = asRecord(data);
+		const failed = asRows(payload.reloaded).filter(one => one.ok !== true).map(one => one.service);
 
 		if (failed.length) {
 			ui.addNotification(null, E('p', {},
 				_('Restored %s, but these did not reload: %s. Check "logread -e bm-agent".')
-					.format((data.restored ?? []).join(', '), failed.join(', '))), 'warning');
+					.format(asRows(payload.restored).join(', '), failed.join(', '))), 'warning');
 			return;
 		}
 
 		ui.addNotification(null, E('p', {},
-			_('Restored %s and reloaded what needed it.').format((data.restored ?? []).join(', '))), 'info');
+			_('Restored %s and reloaded what needed it.').format(asRows(payload.restored).join(', '))), 'info');
 	},
 
 	/* -------------------------------------------------------------- updates */
@@ -372,7 +383,7 @@ return view.extend({
 		return E('div', { 'class': 'bm-small' }, [
 			E('p', {}, _('Last update: %s, %s to %s. Packages: %s.').format(
 				api.when(last.at), last.from ?? '?', last.to ?? '?',
-				(last.packages ?? []).join(', ') || '-')),
+				asRows(last.packages).join(', ') || '-')),
 			E('p', {}, last.migrated === false
 				? _('The schema migration did not finish. Run "bmctl schema" to see why.')
 				: _('The schema migration finished.'))
@@ -391,7 +402,7 @@ return view.extend({
 				return;
 			}
 
-			const data = result.data;
+			const data = asRecord(result.data);
 
 			if (data.ok === false) {
 				dom.content(node, E('div', { 'class': 'alert-message warning' }, [
@@ -443,7 +454,7 @@ return view.extend({
 		return bmui.section(_('%s is available').format(data.latest), null, [
 			E('p', {}, _('This router is on %s. Signed by key %s, fetched from %s.')
 				.format(data.current ?? '?', data.key ?? '?', data.url ?? '?')),
-			E('ul', {}, (data.packages ?? []).map(one => E('li', {},
+			E('ul', {}, asRows(data.packages).map(one => E('li', {},
 				_('%s %s, %s').format(one.name ?? '?', one.version ?? '?', api.size(one.size))))),
 			(data.notes && data.notes.length) ? E('pre', { 'style': 'white-space:pre-wrap' }, data.notes) : '',
 			E('div', { 'style': 'margin:.5em 0' }, [
@@ -484,7 +495,7 @@ return view.extend({
 
 			if (result.dryRun) {
 				ui.addNotification(null, E('p', {},
-					_('Nothing was installed. It would have fetched: %s.').format((result.packages ?? []).join(', '))), 'info');
+					_('Nothing was installed. It would have fetched: %s.').format(asRows(result.packages).join(', '))), 'info');
 				return null;
 			}
 

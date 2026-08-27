@@ -52,9 +52,18 @@ interface Router {
  * in memory the way tmpfs would hold them, and consumed the way the daemon
  * consumes them - a second read of the same path is a miss.
  */
+const DAEMON_DIRECT: AgentCapability = {
+  ...DAEMON,
+  release: '2.2.0',
+  features: [{ name: 'bm-pppoe-pool', version: '2.2.0', apiVersion: 3, provides: ['pppoe'] }]
+}
+
 function router(
   answer: (method: string, args: Record<string, unknown>, payload: unknown) => unknown,
-  overrides: { bindingCarriers?: Array<{ id: string; name: string; carrier: string; running: boolean }> } = {}
+  overrides: {
+    bindingCarriers?: Array<{ id: string; name: string; carrier: string; running: boolean }>
+    daemon?: AgentCapability
+  } = {}
 ): Router {
   const harness = moduleHarness('openwrt', () => ok())
   const files = new Map<string, string>()
@@ -134,7 +143,7 @@ function router(
         ? { bindingCarriers: () => overrides.bindingCarriers! }
         : {})
     },
-    () => DAEMON
+    () => overrides.daemon ?? DAEMON
   )
 
   return { manager, payloads, methods, events, jobs }
@@ -221,6 +230,61 @@ describe('the create gate', () => {
 
     expect(report.ok).toBe(false)
     expect(report.findings.some((f) => f.label === 'Pool fpt1 already exists')).toBe(true)
+  })
+
+  it('refuses Direct mode when the pool daemon is older than API 3', async () => {
+    const run = router((method) =>
+      method === 'pool_check' ? checkReply(true) : { ok: true }
+    )
+
+    const report = await run.manager.createCheck({
+      ...MULTI_FORM,
+      carrier_mode: 'direct',
+      vlans: '1-3'
+    })
+
+    expect(report.ok).toBe(false)
+    expect(run.methods).toEqual([])
+    expect(report.findings.some((f) => f.label.includes('Direct carrier mode'))).toBe(true)
+  })
+
+  it('refuses VLAN 0 locally in Direct mode, before any round trip', async () => {
+    const run = router(
+      (method) => (method === 'pool_check' ? checkReply(true) : { ok: true }),
+      { daemon: DAEMON_DIRECT }
+    )
+
+    const report = await run.manager.createCheck({
+      ...MULTI_FORM,
+      carrier_mode: 'direct',
+      vlans: '0,1'
+    })
+
+    expect(report.ok).toBe(false)
+    expect(run.methods).toEqual([])
+    expect(report.findings.some((f) => f.label.includes('1-4094'))).toBe(true)
+  })
+
+  it('sends carrier_mode direct when the daemon speaks API 3', async () => {
+    const run = router(
+      (method) => (method === 'pool_check' ? checkReply(true) : { ok: true }),
+      { daemon: DAEMON_DIRECT }
+    )
+
+    const report = await run.manager.createCheck({
+      ...MULTI_FORM,
+      carrier_mode: 'direct',
+      mac_mode: 'inherit',
+      vlans: '1-3'
+    })
+
+    expect(report.ok).toBe(true)
+    expect(run.payloads[0]).toMatchObject({
+      mode: 'multi',
+      carrier_mode: 'direct',
+      mac_mode: 'inherit',
+      members: [{ vlan: 1 }, { vlan: 2 }, { vlan: 3 }]
+    })
   })
 
   it('parses per-VLAN member lines in single mode', async () => {

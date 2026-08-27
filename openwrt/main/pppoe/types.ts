@@ -96,6 +96,8 @@ export interface PppoePoolRow {
   modeLabel: string
   prefix: string
   carrier: string
+  carrier_mode: 'vlan' | 'direct'
+  carrierModeLabel: string
   mac_mode: 'auto' | 'inherit'
   /** The shared username in multi; a per-VLAN note in single. */
   account: string

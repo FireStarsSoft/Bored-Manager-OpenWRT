@@ -17,19 +17,19 @@ resolves('install({})', () => install({}));
 let told = requirements();
 check('report answers ok', told.ok, true);
 check('but says it could not ask', told.asked, false);
-check('and still lists every row', length(told.rows), 6);
+check('and still lists every row', length(told.rows), 7);
 
 let unknowns = 0;
 for (let row in told.rows) {
 	if (row.ok == null)
 		unknowns++;
 }
-check('every row is unknown, none invented', unknowns, 6);
+check('every row is unknown, none invented', unknowns, 7);
 
 // -------------------------------------------------------------- the installer
 let junk = install({ group: 'curl' });
 check('a package name is not a group', junk.ok, false);
-says('and the refusal lists the groups', junk.reason, /dnsmasq, ipfull, pppoe/);
+says('and the refusal lists the groups', junk.reason, /dnsmasq, ipfull, macvlan, pppoe/);
 
 let traversal = install({ group: '../etc' });
 check('a path is not a group either', traversal.ok, false);
@@ -41,6 +41,9 @@ check('and names all three packages', join(' ', planned.packages), 'ppp ppp-mod-
 
 let ipfull = install({ group: 'ipfull', dry_run: true });
 check('ipfull is one package', join(' ', ipfull.packages), 'ip-full');
+
+let macvlan = install({ group: 'macvlan', dry_run: true });
+check('macvlan is one package', join(' ', macvlan.packages), 'kmod-macvlan');
 
 // A real run in this harness has no apk to find - and must say that, not die.
 let ran = install({ group: 'dnsmasq' });

@@ -98,7 +98,7 @@ const REQUIREMENTS: Record<RequirementKey, RequirementSpec> = {
     detail: (caps) => {
       if (!caps.agent.usable) {
         return (
-          'PPPoE pools are owned end to end by bm-pppoe-pool 2.x on the router, and there is no ' +
+          'PPPoE Dialer pools are owned end to end by bm-pppoe-pool 2.x on the router, and there is no ' +
           'Bored Manager agent to reach it through. Install the router packages from Router ' +
           'packages, in Module settings.'
         )

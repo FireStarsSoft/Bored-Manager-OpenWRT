@@ -7,7 +7,7 @@
 'require bm.ui as bmui';
 
 /*
- * The PPPoE pools: one card per pool, one row per VLAN, and nothing hidden.
+ * The PPPoE Dialer: one card per pool, one row per member, and nothing hidden.
  *
  * The table under each pool is driven by the pool's record, not by what
  * netifd happens to mention: a member whose section is missing from
@@ -29,6 +29,11 @@ const ACTION_LIMIT = 500;
 const MODES = [
 	['multi', _('Shared account')],
 	['single', _('One account per VLAN')]
+];
+
+const CARRIER_MODES = [
+	['vlan', _('VLAN - one 802.1Q tag per member')],
+	['direct', _('Direct - dial the carrier itself, untagged')]
 ];
 
 const state = {
@@ -214,9 +219,9 @@ return view.extend({
 
 		return E([], [
 			banner,
-			E('h2', {}, _('PPPoE Pools')),
+			E('h2', {}, _('PPPoE Dialer')),
 			E('div', { 'class': 'cbi-map-descr' },
-				_('A pool is one carrier and a list of VLANs, each dialling its own PPPoE session with its own routing table. Everything about it - interfaces, tagged devices, MAC addresses, the firewall zone - is derived from the pool by the router itself.')),
+				_('A pool is one carrier and a list of members, each dialling its own PPPoE session with its own routing table. Members are VLANs, or plain slots when the pool dials the carrier itself. Everything about it - interfaces, devices, MAC addresses, the firewall zone - is derived from the pool by the router itself.')),
 			content
 		]);
 	},
@@ -342,19 +347,24 @@ return view.extend({
 		const rows = state.rows.filter(row => row.pool === pool.id);
 		const sections = rows.map(row => row.section);
 
+		const direct = pool.carrier_mode === 'direct';
+
 		const account = pool.mode === 'multi'
 			? _('account %s').format(pool.username || '?')
-			: _('one account per VLAN');
+			: (direct ? _('one account per slot') : _('one account per VLAN'));
 
 		const macness = pool.mac_mode === 'auto'
-			? _('per-VLAN MACs')
+			? (direct ? _('per-slot MACs') : _('per-VLAN MACs'))
 			: _('carrier MAC');
 
 		const header = E('div', { 'class': 'bm-pool-head' }, [
 			E('h3', {}, pool.label && pool.label.length ? '%s (%s)'.format(pool.label, pool.id) : pool.id),
 			E('span', {
 				'class': 'bm-pill bm-mode--%s'.format(pool.mode === 'multi' ? 'multi' : 'single')
-			}, pool.mode === 'multi' ? _('shared account') : _('per-VLAN accounts')),
+			}, pool.mode === 'multi' ? _('shared account') : (direct ? _('per-slot accounts') : _('per-VLAN accounts'))),
+			E('span', {
+				'class': 'bm-pill bm-mode--%s'.format(direct ? 'direct' : 'vlan')
+			}, direct ? _('direct') : _('VLAN')),
 			E('span', { 'style': 'opacity:.8' }, _('on %s').format(pool.carrier)),
 			E('span', { 'style': 'opacity:.8' }, account),
 			E('span', { 'style': 'opacity:.8' }, macness),
@@ -400,7 +410,7 @@ return view.extend({
 		]);
 
 		const table = new ui.Table([
-			_('Section'), _('VLAN'), _('Device'), _('Username'), _('MAC'), _('IPv4'),
+			_('Section'), direct ? _('Slot') : _('VLAN'), _('Device'), _('Username'), _('MAC'), _('IPv4'),
 			_('Table'), _('State'), _('Error'), ''
 		], {
 			id: 'bm-pool-%s'.format(pool.id),
@@ -472,8 +482,14 @@ return view.extend({
 		const self = this;
 
 		// ---- identity
+		const supportsDirect = ((state.info && state.info.apiVersion) | 0) >= 3;
+
 		const modeSelect = bmui.selectInput(MODES, creating ? 'multi' : pool.mode);
 		if (!creating) modeSelect.disabled = true;
+
+		const carrierModeSelect = bmui.selectInput(CARRIER_MODES,
+			creating ? 'vlan' : (pool.carrier_mode === 'direct' ? 'direct' : 'vlan'));
+		if (!creating || !supportsDirect) carrierModeSelect.disabled = true;
 
 		const idInput = bmui.textInput(creating ? '' : pool.id, 'fpt1', '10em', !creating);
 		const labelInput = bmui.textInput(creating ? '' : (pool.label ?? ''), _('optional'), '18em');
@@ -488,8 +504,8 @@ return view.extend({
 			: bmui.textInput(currentCarrier, 'eth1', '10em');
 
 		const macSelect = bmui.selectInput([
-			['auto', _('auto - one derived MAC per VLAN')],
-			['inherit', _('inherit - every VLAN keeps the carrier MAC')]
+			['auto', _('auto - one derived MAC per member')],
+			['inherit', _('inherit - every member keeps the carrier MAC')]
 		], creating ? 'auto' : pool.mac_mode);
 
 		const tableBaseInput = bmui.textInput(creating ? '10000' : '%d'.format(pool.table_base | 0), '10000', '8em');
@@ -549,26 +565,53 @@ return view.extend({
 
 		// Which member editor is on show follows the mode. `conditional`
 		// rendering by hand, because the two modes ask for different things.
+		const vlanField = bmui.field(_('VLANs'), vlanBox,
+			_('Ranges and numbers: 101-150,200. VLAN 0 means untagged, straight over the carrier, at most once.'));
+		const memberField = bmui.field(_('Members'), memberBox,
+			_('One per line: VLAN, username, password - separated by a comma, a tab, a semicolon, a pipe or spaces. # starts a comment. On an edit, an empty password keeps the stored one.'));
+
 		const multiBlock = E('div', {}, [
-			bmui.field(_('Username'), usernameInput, _('The one account every VLAN dials with.')),
+			bmui.field(_('Username'), usernameInput, _('The one account every member dials with.')),
 			bmui.field(_('Password'), passwordInputNode,
 				creating ? '' : _('Leave empty to keep the stored password.')),
-			bmui.field(_('VLANs'), vlanBox,
-				_('Ranges and numbers: 101-150,200. VLAN 0 means untagged, straight over the carrier, at most once.'))
+			vlanField
 		]);
 
-		const singleBlock = E('div', {}, [
-			bmui.field(_('Members'), memberBox,
-				_('One per line: VLAN, username, password - separated by a comma, a tab, a semicolon, a pipe or spaces. # starts a comment. On an edit, an empty password keeps the stored one.'))
-		]);
+		const singleBlock = E('div', {}, [memberField]);
 
 		function syncMode() {
 			const multi = modeSelect.value === 'multi';
 			multiBlock.style.display = multi ? '' : 'none';
 			singleBlock.style.display = multi ? 'none' : '';
 		}
+
+		function syncCarrier() {
+			const direct = carrierModeSelect.value === 'direct';
+			const vlanTitle = vlanField.querySelector('.cbi-value-title');
+			const vlanHint = vlanField.querySelector('.cbi-value-description');
+			const memberTitle = memberField.querySelector('.cbi-value-title');
+			const memberHint = memberField.querySelector('.cbi-value-description');
+
+			if (vlanTitle)
+				vlanTitle.textContent = direct ? _('Slots') : _('VLANs');
+			if (vlanHint) {
+				vlanHint.textContent = direct
+					? _('Slot numbers 1-4094: 1-32,40. Direct mode has no VLAN 0 - every member dials the carrier itself.')
+					: _('Ranges and numbers: 101-150,200. VLAN 0 means untagged, straight over the carrier, at most once.');
+			}
+			if (memberTitle)
+				memberTitle.textContent = _('Members');
+			if (memberHint) {
+				memberHint.textContent = direct
+					? _('One per line: slot, username, password. Slots are 1-4094. # starts a comment. On an edit, an empty password keeps the stored one.')
+					: _('One per line: VLAN, username, password - separated by a comma, a tab, a semicolon, a pipe or spaces. # starts a comment. On an edit, an empty password keeps the stored one.');
+			}
+		}
+
 		modeSelect.addEventListener('change', syncMode);
+		carrierModeSelect.addEventListener('change', syncCarrier);
 		syncMode();
+		syncCarrier();
 
 		function carrierValue() {
 			return String(carrierSelect.value ?? '').trim();
@@ -590,6 +633,8 @@ return view.extend({
 
 			spec.label = labelInput.value.trim();
 			spec.carrier = carrierValue();
+			if (supportsDirect)
+				spec.carrier_mode = carrierModeSelect.value;
 			spec.mac_mode = macSelect.value;
 
 			const tableBase = bmui.whole(tableBaseInput, 1, 65535);
@@ -618,6 +663,11 @@ return view.extend({
 					return null;
 				}
 				spec.members = parsed.members;
+			}
+
+			if (spec.carrier_mode === 'direct' && spec.members.some(one => (one.vlan | 0) < 1)) {
+				dom.content(status, bmui.riskNote(_('Direct mode numbers its sessions 1-4094. There is no VLAN 0.')));
+				return null;
 			}
 
 			spec.service = serviceInput.value.trim();
@@ -729,18 +779,23 @@ return view.extend({
 				: _('Changes apply to every interface in the pool in one pass. Nothing is written until the check passes and you apply.')),
 
 			bmui.field(_('Mode'), modeSelect, creating
-				? _('Shared account: one login, many VLANs, one derived MAC per VLAN. One account per VLAN: each line has its own login.')
+				? _('Shared account: one login, many members. One account per VLAN: each line has its own login.')
 				: _('The mode of a pool cannot change; delete it and create a new one.')),
+			bmui.field(_('Carrier mode'), carrierModeSelect, creating
+				? (supportsDirect
+					? _('VLAN tags each member. Direct dials the carrier itself, untagged - the flow for an ISP that answers PPPoE without 802.1Q. Fixed after create.')
+					: _('This router\'s bm-pppoe-pool is older than 2.2.0, so only VLAN mode is available. Update the router packages to unlock Direct.'))
+				: _('The carrier mode of a pool cannot change; delete it and create a new one.')),
 			bmui.field(_('Pool id'), idInput, creating
 				? _('Lowercase letters, digits and underscores. This is what you delete it by.')
 				: _('Fixed for the life of the pool.')),
 			bmui.field(_('Label'), labelInput, _('Only for people; shown wherever the pool is.')),
 			bmui.field(_('Prefix'), prefixInput, creating
-				? _('1-4 characters. Interface names derive from it: prefix fpt, VLAN 101 dials as fpt101 on pppoe-fpt101.')
+				? _('1-4 characters. Interface names derive from it: prefix fpt, member 101 dials as fpt101 on pppoe-fpt101.')
 				: _('Fixed: every interface is named by it.')),
 			bmui.field(_('Carrier'), carrierSelect, _('The physical uplink. Changing it later redials the whole pool.')),
-			bmui.field(_('MAC mode'), macSelect, _('auto derives 02:xx:xx:xx:VV:VV from the carrier MAC, the pool id and the VLAN - stable across reboots. Shared-account pools require it.')),
-			bmui.field(_('Table base'), tableBaseInput, _('Each member routes in table base + VLAN. Changing it later strands binding rules until bm-wanbind\'s next pass.')),
+			bmui.field(_('MAC mode'), macSelect, _('auto derives 02:xx:xx:xx:NN:NN from the carrier MAC, the pool id and the member number - a tagged device in VLAN mode, a macvlan in Direct. inherit keeps the carrier MAC; Direct then derives a Host-Uniq per slot.')),
+			bmui.field(_('Table base'), tableBaseInput, _('Each member routes in table base + member number. Changing it later strands binding rules until bm-wanbind\'s next pass.')),
 
 			multiBlock,
 			singleBlock,
@@ -758,7 +813,7 @@ return view.extend({
 			bmui.field(_('Use ISP DNS servers'), peerdnsCheck, _('Off means the servers below are used instead.')),
 			bmui.field(_('DNS servers'), dnsInput, _('Space separated. Only used while ISP DNS is off.')),
 			bmui.field(_('Default route'), defaultrouteCheck, _('Each session installs its default route into its own table.')),
-			bmui.field(_('Host-Uniq'), hostUniqInput, _('Raw hex bytes. Leave empty unless the ISP requires it.')),
+			bmui.field(_('Host-Uniq'), hostUniqInput, _('Raw hex bytes. Leave empty unless the ISP requires it. In Direct mode the daemon extends this per slot so concurrent sessions on one wire can be told apart.')),
 			bmui.field(_('Inactivity timeout'), demandInput, _('Seconds of idle before hanging up; 0 keeps sessions up.')),
 			bmui.field(_('PADI attempts'), padiAttemptsInput, ''),
 			bmui.field(_('PADI timeout'), padiTimeoutInput, ''),
@@ -771,7 +826,7 @@ return view.extend({
 			bmui.field(_('Allow LAN to reach this zone'), lanForwardCheck, _('Writes one forwarding from the LAN zone.')),
 
 			E('p', { 'style': 'opacity:.75' },
-				_('VLAN 0 dials untagged on the bare carrier; VLANs 1-4094 add an 802.1Q tag, and the upstream must answer on that exact VLAN - a wrong tag looks like a PADO timeout. A shared account carries as many sessions as the ISP allows: try two or three VLANs before pasting the full list.')),
+				_('VLAN mode: VLAN 0 dials untagged; VLANs 1-4094 add an 802.1Q tag, and a wrong tag looks like a PADO timeout. Direct mode: every member dials the carrier itself. auto gives each slot its own macvlan and MAC (needs kmod-macvlan); inherit shares the carrier MAC and lets Host-Uniq tell the sessions apart. A shared account carries as many sessions as the ISP allows: try two or three members before pasting the full list.')),
 
 			status,
 			buttons
@@ -793,7 +848,7 @@ return view.extend({
 		bmui.confirmTyped({
 			title: _('Delete pool %s').format(pool.id),
 			body: [
-				E('p', {}, _('This removes all %d interface(s), their VLAN devices, their routing tables and their firewall memberships. Anybody dialling through them loses their connection.').format(pool.members | 0)),
+				E('p', {}, _('This removes all %d interface(s), their devices, their routing tables and their firewall memberships. Anybody dialling through them loses their connection.').format(pool.members | 0)),
 				pool.legacy ? E('p', {}, _('This is an old-model pool: its numbered sessions are removed exactly as the release that made them would have.')) : '',
 				E('p', {}, _('The router refuses while a bm-wanbind instance hands clients to this carrier, unless forced.')),
 				bmui.field(_('Force'), forceCheck, _('Delete even while a binder instance uses this carrier.'))

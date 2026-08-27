@@ -41,6 +41,10 @@ const USAGE = 'usage: bmpppoe <command> [--json] [--pool ID]\n' +
 	'    "members": [ { "vlan": 101 }, { "vlan": 102 } ] }\n' +
 	'mode "single" carries the account per member instead:\n' +
 	'  "members": [ { "vlan": 101, "user": "a@isp", "pass": "..." } ]\n' +
+	'"carrier_mode": "direct" dials the carrier itself, untagged, and the\n' +
+	'member numbers become slots: mac_mode auto gives every slot its own\n' +
+	'macvlan and MAC, mac_mode inherit shares the carrier MAC and derives a\n' +
+	'Host-Uniq per slot instead.\n' +
 	'`check` consumes the file too: write it again before create or set.\n';
 
 function bus() {

@@ -74,7 +74,7 @@ export const SPACE_WARN_KB = 2_048
  * looking for it there.
  */
 export const FW4_MISSING =
-  'Managed PPPoE pools and WAN binding both need nftables masquerading, which routers still on fw3 do not have. It cannot be installed from here: moving a router to fw4 is a firmware upgrade, done at a router shell.'
+  'The PPPoE Dialer and WAN binding both need nftables masquerading, which routers still on fw3 do not have. It cannot be installed from here: moving a router to fw4 is a firmware upgrade, done at a router shell.'
 
 /**
  * Everything `installHint` needs, which is deliberately far less than a whole

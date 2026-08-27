@@ -39,7 +39,8 @@ export interface PinnedPackage {
   size: number
 }
 
-/** The package release these hashes came from. Empty when nothing is pinned. */
+/** The package release these hashes came from. Empty when nothing is pinned.
+ *  Still 2.1.0 until pkg-v2.2.0 is published and `npm run pin:packages` is run. */
 export const PINNED_RELEASE = '2.1.0'
 
 /** Where the files below live. One directory, one release, no redirects. */

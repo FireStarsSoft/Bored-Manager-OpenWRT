@@ -143,6 +143,7 @@ export function buildReadiness(facts: ProbeFacts): OpenWrtCapabilities {
   const hasPppd = tools.has('pppd')
   const hasFw4 = tools.has('fw4') && tools.has('nft')
   const hasPppoe = hasPppd && facts.ppp.plugin && facts.ppp.kmod
+  const hasMacvlan = facts.ppp.macvlan === true
   const hasDnsmasq = tools.has('dnsmasq')
   const hasLogread = tools.has('logread')
   // A functional test, and deliberately not a version string: a snapshot build
@@ -164,6 +165,7 @@ export function buildReadiness(facts: ProbeFacts): OpenWrtCapabilities {
 
   const capabilityValues = {
     hasPppoe,
+    hasMacvlan,
     hasIpRule: facts.hasIpRule,
     hasDnsmasq
   }
@@ -182,6 +184,7 @@ export function buildReadiness(facts: ProbeFacts): OpenWrtCapabilities {
   // to run the same no-op job for ever, which is the loop this release is about.
   if (facts.probed) {
     for (const group of PACKAGE_GROUPS) {
+      if (group.optional) continue
       if (capabilityValues[group.capability]) continue
       if (group.capability === 'hasIpRule' && facts.ip.fullPresent) continue
       for (const name of group.packages) {
@@ -218,6 +221,7 @@ export function buildReadiness(facts: ProbeFacts): OpenWrtCapabilities {
     hasPppd,
     hasFw4,
     hasPppoe,
+    hasMacvlan,
     hasDnsmasq,
     hasLogread,
     oldRelease,
@@ -311,6 +315,7 @@ export function buildReadiness(facts: ProbeFacts): OpenWrtCapabilities {
     hasPppd,
     hasFw4,
     hasPppoe,
+    hasMacvlan,
     hasDnsmasq,
     hasIpRule: facts.hasIpRule,
     ip: facts.ip,

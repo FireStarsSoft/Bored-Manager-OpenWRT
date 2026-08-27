@@ -178,6 +178,7 @@ export interface CheckInput {
   hasPppd: boolean
   hasFw4: boolean
   hasPppoe: boolean
+  hasMacvlan: boolean
   hasDnsmasq: boolean
   hasLogread: boolean
   oldRelease: boolean
@@ -343,6 +344,7 @@ export function observedChecks(input: CheckInput): CheckSeed[] {
     hasPppd,
     hasFw4,
     hasPppoe,
+    hasMacvlan,
     hasDnsmasq,
     hasLogread,
     oldRelease,
@@ -422,6 +424,17 @@ export function observedChecks(input: CheckInput): CheckSeed[] {
       detail: pppoeDetail(hasPppd, facts.ppp.plugin, facts.ppp.kmod),
       required: false,
       install: hasPppoe ? null : 'pppoe',
+      card: 'pppoe'
+    },
+    {
+      key: 'macvlan',
+      title: 'macvlan (per-slot MACs)',
+      status: hasMacvlan ? 'ok' : 'warn',
+      detail: hasMacvlan
+        ? 'Present. A direct-mode pool can give each slot its own MAC on one carrier.'
+        : 'Not installed. Direct carrier mode with mac_mode auto rides one macvlan per slot; without this module those devices will not come up.',
+      required: false,
+      install: hasMacvlan ? null : 'macvlan',
       card: 'pppoe'
     },
     {
@@ -514,10 +527,10 @@ export function observedChecks(input: CheckInput): CheckSeed[] {
     featureCheck(
       agent,
       'pppoe',
-      'PPPoE pools',
+      'PPPoE Dialer',
       'bm-pppoe-pool',
-      'The router owns its pools end to end: interfaces, per-VLAN MACs, routing tables and the firewall zone are all derived and reconciled on the router itself.',
-      'PPPoE pools need it: this module composes and reads pools through the daemon and writes none of it over SSH.',
+      'The router owns its pools end to end: interfaces, VLANs or direct slots, MACs, routing tables and the firewall zone are all derived and reconciled on the router itself.',
+      'PPPoE Dialer needs it: this module composes and reads pools through the daemon and writes none of it over SSH.',
       PPPOE_POOL_API
     ),
     {

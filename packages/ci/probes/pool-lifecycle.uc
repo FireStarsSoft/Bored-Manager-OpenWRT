@@ -51,6 +51,9 @@ let uci = cursor();
 check('mac formula vlan 101', cfg.macFor('aa:bb:cc:dd:ee:ff', 'fpt1', 101), '02:a6:65:b8:00:65');
 check('mac formula vlan 102', cfg.macFor('aa:bb:cc:dd:ee:ff', 'fpt1', 102), '02:a6:65:b8:00:66');
 check('mac formula is carrier-cased', cfg.macFor('AA:BB:CC:DD:EE:FF', 'fpt1', 101), '02:a6:65:b8:00:65');
+check('direct device name', cfg.directDeviceFor('eth1', 7), 'eth1m7');
+check('host uniq formula slot 1', cfg.hostUniqFor('', 'dir1', 1), '646972313a31');
+check('host uniq keeps a user base', cfg.hostUniqFor('aabb', 'dir1', 1), 'aabb0001');
 
 check('section name', cfg.sectionFor('fpt', 101), 'fpt101');
 check('vlan 0 section name', cfg.sectionFor('fpt', 0), 'fpt0');
@@ -124,10 +127,10 @@ check('and says which pool owns it', hasFinding(taken, 'error', 'already belongs
 
 let sharedMac = pppoe.poolCheck({
 	id: 'fpt9', mode: 'multi', prefix: 'fpn', carrier: 'eth1', mac_mode: 'inherit',
-	username: 'x@isp', password: 'x', members: [ { vlan: 300 } ]
+	username: 'x@isp', password: 'x', members: [ { vlan: 300 }, { vlan: 301 } ]
 });
-check('multi without per-vlan MACs is refused', sharedMac.ok, false);
-check('and explains the MAC rule', hasFinding(sharedMac, 'error', 'mac_mode auto'), true);
+check('multi inherit is a warning, not a refusal', sharedMac.ok, true);
+check('and warns about the shared MAC', hasFinding(sharedMac, 'warning', 'Every VLAN presents the carrier MAC'), true);
 
 let twice = pppoe.poolCheck({
 	id: 'fpt9', mode: 'multi', prefix: 'fpn', carrier: 'eth1',
@@ -196,8 +199,9 @@ let modeFlip = pppoe.poolSet({ id: 'fpt1', mode: 'single' });
 check('a mode change is refused', modeFlip.ok, false);
 check('and says why', hasFinding(modeFlip, 'error', 'mode of a pool cannot change'), true);
 
-let macFlip = pppoe.poolSet({ id: 'fpt1', mac_mode: 'inherit' });
-check('multi cannot switch to inherited MACs', macFlip.ok, false);
+let macFlip = pppoe.poolCheck({ id: 'fpt1', mac_mode: 'inherit' });
+check('switching multi to inherit is a warning, not a refusal', macFlip.ok, true);
+check('and the standing MAC warning is on the report', hasFinding(macFlip, 'warning', 'Every VLAN presents the carrier MAC'), true);
 
 // ------------------------------------------- the second pool, mode single
 let second = pppoe.poolAdd({
@@ -285,8 +289,8 @@ function poolTold(told, id) {
 
 let told = pppoe.info();
 let fptTold = poolTold(told, 'fpt1');
-check('info release', told.release, '2.1.0');
-check('info api version', told.apiVersion, 2);
+check('info release', told.release, '2.2.0');
+check('info api version', told.apiVersion, 3);
 check('info lists every pool', length(told.pools), 3);
 check('info never carries a password', exists(fptTold, 'password'), false);
 check('info says one is set', fptTold.hasPassword, true);
@@ -320,5 +324,49 @@ check('the last delete ok', goneLast.ok, true);
 check('the empty zone goes with it', uci.get('firewall', 'bmwanpool'), null);
 check('and the forwarding goes too', uci.get('firewall', 'bmfwd'), null);
 check('the foreign section outlives everything', uci.get('network', 'wan6', 'proto'), 'static');
+
+// ----------------------------------------------------- direct carrier mode
+// After the VLAN pools are gone, so they cannot collide on a prefix or a
+// zone membership. inherit shares the carrier and derives Host-Uniq; auto
+// writes one macvlan per slot.
+let inheritDirect = pppoe.poolAdd({
+	id: 'dinh', mode: 'multi', prefix: 'din', carrier: 'eth1',
+	carrier_mode: 'direct', mac_mode: 'inherit',
+	username: 'u@isp', password: 'pw', table_base: 40000, zone: 'bmwanpool',
+	members: [ { vlan: 1 }, { vlan: 2 } ]
+});
+check('direct inherit create ok', inheritDirect.ok, true);
+check('direct inherit dials the bare carrier', uci.get('network', 'din1', 'device'), 'eth1');
+check('direct inherit writes no device section', uci.get('network', cfg.deviceSection('dinh', 1)), null);
+check('direct inherit writes a derived Host-Uniq', uci.get('network', 'din1', 'host_uniq'), cfg.hostUniqFor('', 'dinh', 1));
+check('direct inherit second slot has its own Host-Uniq', uci.get('network', 'din2', 'host_uniq'), cfg.hostUniqFor('', 'dinh', 2));
+check('direct inherit warns about the shared MAC', hasFinding(inheritDirect, 'warning', 'Every session shares the carrier MAC'), true);
+
+let slotZero = pppoe.poolCheck({
+	id: 'dir9', mode: 'multi', prefix: 'dxz', carrier: 'eth1',
+	carrier_mode: 'direct', mac_mode: 'inherit',
+	username: 'x@isp', password: 'x', members: [ { vlan: 0 } ]
+});
+check('direct refuses slot 0', hasFinding(slotZero, 'error', 'A slot has to be 1 to 4094'), true);
+
+pppoe.poolDelete({ id: 'dinh' });
+
+let autoDirect = pppoe.poolAdd({
+	id: 'daut', mode: 'multi', prefix: 'dau', carrier: 'eth1',
+	carrier_mode: 'direct', mac_mode: 'auto',
+	username: 'u@isp', password: 'pw', table_base: 41000, zone: 'bmwanpool',
+	members: [ { vlan: 7 } ]
+});
+check('direct auto create ok', autoDirect.ok, true);
+check('direct auto dials a macvlan', uci.get('network', 'dau7', 'device'), cfg.directDeviceFor('eth1', 7));
+check('direct auto device type', uci.get('network', cfg.deviceSection('daut', 7), 'type'), 'macvlan');
+check('direct auto device parent', uci.get('network', cfg.deviceSection('daut', 7), 'ifname'), 'eth1');
+check('direct auto device name', uci.get('network', cfg.deviceSection('daut', 7), 'name'), 'eth1m7');
+check('direct auto golden mac', uci.get('network', cfg.deviceSection('daut', 7), 'macaddr'), cfg.macFor('aa:bb:cc:dd:ee:ff', 'daut', 7));
+check('direct auto also writes Host-Uniq', uci.get('network', 'dau7', 'host_uniq'), cfg.hostUniqFor('', 'daut', 7));
+check('direct auto notes the macvlan', hasFinding(autoDirect, 'info', 'One macvlan and one derived MAC per slot'), true);
+
+pppoe.poolDelete({ id: 'daut' });
+check('direct cleanup removes the zone', uci.get('firewall', 'bmwanpool'), null);
 
 report();

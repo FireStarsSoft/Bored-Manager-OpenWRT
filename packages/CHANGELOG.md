@@ -9,6 +9,65 @@ guessing, so it moves only when the shape of a call changes. `configSchema` is
 the shape of what is written to `/etc`, and it is what a downgrade is refused
 on. All three are in [`version.json`](version.json).
 
+## 2.2.0
+
+The PPPoE Dialer grew a second carrier mode, the LuCI pages match the module
+again, and Maintenance no longer throws on a missing array.
+
+The pool daemon's own `apiVersion` moves to **3** (`carrier_mode` on the spec).
+The agent's module API stays **3** and `configSchema` stays **2** - an older
+module that never sends the new key keeps working; it just cannot create a
+Direct-mode pool.
+
+### Direct carrier mode
+
+A pool can now dial the carrier itself, untagged, instead of one 802.1Q tag
+per member. That is the flow for an ISP that answers PPPoE without VLAN tags -
+the same shape as creating many identical `proto pppoe` interfaces on one
+`eth` in LuCI.
+
+- `carrier_mode vlan` (default) is unchanged: VLAN 0 is the bare carrier,
+  VLANs 1-4094 are tagged devices.
+- `carrier_mode direct` numbers members as slots 1-4094. There is no VLAN 0.
+- `mac_mode inherit` shares the carrier MAC. Direct then derives a Host-Uniq
+  per slot so several pppd on one wire can tell PADO replies apart.
+- `mac_mode auto` derives one MAC per member. In Direct that is one macvlan
+  (`ethXmN`) per slot and needs `kmod-macvlan`. Missing the module is a
+  warning on the check, not a refusal.
+
+`mac_mode inherit` on a shared-account VLAN pool is also a warning now, not a
+refusal: some ISPs filter locally-administered `02:xx` MACs, and that is what
+a mass PADO timeout on every tagged member looks like.
+
+### LuCI
+
+The product name is **PPPoE Dialer** on the menu, the page heading and
+Overview. The editor shows both account modes (shared / one per member) and
+the new Carrier mode select when the daemon speaks API 3.
+
+Maintenance guards every snapshot / updater payload with `Array.isArray`
+before `.map`, so a missing or non-array answer is an empty list instead of
+`TypeError: ...map is not a function`.
+
+`luci.mk` already clears `/tmp/luci-modulecache` on install. A same-version
+reinstall does not replace files - this release is **2.2.0** so apk does.
+
+### Requirements
+
+The agent's requirements report has a seventh row for macvlan. The installer
+allowlist gained the group `macvlan` → `kmod-macvlan`.
+
+### After install (router)
+
+1. Confirm `apk info -e bm-pppoe-pool bm-agent luci-app-bm` all say 2.2.0.
+2. Log out of LuCI, hard-refresh (Ctrl+F5). The menu must read PPPoE Dialer.
+3. Open that tab: Shared account and One account per VLAN both present;
+   Carrier mode VLAN / Direct visible.
+4. Open Maintenance: no TypeError in the browser console.
+5. Diagnose PADO timeouts with three small pools, then delete them:
+   Direct + inherit, Direct + auto (install `kmod-macvlan` first),
+   VLAN + shared account + inherit.
+
 ## 2.1.0
 
 The router explains itself, tunes itself, and got its own face lifted.

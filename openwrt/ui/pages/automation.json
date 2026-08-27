@@ -329,7 +329,7 @@
                                 },
                                 {
                                   "type": "section",
-                                  "title": "PPPoE pools",
+                                      "title": "PPPoE Dialer",
                                   "columns": 4,
                                   "slowTarget": "openwrt",
                                   "slowAt": {
@@ -1338,6 +1338,12 @@
                                               "initial": true
                                             },
                                             {
+                                              "key": "macvlan",
+                                              "label": "macvlan (kmod-macvlan) - per-slot MACs in Direct mode",
+                                              "input": "checkbox",
+                                              "initial": false
+                                            },
+                                            {
                                               "key": "ipfull",
                                               "label": "Policy routing (ip-full)",
                                               "input": "checkbox",
@@ -1378,9 +1384,10 @@
                                       "type": "note",
                                       "title": "Tagged, untagged, and shared accounts",
                                       "lines": [
-                                        "VLAN 0 dials untagged on the bare carrier; VLANs 1-4094 add an 802.1Q tag, and the upstream must answer on that exact VLAN - a wrong tag looks like a PADO timeout.",
-                                        "A shared account carries as many sessions as the ISP allows. Each VLAN presents its own derived MAC so the BRAS can tell them apart; try two or three VLANs before pasting the full list.",
-                                        "One account per VLAN is the safe mode: each line has its own login, and MACs may inherit from the carrier or derive per VLAN.",
+                                        "Carrier mode VLAN tags each member as 802.1Q. Direct dials the carrier itself, untagged - the flow for an ISP that answers PPPoE without 802.1Q. Direct has no VLAN 0; slots are 1-4094.",
+                                        "MAC mode auto derives one MAC per member (a tagged device in VLAN mode, a macvlan in Direct - needs kmod-macvlan). inherit keeps the carrier MAC; Direct then derives a Host-Uniq per slot so sessions on one wire can be told apart.",
+                                        "A shared account carries as many sessions as the ISP allows. Try two or three members before pasting the full list.",
+                                        "One account per VLAN is the safe mode: each line has its own login.",
                                         "Nothing is written until the check passes and you apply. The check runs on the router itself and names every derived interface, table and MAC decision it would make."
                                       ]
                                     }
@@ -1437,6 +1444,38 @@
                                               }
                                             },
                                             {
+                                              "key": "carrier_mode",
+                                              "label": "Carrier mode",
+                                              "input": "select",
+                                              "options": [
+                                                {
+                                                  "value": "vlan",
+                                                  "label": "VLAN - one 802.1Q tag per member"
+                                                },
+                                                {
+                                                  "value": "direct",
+                                                  "label": "Direct - dial the carrier itself, untagged"
+                                                }
+                                              ],
+                                              "initial": "vlan"
+                                            },
+                                            {
+                                              "key": "mac_mode",
+                                              "label": "MAC mode",
+                                              "input": "select",
+                                              "options": [
+                                                {
+                                                  "value": "auto",
+                                                  "label": "auto - one derived MAC per member"
+                                                },
+                                                {
+                                                  "value": "inherit",
+                                                  "label": "inherit - every member keeps the carrier MAC"
+                                                }
+                                              ],
+                                              "initial": "auto"
+                                            },
+                                            {
                                               "key": "prefix",
                                               "label": "Prefix",
                                               "input": "text",
@@ -1444,7 +1483,7 @@
                                             },
                                             {
                                               "key": "vlans",
-                                              "label": "VLANs",
+                                              "label": "VLANs / slots",
                                               "input": "textarea",
                                               "placeholder": "101-150,200,0"
                                             },
@@ -1618,8 +1657,8 @@
                                               "lines": [
                                                 "Mode - Fixed for the life of the pool; delete and recreate to change it.",
                                                 "Pool id - 1-31 lowercase letters, digits or underscores. This is what you delete it by. Label - only for people.",
-                                                "Carrier - The physical uplink; the router lists what qualifies. Prefix - 1-4 characters, fixed after create; interface names derive from it: prefix fpt, VLAN 101 dials as fpt101 on pppoe-fpt101.",
-                                                "VLANs - Ranges and numbers, like 101-150,200. VLAN 0 means untagged, at most once. Username and Password - the one account every VLAN dials with.",
+                                                "Carrier - The physical uplink; the router lists what qualifies. Carrier mode - VLAN tags each member; Direct dials the carrier untagged. MAC mode - auto derives one MAC per member; inherit keeps the carrier MAC. Prefix - 1-4 characters, fixed after create; interface names derive from it: prefix fpt, member 101 dials as fpt101 on pppoe-fpt101.",
+                                                "VLANs / slots - Ranges and numbers, like 101-150,200. In VLAN mode, 0 means untagged, at most once. In Direct mode slots are 1-4094. Username and Password - the one account every member dials with.",
                                                 "Table base - Each member routes in table base + VLAN; the pool records its own base on the router.",
                                                 "Service name, Access concentrator, AC MAC - PPPoE discovery filters; empty means autodetect.",
                                                 "MTU - Empty uses the pppd default of 1492; above 1492 needs RFC 4638. LCP echo failures/interval - dead-peer detection; empty leaves pppd's defaults. IPv6, ISP DNS, DNS servers, Default route, Host-Uniq, Inactivity timeout, PADI attempts/timeout, Extra pppd options - the same options LuCI's PPPoE form carries, applied to every member.",
@@ -1677,6 +1716,22 @@
                                               }
                                             },
                                             {
+                                              "key": "carrier_mode",
+                                              "label": "Carrier mode",
+                                              "input": "select",
+                                              "options": [
+                                                {
+                                                  "value": "vlan",
+                                                  "label": "VLAN - one 802.1Q tag per member"
+                                                },
+                                                {
+                                                  "value": "direct",
+                                                  "label": "Direct - dial the carrier itself, untagged"
+                                                }
+                                              ],
+                                              "initial": "vlan"
+                                            },
+                                            {
                                               "key": "prefix",
                                               "label": "Prefix",
                                               "input": "text",
@@ -1689,11 +1744,11 @@
                                               "options": [
                                                 {
                                                   "value": "inherit",
-                                                  "label": "inherit - every VLAN keeps the carrier MAC"
+                                                  "label": "inherit - every member keeps the carrier MAC"
                                                 },
                                                 {
                                                   "value": "auto",
-                                                  "label": "auto - one derived MAC per VLAN"
+                                                  "label": "auto - one derived MAC per member"
                                                 }
                                               ],
                                               "initial": "inherit"
@@ -1868,9 +1923,9 @@
                                               "type": "note",
                                               "title": "What each field means",
                                               "lines": [
-                                                "Mode - Fixed for the life of the pool. Pool id, Label, Carrier, Prefix - as on the shared-account tab; the prefix is fixed after create.",
-                                                "MAC mode - inherit keeps the carrier's MAC on every VLAN; auto derives a stable per-VLAN MAC from the carrier MAC, the pool id and the VLAN.",
-                                                "Member list file / Members - One member per line: VLAN, username, password - separated by a comma, tab, semicolon, pipe or spaces; # starts a comment. The file wins over the pasted text.",
+                                                "Mode - Fixed for the life of the pool. Pool id, Label, Carrier, Carrier mode, Prefix - as on the shared-account tab; the prefix is fixed after create.",
+                                                "MAC mode - inherit keeps the carrier's MAC on every member; auto derives a stable per-member MAC (802.1Q device in VLAN mode, macvlan in Direct).",
+                                                "Member list file / Members - One member per line: VLAN or slot, username, password - separated by a comma, tab, semicolon, pipe or spaces; # starts a comment. The file wins over the pasted text. In Direct mode the first column is a slot 1-4094, not a VLAN tag.",
                                                 "Everything below the member list is the same set of options as the shared-account tab, applied to every member."
                                               ]
                                             }
@@ -2826,6 +2881,12 @@
                                             {
                                               "key": "pppoe",
                                               "label": "PPPoE support (ppp, ppp-mod-pppoe, kmod-pppoe)",
+                                              "input": "checkbox",
+                                              "initial": false
+                                            },
+                                            {
+                                              "key": "macvlan",
+                                              "label": "macvlan (kmod-macvlan) - per-slot MACs in Direct mode",
                                               "input": "checkbox",
                                               "initial": false
                                             },

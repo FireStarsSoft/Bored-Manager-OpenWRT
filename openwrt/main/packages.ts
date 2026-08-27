@@ -13,10 +13,10 @@
  * would take the firewall down rather than fix anything.
  */
 
-export type PackageGroupKey = 'pppoe' | 'ipfull' | 'dnsmasq'
+export type PackageGroupKey = 'pppoe' | 'macvlan' | 'ipfull' | 'dnsmasq'
 
 /** The probe field a group satisfies, so "still missing" is checked, not assumed. */
-export type PackageCapability = 'hasPppoe' | 'hasIpRule' | 'hasDnsmasq'
+export type PackageCapability = 'hasPppoe' | 'hasMacvlan' | 'hasIpRule' | 'hasDnsmasq'
 
 export interface PackageGroup {
   key: PackageGroupKey
@@ -26,6 +26,11 @@ export interface PackageGroup {
   /** What the module cannot do while the group is missing. */
   purpose: string
   capability: PackageCapability
+  /**
+   * When true the group is installable from the form but never listed as
+   * missing: a VLAN-only router without kmod-macvlan is not unfinished.
+   */
+  optional?: boolean
 }
 
 export const PACKAGE_GROUPS: readonly PackageGroup[] = [
@@ -38,6 +43,14 @@ export const PACKAGE_GROUPS: readonly PackageGroup[] = [
     packages: ['ppp', 'ppp-mod-pppoe', 'kmod-pppoe'],
     purpose: 'Dialing PPPoE sessions',
     capability: 'hasPppoe'
+  },
+  {
+    key: 'macvlan',
+    title: 'macvlan (per-slot MACs)',
+    packages: ['kmod-macvlan'],
+    purpose: 'Direct-mode pools that give each slot its own MAC',
+    capability: 'hasMacvlan',
+    optional: true
   },
   {
     key: 'ipfull',

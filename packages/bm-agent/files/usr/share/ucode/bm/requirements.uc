@@ -27,6 +27,7 @@ const APK_TIMEOUT = '300';
 // spells the same names and the check that holds the two together is review.
 const GROUPS = {
 	pppoe: [ 'ppp', 'ppp-mod-pppoe', 'kmod-pppoe' ],
+	macvlan: [ 'kmod-macvlan' ],
 	ipfull: [ 'ip-full' ],
 	dnsmasq: [ 'dnsmasq' ]
 };
@@ -39,6 +40,7 @@ const GROUPS = {
 // both stay failures.
 const FACTS_SCRIPT = 'if ls /usr/lib/pppd/*/*pppoe.so >/dev/null 2>&1; then echo plugin; fi; ' +
 	'if ls /lib/modules/*/pppoe.ko* >/dev/null 2>&1 || grep -qs pppoe /lib/modules/*/modules.builtin; then echo kmod; fi; ' +
+	'if ls /lib/modules/*/macvlan.ko* >/dev/null 2>&1 || grep -qs macvlan /lib/modules/*/modules.builtin; then echo macvlan; fi; ' +
 	'if command -v pppd >/dev/null 2>&1; then echo pppd; fi; ' +
 	'BM_T=$(ip -4 route show table 29999 2>&1); BM_TR=$?; ' +
 	'if ip -4 rule show >/dev/null 2>&1; then if [ $BM_TR -eq 0 ] || printf \'%s\' "$BM_T" | grep -qi \'fib table does not exist\'; then echo iprule; fi; fi; ' +
@@ -96,7 +98,7 @@ export function report() {
 
 	if (!seen) {
 		let unknown = [];
-		for (let id in [ 'pppoe', 'iprule', 'dnsmasq', 'fw4', 'signing', 'cabundle' ])
+		for (let id in [ 'pppoe', 'macvlan', 'iprule', 'dnsmasq', 'fw4', 'signing', 'cabundle' ])
 			push(unknown, row(id, id, null, 'this build could not ask the shell', null));
 		return { ok: true, asked: false, rows: unknown };
 	}
@@ -117,6 +119,13 @@ export function report() {
 			? 'pppd, the pppoe plugin and the kernel module are all present.'
 			: 'Missing: ' + join(', ', pppMissing) + '. Without them no pool session can dial.',
 		length(pppMissing) == 0 ? null : 'pppoe'));
+
+	push(rows, row('macvlan', 'macvlan (per-slot MACs on one carrier)',
+		seen.macvlan == true,
+		seen.macvlan
+			? 'The macvlan kernel module is present, so a direct-mode pool can give each slot its own MAC.'
+			: 'Not installed. Direct carrier mode with mac_mode auto rides one macvlan per slot; without this module those devices will not come up.',
+		seen.macvlan ? null : 'macvlan'));
 
 	push(rows, row('iprule', 'Policy routing (numeric tables)',
 		seen.iprule == true,

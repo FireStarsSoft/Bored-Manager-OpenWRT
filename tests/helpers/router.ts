@@ -112,6 +112,7 @@ export function routerProbeOutput(options: RouterProbeOptions = {}): string {
     '===PPP===',
     'plugin',
     'kmod',
+    'macvlan',
     '===PKG===',
     'apkdb',
     '===IDU===',

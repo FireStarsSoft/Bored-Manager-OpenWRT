@@ -709,8 +709,8 @@ msgstr "Tổng quan"
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:182
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:247
 #: packages/luci-app-bm/root/usr/share/luci/menu.d/luci-app-bm.json:admin/services/bm/pppoe
-msgid "PPPoE Pools"
-msgstr "Nhóm PPPoE"
+msgid "PPPoE Dialer"
+msgstr "PPPoE Dialer"
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:208
 msgid "PPPoE sessions up"
@@ -1684,3 +1684,54 @@ msgstr "Đã áp dụng và ghim dưới /etc/sysctl.d/ nên giữ nguyên qua k
 
 msgid "Persisted in %s. The guard's snapshots deliberately do not cover this file, so a restore never quietly shrinks a capacity fix. At a console: \"bmctl tune\"."
 msgstr "Lưu bền trong %s. Ảnh chụp của guard cố ý không bao phủ file này, nên một lần khôi phục không bao giờ âm thầm thu nhỏ một chỉnh sửa dung lượng. Tại console: \"bmctl tune\"."
+
+msgid "Shared account"
+msgstr "Tài khoản dùng chung"
+
+msgid "One account per VLAN"
+msgstr "Một tài khoản mỗi VLAN"
+
+msgid "VLAN - one 802.1Q tag per member"
+msgstr "VLAN - mỗi thành viên một tag 802.1Q"
+
+msgid "Direct - dial the carrier itself, untagged"
+msgstr "Trực tiếp - quay số thẳng trên cổng, không tag"
+
+msgid "Carrier mode"
+msgstr "Chế độ cổng"
+
+msgid "Mode"
+msgstr "Chế độ"
+
+msgid "Pool id"
+msgstr "Mã pool"
+
+msgid "Members"
+msgstr "Thành viên"
+
+msgid "VLANs"
+msgstr "VLAN"
+
+msgid "Slots"
+msgstr "Slot"
+
+msgid "direct"
+msgstr "trực tiếp"
+
+msgid "VLAN"
+msgstr "VLAN"
+
+msgid "Slot"
+msgstr "Slot"
+
+msgid "per-slot accounts"
+msgstr "tài khoản theo slot"
+
+msgid "per-slot MACs"
+msgstr "MAC theo slot"
+
+msgid "one account per slot"
+msgstr "một tài khoản mỗi slot"
+
+msgid "Direct mode numbers its sessions 1-4094. There is no VLAN 0."
+msgstr "Chế độ trực tiếp đánh số phiên 1-4094. Không có VLAN 0."

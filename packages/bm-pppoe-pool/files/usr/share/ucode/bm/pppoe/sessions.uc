@@ -24,7 +24,7 @@
 
 import { debug, err, notice } from 'bm.log';
 
-import { deviceFor, macFor, netdevFor, sectionFor, tableFor, vlanOfSection } from 'bm.pppoe.config';
+import { macFor, memberDeviceFor, netdevFor, sectionFor, tableFor, vlanOfSection } from 'bm.pppoe.config';
 
 /** Everything known about one pool's members. */
 export function create(one) {
@@ -293,7 +293,7 @@ export function rows(st, scope, limit, rates, now) {
 			pool: one.id,
 			section: section,
 			vlan: member.vlan,
-			device: deviceFor(one.carrier, member.vlan),
+			device: memberDeviceFor(one, member.vlan),
 			username: one.mode == 'single' ? member.username : one.username,
 			mac: (one.macMode == 'auto' && member.vlan >= 1 && length(st.carrierMac))
 				? macFor(st.carrierMac, one.id, member.vlan)

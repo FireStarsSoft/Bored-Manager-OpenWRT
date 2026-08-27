@@ -45,7 +45,7 @@ of it still has a working dashboard:
 |---|---|---|
 | Dashboard, interfaces, history charts | nothing beyond the base system above | - |
 | DHCP device table, and device discovery generally | dnsmasq | Leases are where devices come from, so the table stays empty. |
-| Managed PPPoE pools | fw4 + nft, plus `ppp`, `ppp-mod-pppoe` and kernel PPPoE, plus the router packages with `bm-pppoe-pool` 2.x | The create check refuses and names the piece that is missing. Pools are owned end to end by the router's own daemon; there is no SSH path for them. |
+| PPPoE Dialer | fw4 + nft, plus `ppp`, `ppp-mod-pppoe` and kernel PPPoE, plus the router packages with `bm-pppoe-pool` 2.x (`kmod-macvlan` only for Direct + auto MAC) | The create check refuses and names the piece that is missing. Pools are owned end to end by the router's own daemon; there is no SSH path for them. |
 | WAN binding | fw4 + nft, `ip rule` support, dnsmasq | The create check refuses; each of the three has its own reason. |
 | PPPoE dial errors | `logread` | A failed session still shows as failed, with no reason for it. |
 
@@ -909,6 +909,28 @@ Items 50 to 53 are what module 3.1.0 and packages 2.1.0 changed together.
     the two presets. Remove `dnsmasq`, reload the page: the row goes red, the
     install button puts it back, and `bmctl requirements` agrees at a console
     throughout.
+
+Items 54 to 57 are what module 3.2.0 and packages 2.2.0 changed together.
+
+54. **Both account modes and both carrier modes.** On LuCI PPPoE Dialer and
+    on the app Automation tab: Shared account and One account per VLAN both
+    show. Carrier mode VLAN / Direct and MAC mode auto / inherit show on
+    both create forms. A router still on packages 2.1.x must refuse Direct
+    with a sentence that names the update, and still create a VLAN pool.
+55. **Maintenance does not throw.** Open the LuCI Maintenance tab on a
+    router with no snapshots and no pending update. The page renders. The
+    browser console has no `TypeError`.
+56. **Direct inherit and Direct auto, small.** Create a 2-slot Direct +
+    inherit pool on the live carrier. `uci show network` must show both
+    interfaces on the bare device, each with its own `host_uniq`, and no
+    macvlan device section. Delete it. Install `kmod-macvlan`, create a
+    2-slot Direct + auto pool: each member rides `ethXmN` with a derived
+    MAC. If the ISP answers untagged PPPoE, at least one session must leave
+    Discovery. Delete both.
+57. **The stale LuCI face is gone.** After apk reports 2.2.0, log out and
+    hard-refresh. The menu title is PPPoE Dialer, not an older label, and
+    the editor matches the sources in this tree. A same-number reinstall of
+    2.1.0 must not be treated as an update.
 
 ## Safety and limitations
 

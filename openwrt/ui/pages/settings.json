@@ -189,6 +189,12 @@
                           "initial": true
                         },
                         {
+                          "key": "macvlan",
+                          "label": "macvlan (kmod-macvlan) - per-slot MACs in Direct mode",
+                          "input": "checkbox",
+                          "initial": false
+                        },
+                        {
                           "key": "ipfull",
                           "label": "Policy routing (ip-full)",
                           "input": "checkbox",
@@ -264,7 +270,8 @@
                       "lines": [
                         "These are OpenWrt's own packages, fetched from the router's package feed. The Bored Manager packages - the agent and its daemons - are a different thing, installed from the Router packages tab beside this one.",
                         "Only the packages listed here can ever be installed from this form, and only with the package manager this firmware actually ships. Nothing you type reaches a router command line.",
-                        "PPPoE support - ppp, ppp-mod-pppoe and kmod-pppoe. Required before the PPPoE Dialer can create a batch. All three go in together because the probe reads files on disk, not a package list, so it cannot say which one is missing.",
+                        "PPPoE support - ppp, ppp-mod-pppoe and kmod-pppoe. Required before the PPPoE Dialer can create a pool. All three go in together because the probe reads files on disk, not a package list, so it cannot say which one is missing.",
+                        "macvlan - kmod-macvlan. Only needed for a Direct-mode pool that gives each slot its own MAC on one carrier. VLAN mode and Direct with inherit do not use it.",
                         "Policy routing - ip-full. Required by WAN Binding. A stock image symlinks /sbin/ip at BusyBox, whose ip answers 'ip rule show' but refuses a numeric routing table, and every rule and route binding writes names one.",
                         "DHCP leases - dnsmasq. Without it there are no DHCP leases to read, so the device table stays empty and binding has nobody to assign.",
                         "Run the install again - off, a group the router already reports is skipped and a form with nothing missing is refused. On, every ticked group is installed again with the same command, which restores a package that has gone missing and leaves alone anything apk still considers installed.",
@@ -947,7 +954,7 @@
                     "Every field opens filled in with the value this router is using right now, so each form doubles as the list of rules in force. Saving one group leaves the others exactly as they are.",
                     "A field left empty means keep the current value. The placeholder still names the documented default; to put one rule back, type that default, and to put all of them back use Reset every rule.",
                     "Changing the rule-priority bases while binding instances exist is refused: the old and new ownership ranges cannot safely overlap.",
-                    "PPPoE pools carry their own numbering and firewall on the router - each pool records its table base and zone when it is created - so nothing here describes them. The pool daemon's own settings are on Automation, PPPoE Dialer."
+                    "PPPoE Dialer pools carry their own numbering and firewall on the router - each pool records its table base and zone when it is created - so nothing here describes them. The pool daemon's own settings are on Automation, PPPoE Dialer."
                   ]
                 }
               ]

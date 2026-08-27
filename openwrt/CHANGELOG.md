@@ -8,6 +8,35 @@ From 3.0.0, PPPoE pools also need the router packages at **2.x** - the rest of
 the module does not. Which release a module build installs is pinned in
 `main/agent/manifest.ts`.
 
+## 3.2.0
+
+Needs the same Bored Manager **0.4.1** and OpenWrt **25.12 or newer**. Router
+packages **2.2.0** for Direct carrier mode; a router still on 2.1.x keeps
+working over the VLAN path and the create form refuses Direct until the
+packages are updated.
+
+### Direct carrier mode, same two account modes
+
+Create a pool with Carrier mode VLAN (802.1Q per member) or Direct (every
+member dials the carrier itself, untagged). MAC mode auto or inherit is
+available on both. Direct needs `bm-pppoe-pool` API 3; the module refuses
+it locally on an older daemon and never sends the key.
+
+`kmod-macvlan` is installable from Module settings but optional: a VLAN-only
+router without it is not unfinished. The readiness card warns, it does not
+turn the router red.
+
+### Naming
+
+Every user-facing label is **PPPoE Dialer**. Package ids stay `bm-pppoe-pool`,
+`bm.pppoe`, `bm_pppoe`.
+
+### Pin
+
+`main/agent/manifest.ts` still pins **2.1.0** until `pkg-v2.2.0` is published
+and `npm run pin:packages` is run against those apk hashes. Installing 2.2.0
+from a local build or a release asset still replaces the stale LuCI files.
+
 ## 3.1.0
 
 Needs the same Bored Manager **0.4.1** and OpenWrt **25.12 or newer**. Router

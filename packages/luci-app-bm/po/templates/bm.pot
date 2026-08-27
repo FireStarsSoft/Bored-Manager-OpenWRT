@@ -703,7 +703,7 @@ msgstr ""
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:182
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:247
 #: packages/luci-app-bm/root/usr/share/luci/menu.d/luci-app-bm.json:admin/services/bm/pppoe
-msgid "PPPoE Pools"
+msgid "PPPoE Dialer"
 msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:208
@@ -1677,4 +1677,55 @@ msgid "Applied, and pinned under /etc/sysctl.d/ so it survives a reboot."
 msgstr ""
 
 msgid "Persisted in %s. The guard's snapshots deliberately do not cover this file, so a restore never quietly shrinks a capacity fix. At a console: \"bmctl tune\"."
+msgstr ""
+
+msgid "Shared account"
+msgstr ""
+
+msgid "One account per VLAN"
+msgstr ""
+
+msgid "VLAN - one 802.1Q tag per member"
+msgstr ""
+
+msgid "Direct - dial the carrier itself, untagged"
+msgstr ""
+
+msgid "Carrier mode"
+msgstr ""
+
+msgid "Mode"
+msgstr ""
+
+msgid "Pool id"
+msgstr ""
+
+msgid "Members"
+msgstr ""
+
+msgid "VLANs"
+msgstr ""
+
+msgid "Slots"
+msgstr ""
+
+msgid "direct"
+msgstr ""
+
+msgid "VLAN"
+msgstr ""
+
+msgid "Slot"
+msgstr ""
+
+msgid "per-slot accounts"
+msgstr ""
+
+msgid "per-slot MACs"
+msgstr ""
+
+msgid "one account per slot"
+msgstr ""
+
+msgid "Direct mode numbers its sessions 1-4094. There is no VLAN 0."
 msgstr ""

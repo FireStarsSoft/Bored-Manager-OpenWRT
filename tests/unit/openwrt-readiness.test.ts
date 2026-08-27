@@ -82,7 +82,7 @@ function probeOutput(options: ProbeOptions = {}): string {
     '===TOOLS===',
     ...(options.tools ?? ROUTER_TOOLS),
     '===PPP===',
-    ...(options.ppp ?? ['plugin', 'kmod']),
+    ...(options.ppp ?? ['plugin', 'kmod', 'macvlan']),
     '===PKG===',
     ...(options.pkg ?? ['apkdb']),
     '===IDU===',
@@ -116,7 +116,7 @@ const facts = (patch: Partial<ProbeFacts> = {}): ProbeFacts => ({
   release: '25.12.0',
   board: 'Test Router',
   tools: ['ubus', 'uci', 'ip', 'netifd', 'fw4', 'nft', 'logread', 'pppd', 'dnsmasq', 'apk'],
-  ppp: { plugin: true, kmod: true },
+  ppp: { plugin: true, kmod: true, macvlan: true },
   pkgDb: { opkg: false, apk: true },
   uid: 0,
   overlayFreeKb: 8_192,
@@ -431,6 +431,16 @@ describe('openwrt readiness: five states instead of one sentence', () => {
     expect(caps.missingPackages.every((entry) => entry.group === 'pppoe')).toBe(true)
   })
 
+  it('does not treat a missing macvlan as unfinished', () => {
+    const caps = buildReadiness(facts({ ppp: { plugin: true, kmod: true, macvlan: false } }))
+
+    expect(caps.ready).toBe(true)
+    expect(caps.setupNeeded).toBe(false)
+    expect(caps.missingPackages).toEqual([])
+    expect(check(caps, 'macvlan').status).toBe('warn')
+    expect(check(caps, 'pppoe').status).toBe('ok')
+  })
+
   it('does not offer an install it cannot perform', () => {
     const noManager = buildReadiness(
       facts({ ppp: { plugin: false, kmod: false }, pkgDb: { opkg: false, apk: false }, tools: [
@@ -507,7 +517,7 @@ describe('openwrt readiness cards', () => {
     ])
     const pppoe = caps.cards[2]
     expect(pppoe.status).toBe('bad')
-    expect(pppoe.subtitle).toBe('0/1 ok')
+    expect(pppoe.subtitle).toBe('0/2 ok')
     expect(pppoe.note).toContain('kernel PPPoE support')
     // The worst check decides the card, not the count.
     expect(caps.cards[1].status).toBe('warn')

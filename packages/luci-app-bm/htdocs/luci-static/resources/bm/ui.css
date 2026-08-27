@@ -246,3 +246,5 @@
 
 .bm-mode--multi  { color: #fff; background: #7a5195; border-color: #7a5195; }
 .bm-mode--single { color: #fff; background: #336699; border-color: #336699; }
+.bm-mode--vlan   { color: #fff; background: #3d6b4f; border-color: #3d6b4f; }
+.bm-mode--direct { color: #fff; background: #8a5a2b; border-color: #8a5a2b; }

@@ -10,6 +10,7 @@ export {
   AGENT_API_GUARD,
   AGENT_API_UPDATE,
   PPPOE_POOL_API,
+  PPPOE_DIRECT_API,
   emptyAgentFacts,
   emptyFacts,
   featureApi,

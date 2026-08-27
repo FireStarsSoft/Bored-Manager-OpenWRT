@@ -84,7 +84,7 @@ export function buildProbeCommand(rulePrefBase: number): string {
     // ppp-mod-pppoe and kmod-pppoe installed all along. The artefacts are the
     // same under either manager - and they also cover a pppoe driver built into
     // the kernel, which no package list mentions at all.
-    `echo '===PPP==='; if ls /usr/lib/pppd/*/*pppoe.so >/dev/null 2>&1; then echo plugin; fi; if ls /lib/modules/*/pppoe.ko* >/dev/null 2>&1 || grep -qs pppoe /lib/modules/*/modules.builtin; then echo kmod; fi`,
+    `echo '===PPP==='; if ls /usr/lib/pppd/*/*pppoe.so >/dev/null 2>&1; then echo plugin; fi; if ls /lib/modules/*/pppoe.ko* >/dev/null 2>&1 || grep -qs pppoe /lib/modules/*/modules.builtin; then echo kmod; fi; if ls /lib/modules/*/macvlan.ko* >/dev/null 2>&1 || grep -qs macvlan /lib/modules/*/modules.builtin; then echo macvlan; fi`,
     // Which manager can install, decided by the databases on disk rather than by
     // the binary: an apk router keeps an `opkg` compatibility shim in PATH.
     //
@@ -470,7 +470,7 @@ export async function probeOpenWrt(
       release: release.DISTRIB_RELEASE || board.version,
       board: board.model || release.DISTRIB_TARGET || '',
       tools: tools.filter((name) => name.length > 0),
-      ppp: { plugin: ppp.has('plugin'), kmod: ppp.has('kmod') },
+      ppp: { plugin: ppp.has('plugin'), kmod: ppp.has('kmod'), macvlan: ppp.has('macvlan') },
       pkgDb: { opkg: pkg.has('opkgdb'), apk: pkg.has('apkdb') || pkg.has('apkworld') },
       uid: Number.isFinite(uid) ? uid : -1,
       overlayFreeKb: freeKbFromDf(sections.get('SPACE') ?? ''),

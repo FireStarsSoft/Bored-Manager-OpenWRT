@@ -54,7 +54,7 @@ function declare(object, method, params) {
  * so no part of it is ever a command line on the router.
  */
 const POOL_SPEC = {
-	id: '', mode: '', label: '', prefix: '', carrier: '', mac_mode: '',
+	id: '', mode: '', label: '', prefix: '', carrier: '', carrier_mode: '', mac_mode: '',
 	username: '', password: '', members: [], table_base: 0,
 	service: '', ac: '', ac_mac: '', mtu: 0, keepalive: '', ipv6: '',
 	peerdns: false, dns: [], defaultroute: true, host_uniq: '', demand: 0,

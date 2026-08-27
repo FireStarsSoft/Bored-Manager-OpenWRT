@@ -181,6 +181,7 @@ export interface OpenWrtCapabilities {
   hasPppd: boolean
   hasFw4: boolean
   hasPppoe: boolean
+  hasMacvlan: boolean
   hasDnsmasq: boolean
   /**
    * This router's `ip` accepts a numeric routing table, which is the only
@@ -263,7 +264,7 @@ export interface ProbeFacts {
   release: string
   board: string
   tools: readonly string[]
-  ppp: { plugin: boolean; kmod: boolean }
+  ppp: { plugin: boolean; kmod: boolean; macvlan?: boolean }
   /**
    * Both databases, although only apk is supported: `opkg` present and `apk`
    * absent is a router this module can name the release of and explain itself
@@ -357,6 +358,9 @@ export function featureApi(facts: AgentFacts, capability: string): number {
  */
 export const PPPOE_POOL_API = 2
 
+/** The contract version that added `carrier_mode` (vlan | direct). */
+export const PPPOE_DIRECT_API = 3
+
 export function hasPoolDaemon(agent: AgentCapability): boolean {
   return (
     agent.usable &&
@@ -388,7 +392,7 @@ export function emptyFacts(): ProbeFacts {
     release: '',
     board: '',
     tools: [],
-    ppp: { plugin: false, kmod: false },
+    ppp: { plugin: false, kmod: false, macvlan: false },
     pkgDb: { opkg: false, apk: false },
     uid: -1,
     overlayFreeKb: -1,

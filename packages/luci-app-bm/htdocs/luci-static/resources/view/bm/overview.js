@@ -169,7 +169,7 @@ return view.extend({
 							binding
 								? _('bm-wanbind is installed but is not answering. Check "logread -e bm-wanbind".')
 								: _('bm-wanbind is not installed. Without it, binding is done by the app over SSH: it works, and a client waits up to one sweep for its WAN instead of a few milliseconds.')),
-						daemonCard(_('PPPoE Pools'), _('Many sessions over one carrier'),
+						daemonCard(_('PPPoE Dialer'), _('Many sessions over one carrier'),
 							pppoe ? pool : null, poolStats,
 							pppoe
 								? _('bm-pppoe-pool is installed but is not answering. Check "logread -e bm-pppoe".')

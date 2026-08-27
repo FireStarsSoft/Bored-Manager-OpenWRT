@@ -89,7 +89,7 @@ export function hasFeature(capability: AgentCapability, feature: AgentFeature): 
 export function missingFeature(feature: AgentFeature): string {
   return feature === 'binding'
     ? 'This router has the Bored Manager agent but not bm-wanbind, so binding is being done over SSH. Install it from Module settings, Router packages.'
-    : 'This router has the Bored Manager agent but not bm-pppoe-pool, so PPPoE pools are being created over SSH. Install it from Module settings, Router packages.'
+    : 'This router has the Bored Manager agent but not bm-pppoe-pool, so PPPoE Dialer pools are being created over SSH. Install it from Module settings, Router packages.'
 }
 
 /**

@@ -109,6 +109,19 @@ describe('each automation owns its own configuration', () => {
     expect(methods.has('bindingCheck')).toBe(false)
   })
 
+  it('offers carrier mode on both create forms', () => {
+    const keys = nodes(automation())
+      .filter((node) => node['type'] === 'checkForm' && node['checkMethod'] === 'poolCreateCheck')
+      .map((form) =>
+        ((form['fields'] as Node[]) ?? []).map((field) => String(field['key']))
+      )
+
+    expect(keys.length).toBe(2)
+    expect(keys.every((list) => list.includes('carrier_mode') && list.includes('mac_mode'))).toBe(
+      true
+    )
+  })
+
   it('creates a binding instance from the WAN Binding tab', () => {
     const methods = methodsIn(automation(), 'binding')
     expect(methods.has('bindingCheck')).toBe(true)

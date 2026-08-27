@@ -29,11 +29,13 @@ import * as legacy from 'bm.pppoe.legacy';
 import * as sections from 'bm.pppoe.sections';
 import * as sessions from 'bm.pppoe.sessions';
 
-export const RELEASE = '2.1.0';
+export const RELEASE = '2.2.0';
 
 /** The ubus contract version, separate from the release. 2 is the pool-of-
- * members model; a module built for 1 refuses it and says to update. */
-export const API_VERSION = 2;
+ * members model; 3 adds `carrier_mode` (vlan | direct) to the spec. A module
+ * built for 1 refuses it and says to update; one built for 2 keeps working -
+ * it just never sends the new key. */
+export const API_VERSION = 3;
 
 const STARTED = time();
 
@@ -55,7 +57,7 @@ const ROW_LIMIT = 500;
 const SYS_NET = '/sys/cl' + 'ass/net';
 
 const SPEC_ARGS = {
-	mode: '', label: '', prefix: '', carrier: '', mac_mode: '',
+	mode: '', label: '', prefix: '', carrier: '', carrier_mode: '', mac_mode: '',
 	username: '', password: '', members: [], table_base: 0,
 	service: '', ac: '', ac_mac: '', mtu: 0, keepalive: '', ipv6: '',
 	peerdns: false, dns: [], defaultroute: true, host_uniq: '', demand: 0,
@@ -276,6 +278,16 @@ function carrierMacOf(name, devices) {
 		return lc(trim(raw));
 
 	return '';
+};
+
+/**
+ * Whether the macvlan kernel module is loaded. /sys/module/macvlan appears
+ * when it is (kmod-macvlan loads it at boot). Only direct + mac_mode auto
+ * cares, and the gate treats a missing module as a warning, never a refusal -
+ * a false "missing" on an unusual kernel must not block a pool.
+ */
+function macvlanLoaded() {
+	return type(lsdir('/sys/module/macvlan')) == 'array';
 };
 
 /** Every interface section name in /etc/config/network, or null. */
@@ -623,7 +635,8 @@ function checkRecord(record, creating, previous) {
 		devices: deviceInfo(),
 		sections: networkSectionNames(),
 		liveUp: liveUpOf(record.id),
-		others: others
+		others: others,
+		macvlanReady: macvlanLoaded()
 	});
 };
 
@@ -972,9 +985,22 @@ export function carriersList() {
 	if (devices === null)
 		return { ok: false, reason: 'neither netifd nor ' + SYS_NET + ' would say what devices exist', carriers: [] };
 
+	// Devices this package derives - tagged VLANs and per-slot macvlans - are
+	// children of a carrier, never carriers themselves. Tagged names carry a
+	// dot and are refused by name already; the macvlans have to be looked up.
+	// The bare carrier a direct pool dials over stays offered, of course.
+	let derived = {};
+	for (let one in cfg.pools()) {
+		for (let member in one.members) {
+			let child = cfg.memberDeviceFor(one, member.vlan);
+			if (child != one.carrier)
+				derived[child] = true;
+		}
+	}
+
 	let out = [];
 	for (let name in devices) {
-		if (cfg.carrierRefusal(name))
+		if (exists(derived, name) || cfg.carrierRefusal(name))
 			continue;
 
 		push(out, { name: name, up: devices[name].up, macaddr: devices[name].macaddr });

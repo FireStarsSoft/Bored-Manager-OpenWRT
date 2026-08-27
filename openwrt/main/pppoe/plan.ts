@@ -20,9 +20,15 @@ import {
   type ModuleCheckReport
 } from '@shared/check'
 import { poolCheck, type PoolSpec, type PoolSpecMember } from '../agent'
+import { featureApi, PPPOE_DIRECT_API } from '../probe'
 import { textField } from '../util'
 import { agentDeps, type PppoeRuntime } from './runtime'
 import { asRecord } from './parse'
+
+function poolApi(runtime: PppoeRuntime): number {
+  const capability = runtime.agent?.()
+  return capability ? featureApi(capability, 'pppoe') : 0
+}
 
 export const POOL_ID = /^[a-z][a-z0-9_]{0,30}$/
 
@@ -257,7 +263,8 @@ function memberKeys(
   values: Record<string, unknown>,
   mode: 'multi' | 'single',
   spec: PoolSpec,
-  findings: ModuleCheckFinding[]
+  findings: ModuleCheckFinding[],
+  carrierMode: 'vlan' | 'direct'
 ): void {
   if (mode === 'multi') {
     if (!has(values, 'vlans')) return
@@ -265,8 +272,16 @@ function memberKeys(
     if (parsed.errors.length) {
       findings.push({
         level: 'error',
-        label: `${parsed.errors.length} VLAN entr${parsed.errors.length === 1 ? 'y' : 'ies'} cannot be read`,
+        label: `${parsed.errors.length} ${carrierMode === 'direct' ? 'slot' : 'VLAN'} entr${parsed.errors.length === 1 ? 'y' : 'ies'} cannot be read`,
         detail: parsed.errors.slice(0, SHOWN_ERRORS).join('; ')
+      })
+      return
+    }
+    if (carrierMode === 'direct' && parsed.vlans.some((vlan) => vlan < 1)) {
+      findings.push({
+        level: 'error',
+        label: 'Direct mode numbers its sessions 1-4094',
+        detail: 'There is no VLAN 0: every member dials the carrier itself.'
       })
       return
     }
@@ -284,6 +299,14 @@ function memberKeys(
       level: 'error',
       label: `${parsed.errors.length} member line(s) cannot be read`,
       detail: parsed.errors.slice(0, SHOWN_ERRORS).join('; ')
+    })
+    return
+  }
+  if (carrierMode === 'direct' && parsed.members.some((member) => member.vlan < 1)) {
+    findings.push({
+      level: 'error',
+      label: 'Direct mode numbers its sessions 1-4094',
+      detail: 'There is no VLAN 0: every member dials the carrier itself.'
     })
     return
   }
@@ -391,23 +414,38 @@ export async function checkPool(runtime: PppoeRuntime, raw: unknown): Promise<Mo
   if (carrier) spec.carrier = carrier
 
   if (mode === 'multi') {
-    spec.mac_mode = 'auto'
     spec.username = textField(values, 'username')
     const password = typeof values.password === 'string' ? values.password : ''
     if (password) spec.password = password
   }
 
+  const carrierMode = textField(values, 'carrier_mode') === 'direct' ? 'direct' : 'vlan'
+  const api = poolApi(runtime)
+  if (carrierMode === 'direct' && api < PPPOE_DIRECT_API) {
+    findings.push({
+      level: 'error',
+      label: 'Direct carrier mode needs bm-pppoe-pool 2.2.0 or newer',
+      detail: 'Update the router packages from Router packages, in Module settings.'
+    })
+  } else if (api >= PPPOE_DIRECT_API) {
+    spec.carrier_mode = carrierMode
+  }
+
   const base = numberField(values, 'table_base', 'Table base', 1, 65_535, findings)
   spec.table_base = base ?? runtime.config.effectiveRules().tableBase
 
-  memberKeys(values, mode, spec, findings)
+  memberKeys(values, mode, spec, findings, carrierMode)
   if (!spec.members?.length) {
     findings.push({
       level: 'error',
-      label: mode === 'multi' ? 'List at least one VLAN' : 'List at least one member line',
+      label: mode === 'multi'
+        ? (carrierMode === 'direct' ? 'List at least one slot' : 'List at least one VLAN')
+        : 'List at least one member line',
       detail:
         mode === 'multi'
-          ? 'Ranges and numbers: 101-150,200. VLAN 0 means untagged, at most once.'
+          ? (carrierMode === 'direct'
+            ? 'Slot numbers 1-4094: 1-32,40. There is no VLAN 0.'
+            : 'Ranges and numbers: 101-150,200. VLAN 0 means untagged, at most once.')
           : 'One per line: VLAN, username, password.'
     })
   }
@@ -453,7 +491,20 @@ export async function checkPoolEdit(
   const password = typeof values.password === 'string' ? values.password : ''
   if (password) spec.password = password
 
-  memberKeys(values, pool.mode, spec, findings)
+  const carrierMode = textField(values, 'carrier_mode') === 'direct'
+    ? 'direct'
+    : pool.carrier_mode === 'direct'
+      ? 'direct'
+      : 'vlan'
+  if (has(values, 'carrier_mode') && textField(values, 'carrier_mode') === 'direct' && poolApi(runtime) < PPPOE_DIRECT_API) {
+    findings.push({
+      level: 'error',
+      label: 'Direct carrier mode needs bm-pppoe-pool 2.2.0 or newer',
+      detail: 'Update the router packages from Router packages, in Module settings.'
+    })
+  }
+
+  memberKeys(values, pool.mode, spec, findings, carrierMode)
   optionalKeys(values, spec, findings)
 
   if (hasBlockingFinding(findings)) return { ok: false, findings }

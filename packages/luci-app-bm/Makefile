@@ -18,7 +18,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-bm
-PKG_VERSION:=2.1.0
+PKG_VERSION:=2.2.0
 PKG_RELEASE:=1
 
 # luci.mk would otherwise derive this from the last commit that touched po/,
@@ -45,8 +45,8 @@ LUCI_PKGARCH:=all
 define Package/luci-app-bm/description
   The Bored Manager pages, served by the router itself.
 
-  Five tabs under Services: an overview of the three daemons, the PPPoE pools,
-  the one-to-one WAN bindings, the configuration snapshots, and the updater.
+  Four tabs under Services: an overview of the three daemons, the PPPoE Dialer,
+  the one-to-one WAN bindings, and Maintenance (snapshots, updates, scaling).
   They read the same ubus API the app drives, so what they show is what the
   router thinks rather than a second opinion assembled somewhere else.
 

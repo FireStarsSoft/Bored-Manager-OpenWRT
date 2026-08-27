@@ -1,9 +1,10 @@
 // The network reconciler: /etc/config/network, made to match the record.
 //
 // Given a pool record, there is exactly one set of sections the router should
-// have: one `config device` per tagged VLAN and one `config interface` per
-// member, every option derived by config.uc's rules. This file computes that
-// set, compares it with what is there, and writes only the difference - so a
+// have: one `config device` per tagged VLAN (or per macvlan slot, when the
+// pool runs direct with derived MACs) and one `config interface` per member,
+// every option derived by config.uc's rules. This file computes that set,
+// compares it with what is there, and writes only the difference - so a
 // create, an edit and a repair are all the same operation, and running it
 // twice writes nothing the second time.
 //
@@ -29,7 +30,9 @@ import { err, notice } from 'bm.log';
 import {
 	deviceFor,
 	deviceSection,
+	hostUniqFor,
 	macFor,
+	memberDeviceFor,
 	safeValue,
 	sectionFor,
 	tableFor,
@@ -79,7 +82,7 @@ function same(current, wanted) {
 function interfaceOptions(one, member) {
 	let out = {
 		proto: 'pppoe',
-		device: deviceFor(one.carrier, member.vlan),
+		device: memberDeviceFor(one, member.vlan),
 		username: one.mode == 'single' ? member.username : one.username,
 		password: one.mode == 'single' ? member.password : one.password,
 		ipv6: one.ipv6,
@@ -102,7 +105,14 @@ function interfaceOptions(one, member) {
 		out.ac = one.ac;
 	if (length(one.acMac))
 		out.ac_mac = one.acMac;
-	if (length(one.hostUniq))
+
+	// Direct mode always writes a Host-Uniq, derived per slot: the sessions
+	// may share one MAC on one wire, and the tag is what lets each pppd pick
+	// its own PADO out of the broadcast replies. A user-set value becomes the
+	// base; VLAN mode passes the value through untouched, as before.
+	if (one.carrierMode == 'direct')
+		out.host_uniq = hostUniqFor(one.hostUniq, one.id, member.vlan);
+	else if (length(one.hostUniq))
 		out.host_uniq = one.hostUniq;
 	if (one.demand)
 		out.demand = sprintf('%d', one.demand);
@@ -127,7 +137,26 @@ export function desired(one, carrierMac) {
 	let out = { devices: {}, interfaces: {} };
 
 	for (let member in one.members) {
-		if (member.vlan >= 1) {
+		if (one.carrierMode == 'direct') {
+			// One macvlan per slot when the pool derives MACs; the bare
+			// carrier otherwise, which needs no device section at all. No
+			// `mode` option: the kernel default (vepa) is fine for a device
+			// that only ever talks upstream, and fewer options is fewer
+			// spellings to reconcile.
+			if (one.macMode == 'auto') {
+				let device = {
+					type: 'macvlan',
+					ifname: one.carrier,
+					name: memberDeviceFor(one, member.vlan)
+				};
+
+				if (length(text(carrierMac)))
+					device.macaddr = macFor(carrierMac, one.id, member.vlan);
+
+				out.devices[deviceSection(one.id, member.vlan)] = device;
+			}
+		}
+		else if (member.vlan >= 1) {
 			let device = {
 				type: '8021q',
 				ifname: one.carrier,
