@@ -329,18 +329,22 @@ check('the foreign section outlives everything', uci.get('network', 'wan6', 'pro
 // After the VLAN pools are gone, so they cannot collide on a prefix or a
 // zone membership. inherit shares the carrier and derives Host-Uniq; auto
 // writes one macvlan per slot.
-let inheritDirect = pppoe.poolAdd({
+let inheritDirectSpec = {
 	id: 'dinh', mode: 'multi', prefix: 'din', carrier: 'eth1',
 	carrier_mode: 'direct', mac_mode: 'inherit',
 	username: 'u@isp', password: 'pw', table_base: 40000, zone: 'bmwanpool',
 	members: [ { vlan: 1 }, { vlan: 2 } ]
-});
+};
+let inheritDirectCheck = pppoe.poolCheck(inheritDirectSpec);
+check('direct inherit check ok', inheritDirectCheck.ok, true);
+check('direct inherit warns about the shared MAC', hasFinding(inheritDirectCheck, 'warning', 'Every session shares the carrier MAC'), true);
+
+let inheritDirect = pppoe.poolAdd(inheritDirectSpec);
 check('direct inherit create ok', inheritDirect.ok, true);
 check('direct inherit dials the bare carrier', uci.get('network', 'din1', 'device'), 'eth1');
 check('direct inherit writes no device section', uci.get('network', cfg.deviceSection('dinh', 1)), null);
 check('direct inherit writes a derived Host-Uniq', uci.get('network', 'din1', 'host_uniq'), cfg.hostUniqFor('', 'dinh', 1));
 check('direct inherit second slot has its own Host-Uniq', uci.get('network', 'din2', 'host_uniq'), cfg.hostUniqFor('', 'dinh', 2));
-check('direct inherit warns about the shared MAC', hasFinding(inheritDirect, 'warning', 'Every session shares the carrier MAC'), true);
 
 let slotZero = pppoe.poolCheck({
 	id: 'dir9', mode: 'multi', prefix: 'dxz', carrier: 'eth1',
@@ -351,12 +355,17 @@ check('direct refuses slot 0', hasFinding(slotZero, 'error', 'A slot has to be 1
 
 pppoe.poolDelete({ id: 'dinh' });
 
-let autoDirect = pppoe.poolAdd({
+let autoDirectSpec = {
 	id: 'daut', mode: 'multi', prefix: 'dau', carrier: 'eth1',
 	carrier_mode: 'direct', mac_mode: 'auto',
 	username: 'u@isp', password: 'pw', table_base: 41000, zone: 'bmwanpool',
 	members: [ { vlan: 7 } ]
-});
+};
+let autoDirectCheck = pppoe.poolCheck(autoDirectSpec);
+check('direct auto check ok', autoDirectCheck.ok, true);
+check('direct auto notes the macvlan', hasFinding(autoDirectCheck, 'info', 'One macvlan and one derived MAC per slot'), true);
+
+let autoDirect = pppoe.poolAdd(autoDirectSpec);
 check('direct auto create ok', autoDirect.ok, true);
 check('direct auto dials a macvlan', uci.get('network', 'dau7', 'device'), cfg.directDeviceFor('eth1', 7));
 check('direct auto device type', uci.get('network', cfg.deviceSection('daut', 7), 'type'), 'macvlan');
@@ -364,7 +373,6 @@ check('direct auto device parent', uci.get('network', cfg.deviceSection('daut', 
 check('direct auto device name', uci.get('network', cfg.deviceSection('daut', 7), 'name'), 'eth1m7');
 check('direct auto golden mac', uci.get('network', cfg.deviceSection('daut', 7), 'macaddr'), cfg.macFor('aa:bb:cc:dd:ee:ff', 'daut', 7));
 check('direct auto also writes Host-Uniq', uci.get('network', 'dau7', 'host_uniq'), cfg.hostUniqFor('', 'daut', 7));
-check('direct auto notes the macvlan', hasFinding(autoDirect, 'info', 'One macvlan and one derived MAC per slot'), true);
 
 pppoe.poolDelete({ id: 'daut' });
 check('direct cleanup removes the zone', uci.get('firewall', 'bmwanpool'), null);
