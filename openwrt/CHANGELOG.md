@@ -4,8 +4,52 @@ Module versions are independent of the app's. OpenWRT 2.x and 3.x need Bored
 Manager **0.4.1**, for the `statusCards` and `meter` blocks, badge columns and
 forms that open pre-filled, and OpenWrt **25.12** on the router. The 1.0.x line
 needs **0.3.3**, for the `subnav` and `note` blocks and the `file` form input.
-From 3.0.0, PPPoE pools also need the router packages at **2.0.0** - the rest
-of the module does not.
+From 3.0.0, PPPoE pools also need the router packages at **2.x** - the rest of
+the module does not. Which release a module build installs is pinned in
+`main/agent/manifest.ts`.
+
+## 3.0.1
+
+Needs the same Bored Manager **0.4.1** and OpenWrt **25.12 or newer**. Router
+packages **2.0.1**. One fix, and it is the one that decided whether 3.0.0 could
+be deployed at all.
+
+### The pinned install put the wrong packages on the router
+
+`main/agent/manifest.ts` is what *"the release this module was built against"*
+means: the router downloads each `.apk` from the URL in that file and checks it
+against a sha256 compiled into the module. It is written by
+`npm run pin:packages`, which can only read a package release after that release
+is published - so the correct order is to tag the packages, pin, commit, then
+tag the module. 3.0.0 was tagged without the pinning step, and shipped pointing
+at **packages 1.4.1**.
+
+Nothing failed where it could be seen. The install downloaded, every checksum
+matched, apk reported success - and the router ended up running the 1.4.x
+daemons under a module that drives the 2.x pool API. So `bm-pppoe-pool`
+declared API 1, the pool gate refused with *"the installed bm-pppoe-pool speaks
+version 1 of its contract and this module drives 2"*, and the remedy it named -
+Router packages, install from the pinned release - installed 1.4.1 again. The
+same shape as the `ip-full` loop 2.5.0 fixed: a correct refusal, and the only
+button on offer could never change the answer.
+
+The pin is now packages 2.0.1, and `npm run pin:check` runs on the module's
+release tag so a module can no longer be published pinned to anything other
+than the release in `packages/version.json`. It is deliberately not part of
+`npm run check`, because the commit that bumps the package version legitimately
+predates the release it names - the reasoning is written out in
+`scripts/check-pin.mjs`.
+
+### Both router-fetched paths work now
+
+Packages 2.0.1 is the first release with a signed manifest, which is what
+`bmctl check-update` on the router and *Latest release, fetched by the router*
+in Router packages both verify before downloading anything. Until now there was
+no release key at all, so both refused - correctly, and with no way forward.
+
+One bootstrap remains and is not a fault: a router has to receive the public key
+before it can verify anything, so the first 2.0.1 install comes from the pinned
+source or a bundle. After that the router looks after itself.
 
 ## 3.0.0
 

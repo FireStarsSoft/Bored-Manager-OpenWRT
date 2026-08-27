@@ -734,7 +734,7 @@ what 2.2.0 did, 30 to 37 what the router packages at 1.3.0 and module 2.3.0 did
 together, and 38 to 49 the LuCI app, the two-writer fixes and the standing
 promise that the router keeps every capability with no app attached, all in
 1.4.0 / 2.4.0. The PPPoE items among them - 4, 5, 7, 10, 11, 26, 43, 45 and
-46 - are written against the pool model of 3.0.0 and the 2.0.0 packages, which
+46 - are written against the pool model of 3.0.0 and the 2.x packages, which
 replaced the batches every earlier release tested.
 
 1. **The probe reads the router correctly.** At a router shell, `for t in ubus uci ip fw4 logread nft netifd pppd dnsmasq opkg apk; do command -v "$t"; done` and compare the result with the cards under Router readiness. Nothing present should be listed as missing. (`command -v ubus uci ip …` on one line is the 1.0.x form, and answers only the first name - that is the bug 2.0.0 fixes, so the two outputs disagreeing is the expected result.) Confirm too that `df -k /overlay` and `id -u` match what the Install readiness card reports.
