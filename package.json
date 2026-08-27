@@ -15,6 +15,7 @@
     "pack": "node scripts/package-module.mjs openwrt dist",
     "pack:packages": "node scripts/pack-bundle.mjs",
     "pin:packages": "node scripts/pin-packages.mjs",
+    "pin:check": "node scripts/check-pin.mjs",
     "packages:ucode": "sh scripts/check-ucode.sh",
     "sdk:check": "node scripts/sync-sdk.mjs --check",
     "sdk:sync": "node scripts/sync-sdk.mjs",

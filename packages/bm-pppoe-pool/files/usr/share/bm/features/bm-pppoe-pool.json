@@ -1,6 +1,6 @@
 {
 	"name": "bm-pppoe-pool",
-	"version": "2.0.0",
+	"version": "2.0.1",
 	"ubus": "bm.pppoe",
 	"apiVersion": 2,
 	"provides": [ "pppoe" ],

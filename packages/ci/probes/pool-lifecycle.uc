@@ -285,7 +285,7 @@ function poolTold(told, id) {
 
 let told = pppoe.info();
 let fptTold = poolTold(told, 'fpt1');
-check('info release', told.release, '2.0.0');
+check('info release', told.release, '2.0.1');
 check('info api version', told.apiVersion, 2);
 check('info lists every pool', length(told.pools), 3);
 check('info never carries a password', exists(fptTold, 'password'), false);

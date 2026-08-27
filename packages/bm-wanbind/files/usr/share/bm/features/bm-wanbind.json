@@ -1,6 +1,6 @@
 {
 	"name": "bm-wanbind",
-	"version": "2.0.0",
+	"version": "2.0.1",
 	"ubus": "bm.wanbind",
 	"apiVersion": 1,
 	"provides": [ "binding" ],

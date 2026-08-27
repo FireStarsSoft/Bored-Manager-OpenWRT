@@ -9,6 +9,43 @@ guessing, so it moves only when the shape of a call changes. `configSchema` is
 the shape of what is written to `/etc`, and it is what a downgrade is refused
 on. All three are in [`version.json`](version.json).
 
+## 2.0.1
+
+The release key. Nothing else moves: the pool model, `apiVersion` and
+`configSchema` are exactly 2.0.0's, and every daemon behaves the same.
+
+### A router can update itself now
+
+`bm.signature` fails closed, and until this release there was nothing for it to
+fail closed *against*: no public key had ever been generated, so
+`/usr/share/bm/keys/` shipped empty, `bmctl check-update` answered *"no release
+key is installed"*, and the manifest attached to every release was unsigned
+because CI had no secret half to sign it with. That is the designed answer to a
+missing key rather than a fault - but it meant the one install path that needs
+no app and no file was the one path that could never work.
+
+`bm-release.pub` is committed now and installed with the agent, and
+`packages-release.yml` signs `bm-packages.json` with the secret half held as a
+repository secret. It verifies the signature against the committed public key
+in the same step, so a mismatched pair fails the release rather than shipping a
+manifest no router will take.
+
+**One bootstrap is unavoidable, and it is not a bug.** A router running 2.0.0
+has no key on it, so it cannot verify this release either - the key has to
+arrive by a path that does not depend on the key. Install 2.0.1 from the app
+(Router packages) or from a `.apkbundle`, once; from that router onwards
+`bmctl check-update` and the app's *Latest release, fetched by the router*
+source both work on their own. The signature is what makes the network path
+trustworthy, and a trust root cannot be delivered over the thing it exists to
+protect.
+
+### Also
+
+- `/usr/share/bm/keys/README.md` already said how to roll a key over. It is
+  worth reading before generating a second one: a new key is *added* beside the
+  old, never swapped for it, because a router still on an older release has only
+  the old key and would refuse a manifest signed with the new one.
+
 ## 2.0.0
 
 `bm-pppoe-pool` is rewritten around what a pool actually is, and the daemon now

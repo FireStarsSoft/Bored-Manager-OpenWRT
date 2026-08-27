@@ -27,6 +27,13 @@ jobs:
       # A tag publishes straight from this job, so everything main's CI would
       # have rejected has to be rejected here too.
       - run: npm run check
+      # And one thing main's CI deliberately does not check, because a branch
+      # has to be able to commit the version bump before the release it names
+      # exists: that this module release ships pinned to the package release in
+      # packages/version.json. 3.0.0 went out pinned to packages 1.4.1, so its
+      # own PPPoE pools could not be created on a router the install had just
+      # reported ready. The reasoning is in scripts/check-pin.mjs.
+      - run: npm run pin:check
       - run: npm run pack
       # Exactly one .zip may be attached: the app picks a module archive by "the
       # only zip asset attached", so a second one turns every install into an
