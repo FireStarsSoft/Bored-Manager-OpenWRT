@@ -8,6 +8,19 @@ From 3.0.0, PPPoE pools also need the router packages at **2.x** - the rest of
 the module does not. Which release a module build installs is pinned in
 `main/agent/manifest.ts`.
 
+## 3.2.1
+
+- **Declares the storage it uses.** Bored Manager 0.5.0 lets a module say in its
+  manifest what it needs kept for it, and grants that rather than applying one
+  fixed cap to everything. This module asks for what it already used: the same
+  512 KB for its settings and for what it remembers per machine.
+  It writes one history stream of its own (`openwrt`) and is granted 32 MB of the
+  metrics store for it.
+- **Nothing else changed**, and nothing about it needs a newer app. `minAppVersion`
+  is untouched: an app that has never heard of a `storage` block ignores it, so
+  this release installs on 0.4.3 exactly as the previous one did. On 0.5.0 and
+  later it also shows up in Settings → Data & storage with its own figures.
+
 ## 3.2.0
 
 Needs the same Bored Manager **0.4.1** and OpenWrt **25.12 or newer**. Router

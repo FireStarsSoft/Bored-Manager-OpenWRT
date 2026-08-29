@@ -2,45 +2,136 @@
   "apiVersion": 2,
   "id": "openwrt",
   "name": "OpenWRT",
-  "version": "3.2.0",
+  "version": "3.2.1",
   "description": "Manage an OpenWRT router over SSH without its web UI: live dashboard, the PPPoE Dialer and one-to-one LAN device to WAN binding.",
   "author": "Bored Manager",
   "minAppVersion": "0.4.1",
   "defaultEnabled": false,
-  "entries": { "main": "main/index.ts" },
+  "entries": {
+    "main": "main/index.ts"
+  },
   "pages": [
-    { "id": "dashboard", "label": "Dashboard", "icon": "Gauge", "order": 57 },
-    { "id": "automation", "label": "Automation", "icon": "Zap", "order": 58 },
-    { "id": "settings", "label": "Module settings", "icon": "Settings2", "order": 59 }
+    {
+      "id": "dashboard",
+      "label": "Dashboard",
+      "icon": "Gauge",
+      "order": 57
+    },
+    {
+      "id": "automation",
+      "label": "Automation",
+      "icon": "Zap",
+      "order": 58
+    },
+    {
+      "id": "settings",
+      "label": "Module settings",
+      "icon": "Settings2",
+      "order": 59
+    }
   ],
   "widgets": [
-    { "id": "summary", "label": "OpenWRT", "defaultEnabled": false, "order": 77 }
+    {
+      "id": "summary",
+      "label": "OpenWRT",
+      "defaultEnabled": false,
+      "order": 77
+    }
   ],
   "streams": [
-    { "event": "capabilities", "kind": "latest" },
-    { "event": "ui", "kind": "latest" },
-    { "event": "overview", "kind": "latest" },
-    { "event": "series", "kind": "series" },
-    { "event": "pppoe", "kind": "latest" },
-    { "event": "binding", "kind": "latest" },
-    { "event": "jobs", "kind": "latest" }
+    {
+      "event": "capabilities",
+      "kind": "latest"
+    },
+    {
+      "event": "ui",
+      "kind": "latest"
+    },
+    {
+      "event": "overview",
+      "kind": "latest"
+    },
+    {
+      "event": "series",
+      "kind": "series"
+    },
+    {
+      "event": "pppoe",
+      "kind": "latest"
+    },
+    {
+      "event": "binding",
+      "kind": "latest"
+    },
+    {
+      "event": "jobs",
+      "kind": "latest"
+    }
   ],
   "methods": [
-    "sweepNow", "selectOptions", "hintsSet", "deviceRows",
-    "setupCheck", "setupApply", "installHint",
-    "pppoePools", "pppoeRows", "pppoeLegacyRows", "pppoeCarriers",
-    "poolCreateCheck", "poolCreateApply", "poolSetCheck", "poolSetApply", "poolDelete",
-    "pppoePoolAction", "pppoeConnAction",
-    "pppoeSettingsGet", "pppoeSettingsCheck", "pppoeSettingsApply",
-    "bindingCheck", "bindingApply", "bindingRows",
-    "bindingWaitingRows", "bindingEventRows", "eventRows", "bindingStart", "bindingStop",
-    "bindingUpdate", "bindingDelete", "bindingUnassign", "bindingReassign", "bindingPin",
-    "rulesEffective", "rulesCheck", "rulesApply", "rulesReset",
-    "limitsEffective", "limitsCheck", "limitsApply",
-    "jobCancel", "jobsClear",
-    "agentRows", "agentInstallCheck", "agentInstallApply",
-    "agentUninstallCheck", "agentUninstallApply"
+    "sweepNow",
+    "selectOptions",
+    "hintsSet",
+    "deviceRows",
+    "setupCheck",
+    "setupApply",
+    "installHint",
+    "pppoePools",
+    "pppoeRows",
+    "pppoeLegacyRows",
+    "pppoeCarriers",
+    "poolCreateCheck",
+    "poolCreateApply",
+    "poolSetCheck",
+    "poolSetApply",
+    "poolDelete",
+    "pppoePoolAction",
+    "pppoeConnAction",
+    "pppoeSettingsGet",
+    "pppoeSettingsCheck",
+    "pppoeSettingsApply",
+    "bindingCheck",
+    "bindingApply",
+    "bindingRows",
+    "bindingWaitingRows",
+    "bindingEventRows",
+    "eventRows",
+    "bindingStart",
+    "bindingStop",
+    "bindingUpdate",
+    "bindingDelete",
+    "bindingUnassign",
+    "bindingReassign",
+    "bindingPin",
+    "rulesEffective",
+    "rulesCheck",
+    "rulesApply",
+    "rulesReset",
+    "limitsEffective",
+    "limitsCheck",
+    "limitsApply",
+    "jobCancel",
+    "jobsClear",
+    "agentRows",
+    "agentInstallCheck",
+    "agentInstallApply",
+    "agentUninstallCheck",
+    "agentUninstallApply"
   ],
+  "storage": {
+    "config": {
+      "maxKB": 512
+    },
+    "hostData": {
+      "maxKB": 512
+    },
+    "history": {
+      "streams": [
+        "openwrt"
+      ],
+      "maxMB": 32
+    }
+  },
   "fastInterval": "openwrt",
   "slowInterval": "openwrt"
 }
