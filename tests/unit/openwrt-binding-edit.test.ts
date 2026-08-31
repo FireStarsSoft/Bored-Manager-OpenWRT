@@ -57,7 +57,10 @@ function hostData(): unknown {
 }
 
 interface Module {
-  update(id: unknown, values: unknown): OkResult
+  /** The object form, which is what these cases are about: what the domain refuses. */
+  update(id: unknown, values: Record<string, unknown>): OkResult
+  /** The shape the page actually sends: one argument per field, in spec order. */
+  updateFromForm(id: unknown, name?: unknown, sticky?: unknown, remap?: unknown): OkResult
   rows(): Array<Record<string, unknown>>
   events(): Array<{ kind: string; text: string }>
   methods: Set<string>
@@ -77,6 +80,8 @@ function moduleUnder(): Module {
     methods: new Set(manifest.methods),
     update: (id, values) =>
       harness.handlers.get('bindingUpdate')?.(id, values) as OkResult,
+    updateFromForm: (id, name, sticky, remap) =>
+      harness.handlers.get('bindingUpdate')?.(id, name, sticky, remap) as OkResult,
     // The rows a surface renders, straight off the stream payload the module
     // republishes: an edit has to reach them without waiting for a fast tick.
     rows: () =>
@@ -169,6 +174,40 @@ describe('editing an instance', () => {
 
     expect(result).toEqual({ ok: true, data: 'nothing changed' })
     expect(module.events()).toEqual([])
+    module.dispose()
+  })
+})
+
+describe('the shape the page actually sends', () => {
+  /**
+   * A `form` block sends one argument per field, in the order its spec lists
+   * them - not one object, which is what a `checkForm` sends. The handler was
+   * written for the object alone, so it received the name string where it
+   * expected the whole form and answered "Save: done" having changed nothing:
+   * the two flags could never be edited from the page at all.
+   */
+  it('renames and flips both flags from three positional arguments', () => {
+    const module = moduleUnder()
+
+    const result = module.updateFromForm('bind_1', 'Floor 3', false, false)
+
+    expect(result.ok).toBe(true)
+    expect(module.rows()[0]).toMatchObject({
+      id: 'bind_1',
+      name: 'Floor 3',
+      sticky: false,
+      remap: false
+    })
+    module.dispose()
+  })
+
+  it('leaves a field the form did not send alone', () => {
+    const module = moduleUnder()
+
+    // Three fields, only the last two carrying a value - an argument that is
+    // `undefined` is a field left out, not a field cleared.
+    expect(module.updateFromForm('bind_1', undefined, false, undefined).ok).toBe(true)
+    expect(module.rows()[0]).toMatchObject({ name: 'Office LAN', sticky: false, remap: true })
     module.dispose()
   })
 })

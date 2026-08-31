@@ -105,6 +105,11 @@ function publish(
     devices: overview.counts.devices,
     bound: overview.counts.bound,
     waiting: overview.counts.waiting,
+    wanFree: overview.counts.wanFree,
+    wanErrBound: overview.counts.wanErrBound,
+    pppDial: overview.counts.pppDial,
+    directOk: overview.counts.directOk,
+    directHeld: overview.counts.directHeld,
     load1: model.sys.load1,
     memPct: overview.sys.memPct
   }

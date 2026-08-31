@@ -6,7 +6,7 @@
  * into that shape. Nothing in this file decides what to keep when the document
  * grows too large - that is `trim.ts` - and nothing here talks to the host.
  */
-import { finite, isRecord } from '../util'
+import { finite, ipv4ToInt, isRecord } from '../util'
 import {
   MAX_FINISHED_JOBS,
   MAX_FINISHED_JOB_ITEMS,
@@ -29,24 +29,69 @@ export interface BindingInstanceRecord {
   slot: number
   /** Absent on records written before this was stamped; see `recordLayout`. */
   layout?: ManagedLayout
+  /**
+   * Which addresses on the LAN this instance is allowed to hand a WAN to.
+   * Absent means the whole LAN, which is what every instance written before
+   * ranges existed meant and still means, so no migration is needed. A range
+   * changes two things and only two: which leases enter the planner, and which
+   * CIDRs the fail-closed catch-all is written for.
+   */
+  source?: { kind: 'lan' } | { kind: 'range'; from: string; to: string }
 }
 
 /**
- * Version 2: the PPPoE batch records and their sequence counter are gone.
- * Pools live on the router - `/etc/config/bm_pppoe` is the record, the daemon
- * owns it - so a per-router document that also described them would only ever
- * drift from the truth. A version-1 document loads fine: its `batches` and
- * `nextSeq` are simply not read, and everything binding needs survives.
+ * One address bound to one WAN port by hand.
+ *
+ * The numbers are stamped at creation and read back afterwards, for the reason
+ * `ManagedLayout` is stamped onto an instance: `pref` and `table` are what the
+ * reconcile looks for on the router, so re-deriving them from settings that
+ * have since been edited would send it hunting in the wrong band and leave the
+ * real rule behind, unowned and still steering traffic.
+ */
+export interface DirectBindingRecord {
+  id: string
+  name: string
+  target: { kind: 'ip'; ip: string } | { kind: 'mac'; mac: string }
+  /** UCI network section of the WAN port. */
+  wan: string
+  enabled: boolean
+  /** What happens when the WAN goes down; `hold` is fail-closed. */
+  whenDown: 'hold' | 'fallback'
+  /** Stamped from the direct band at creation. */
+  pref: number
+  /** Stamped; the WAN's `ip4table`. */
+  table: number
+  /** The logical LAN the address sits in, which is its firewall source zone. */
+  lan: string
+  /** Numbers the `bmd<slot>_` firewall sections; allocated from the live set. */
+  slot: number
+  createdAt: number
+}
+
+/**
+ * Version 3: one-to-one bindings have a record of their own.
+ *
+ * A version-2 document loads unchanged, exactly as a version-1 one does: it
+ * carries no `direct` array, that normalises to `[]`, and every instance in it
+ * keeps behaving as a whole-LAN instance because an absent `source` means the
+ * whole LAN. Writing the document back at version 3 is the entire migration.
+ *
+ * Version 2 was where the PPPoE batch records and their sequence counter went
+ * away. Pools live on the router - `/etc/config/bm_pppoe` is the record, the
+ * daemon owns it - so a per-router document that also described them would only
+ * ever drift from the truth.
  */
 export interface OwrtHostData {
-  version: 2
+  version: 3
   instances: BindingInstanceRecord[]
+  /** The one-to-one bindings; each owns one `ip rule` in the direct band. */
+  direct: DirectBindingRecord[]
   /**
-   * WAN-to-table assignments a binding preparation wrote to the router, with
-   * the instance that claimed them. The owner is what lets `trim` drop an
-   * assignment once its instance is deleted; entries written before this third
-   * element existed name nobody, and are dropped only when no instance is left
-   * at all.
+   * WAN-to-table assignments a preparation wrote to the router, with the record
+   * that claimed them - a binding instance or, since version 3, a one-to-one
+   * binding. The owner is what lets `trim` drop an assignment once that record
+   * is deleted; entries written before this third element existed name nobody,
+   * and are dropped only when no owner of either kind is left at all.
    */
   extraTables: Array<[wanName: string, tableId: number, instanceId?: string]>
   stickyMap: Array<[
@@ -78,8 +123,9 @@ export type PersistedHostData = Omit<OwrtHostData, 'stickyMap'> & {
 
 export function emptyData(): OwrtHostData {
   return {
-    version: 2,
+    version: 3,
     instances: [],
+    direct: [],
     extraTables: [],
     stickyMap: [],
     events: [],
@@ -117,8 +163,9 @@ function unpackSticky(value: unknown): OwrtHostData['stickyMap'][number] | null 
 
 export function serializeHostData(data: OwrtHostData): PersistedHostData {
   return {
-    version: 2,
+    version: 3,
     instances: data.instances,
+    direct: data.direct,
     extraTables: data.extraTables,
     stickyPacked: data.stickyMap.map(packSticky),
     events: data.events,
@@ -171,6 +218,50 @@ function layout(raw: unknown): ManagedLayout | undefined {
     catchAllTable: values.catchAllTable!,
     zoneName
   }
+}
+
+/**
+ * An instance's address scope, or nothing.
+ *
+ * Whole field or nothing, and "nothing" is deliberately the safe reading: a
+ * range whose endpoints no longer parse would otherwise have been kept as a
+ * scope nothing can evaluate, and the catch-all built from it would have
+ * covered no address at all - which on a fail-closed rule set means the LAN
+ * routes normally and the instance silently stops being fail-closed. Falling
+ * back to the whole LAN is the behaviour every pre-range instance already has.
+ */
+function instanceSource(raw: unknown): BindingInstanceRecord['source'] {
+  if (!isRecord(raw)) return undefined
+  if (raw.kind === 'lan') return { kind: 'lan' }
+  if (raw.kind !== 'range') return undefined
+  const from = string(raw.from)
+  const to = string(raw.to)
+  const low = ipv4ToInt(from)
+  const high = ipv4ToInt(to)
+  if (low == null || high == null || low > high) return undefined
+  return { kind: 'range', from, to }
+}
+
+/**
+ * A one-to-one binding's target, or nothing.
+ *
+ * All of it or none of it, the way `layout` is: a target this cannot read is a
+ * binding the reconcile can neither install nor explain, and keeping the record
+ * without one would put a row on the page that never resolves to an address.
+ */
+function directTarget(raw: unknown): DirectBindingRecord['target'] | null {
+  if (!isRecord(raw)) return null
+  if (raw.kind === 'ip') {
+    const ip = string(raw.ip)
+    return ipv4ToInt(ip) == null ? null : { kind: 'ip', ip }
+  }
+  if (raw.kind === 'mac') {
+    // Lower-cased colon form because that is the spelling `model.leases`
+    // carries, and the reconcile matches a MAC target against it by string.
+    const mac = string(raw.mac).toLowerCase()
+    return /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/.test(mac) ? { kind: 'mac', mac } : null
+  }
+  return null
 }
 
 export function isModuleEventScope(value: string): value is ModuleEventScope {
@@ -247,6 +338,7 @@ export function normalize(raw: unknown): OwrtHostData {
     if (!id || instanceIds.has(id) || !lan || !carrier) continue
     instanceIds.add(id)
     const stamped = layout(value.layout)
+    const source = instanceSource(value.source)
     data.instances.push({
       id,
       name: string(value.name) || id,
@@ -257,9 +349,44 @@ export function normalize(raw: unknown): OwrtHostData {
       remap: value.remap !== false,
       createdAt: finite(value.createdAt),
       slot: Math.max(0, integer(value.slot)),
-      ...(stamped ? { layout: stamped } : {})
+      ...(stamped ? { layout: stamped } : {}),
+      ...(source ? { source } : {})
     })
     if (data.instances.length >= 512) break
+  }
+
+  const directIds = new Set<string>()
+  for (const value of Array.isArray(raw.direct) ? raw.direct : []) {
+    if (!isRecord(value)) continue
+    const id = string(value.id)
+    const target = directTarget(value.target)
+    const wan = string(value.wan)
+    const pref = integer(value.pref)
+    const table = integer(value.table)
+    // Whole record or none of it. Every field below is something a write to the
+    // router is built out of, so a half-read binding would name a rule at
+    // preference 0 in table 0 - which is not the rule on the router, and
+    // deleting the binding would leave the real one behind with no record left
+    // to say it exists.
+    if (!id || directIds.has(id) || !target || !wan || pref <= 0 || table <= 0) continue
+    directIds.add(id)
+    data.direct.push({
+      id,
+      name: string(value.name) || id,
+      target,
+      wan,
+      enabled: value.enabled !== false,
+      // Hold is the default in the reader as well as in the form: a record
+      // whose flag was lost has to fail closed rather than quietly start
+      // letting the address out over the default connection.
+      whenDown: value.whenDown === 'fallback' ? 'fallback' : 'hold',
+      pref,
+      table,
+      lan: string(value.lan),
+      slot: Math.max(0, integer(value.slot)),
+      createdAt: finite(value.createdAt)
+    })
+    if (data.direct.length >= 512) break
   }
 
   const tableNames = new Set<string>()
@@ -321,13 +448,18 @@ export function normalize(raw: unknown): OwrtHostData {
     if (data.jobs.length >= MAX_FINISHED_JOBS) break
   }
 
-  // A table assignment belongs to the binding instance whose preparation wrote
-  // it. Entries from a build that predates that field name nobody, so the only
-  // safe statement about them is "no instance is left to own any of these" -
-  // and load time is the one moment no preparation can be in flight writing
-  // more. Left alone they kept overriding the WAN-to-table map for every
-  // instance created afterwards, for the life of the router.
-  if (data.instances.length === 0) {
+  // A table assignment belongs to the record whose preparation wrote it.
+  // Entries from a build that predates that field name nobody, so the only safe
+  // statement about them is "nothing is left that could own any of these" - and
+  // load time is the one moment no preparation can be in flight writing more.
+  // Left alone they kept overriding the WAN-to-table map for every instance
+  // created afterwards, for the life of the router.
+  //
+  // A one-to-one binding claims a table the same way an instance does, so an
+  // ownerless entry is only unowned when both arrays are empty. Testing the
+  // instances alone would have wiped the claims of a router whose only bindings
+  // are direct ones, on the first read after a restart.
+  if (data.instances.length === 0 && data.direct.length === 0) {
     data.extraTables = data.extraTables.filter((entry) => entry[2] != null)
   }
   return data

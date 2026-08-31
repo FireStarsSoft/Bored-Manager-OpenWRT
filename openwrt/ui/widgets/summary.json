@@ -156,7 +156,7 @@
                           "type": "note",
                           "tone": "warning",
                           "lines": [
-                            "A few failures out of many are easy to miss in the ring above. The OpenWRT Automation page, PPPoE Dialer tab, names them under Sessions needing attention."
+                            "A few failures out of many are easy to miss in the ring above. The OpenWRT Connection page, PPPoE Dialer tab, names them under Sessions needing attention."
                           ]
                         }
                       ]

@@ -8,7 +8,6 @@
  * because a half-installed instance is the one state nothing else can reason
  * about.
  */
-import { shQuote } from '@shared/shell'
 import type { OkResult } from '@shared/types'
 import type { JobSpec } from '../jobs'
 import { recordLayout } from '../records'
@@ -16,7 +15,7 @@ import type { BindingInstanceRecord } from '../store'
 import { carrierScopesOverlap, parseCidr, subnetsOverlap } from '../util'
 import { recordEvents } from './events'
 import { lanCidr } from './pool'
-import { applyChange } from './reconcile'
+import { applyChange, catchAllCidrs } from './reconcile'
 import { MANAGED_PREF_CEILING, catchAllLocalRoute, catchAllRoute } from './rules'
 import {
   ENGINE_STOPPED,
@@ -26,10 +25,10 @@ import {
   shellFailure,
   uciWrite
 } from './runtime'
+import { installScopedForwardings, removeScopedForwardings } from './shared'
 import { applyTableChunk, claimExtraTables } from './tables'
 import {
   DHCP_SECTION,
-  FIREWALL_ZONE,
   firewallZoneForNetwork,
   networkTables,
   preparationProbe,
@@ -171,18 +170,29 @@ function preparationJob(runtime: BindingRuntime, plan: BindingCreatePlan): JobSp
           plan.lanZone,
           plan.destinationZones
         )
-        await installCatchAll(runtime, plan.instance, plan.lanCidr, true)
+        const cidrs = catchAllCidrs(plan.instance, plan.lanCidr)
+        await installCatchAll(runtime, plan.instance, {
+          lanCidr: plan.lanCidr,
+          cidrs,
+          replace: true
+        })
         if (runtime.latestModel) {
           const stamped = recordLayout(plan.instance, runtime.options.rules())
           const pref = stamped.catchAllPrefBase + plan.instance.slot
           runtime.latestModel.rules = runtime.latestModel.rules.filter(
             (rule) => rule.pref !== pref
           )
-          runtime.latestModel.rules.push({
-            pref,
-            from: plan.lanCidr,
-            table: stamped.catchAllTable
-          })
+          // One entry per block, from the same derivation the write above used.
+          // The next reconcile compares the preference group as a set, so a
+          // model carrying only the first block would have it rebuild a group
+          // that is already exactly right.
+          for (const block of cidrs) {
+            runtime.latestModel.rules.push({
+              pref,
+              from: block,
+              table: stamped.catchAllTable
+            })
+          }
         }
         // Write-through: an instance appearing is topology. The debounce would
         // put ten seconds between the router carrying this instance's rules
@@ -381,80 +391,27 @@ async function applyDhcpPreparation(
   if (runtime.disposed) throw new Error(ENGINE_STOPPED)
 }
 
+/**
+ * An instance's own forwardings, which are the shared ones under this
+ * instance's `bmf<slot>_` band.
+ *
+ * The layout is resolved here rather than in the shared writer: it is the
+ * module-owned zone this instance was created against, so a rename in settings
+ * cannot leave the forwardings pointing at a zone that has none of this
+ * instance's WANs in it.
+ */
 async function installFirewallForwardings(
   runtime: BindingRuntime,
   instance: BindingInstanceRecord,
   sourceZone: string,
   destinationZonesRaw: readonly string[]
 ): Promise<void> {
-  const rules = runtime.options.rules()
-  // The module-owned zone this instance was created against, so a rename in
-  // settings cannot leave the forwardings pointing at a zone that has none of
-  // this instance's WANs in it.
-  const layout = recordLayout(instance, rules)
-  if (!FIREWALL_ZONE.test(sourceZone)) {
-    throw new Error(
-      `LAN firewall zone "${sourceZone}" has an unsupported name; use 1-32 letters, digits, hyphens or underscores, then check again`
-    )
-  }
-  const destinationZones = [...new Set(destinationZonesRaw)]
-  // One message used to cover all three, and identified none of them. This
-  // surfaces on a failed job item, where the whole value of the text is
-  // telling the operator which of the three they are looking at.
-  if (destinationZones.length === 0) {
-    throw new Error('the WAN pool resolved to no firewall zone at all; check again')
-  }
-  if (destinationZones.length > 32) {
-    throw new Error(
-      `the WAN pool spans ${destinationZones.length} firewall zones and at most 32 can be forwarded; split it into smaller carrier-scoped binding instances`
-    )
-  }
-  const badZone = destinationZones.find((zone) => !FIREWALL_ZONE.test(zone))
-  if (badZone != null) {
-    throw new Error(
-      `WAN firewall zone "${badZone}" has an unsupported name; use 1-32 letters, digits, hyphens or underscores`
-    )
-  }
-  const prefix = `bmf${instance.slot}_`
-  const lines = [
-    // The module-owned masquerading zone this instance was created against.
-    // Existing DHCP/static WAN zones are left untouched, and so is the zone's
-    // own membership: when it is the pool zone, bm-pppoe-pool owns the
-    // `list network` entries and rebuilds them on every pool change - the old
-    // `pppoe-<prefix>+` device wildcard this path used to claim is gone with
-    // the model that needed it.
-    `set firewall.${layout.zoneName}=zone`,
-    `set firewall.${layout.zoneName}.name=${shQuote(layout.zoneName)}`,
-    `set firewall.${layout.zoneName}.input='REJECT'`,
-    `set firewall.${layout.zoneName}.output='ACCEPT'`,
-    `set firewall.${layout.zoneName}.forward='REJECT'`,
-    `set firewall.${layout.zoneName}.masq='1'`,
-    `set firewall.${layout.zoneName}.mtu_fix='1'`
-  ]
-  const cleanup: string[] = []
-  for (let index = 0; index < 32; index++) {
-    cleanup.push(`uci -q delete firewall.${prefix}${index} 2>/dev/null || true`)
-  }
-  destinationZones.forEach((zone, index) => {
-    const section = `${prefix}${index}`
-    lines.push(
-      `set firewall.${section}=forwarding`,
-      `set firewall.${section}.src=${shQuote(sourceZone)}`,
-      `set firewall.${section}.dest=${shQuote(zone)}`
-    )
-  })
-  await runtime.store.withFirewall(async () => {
-    const cleaned = await runtime.ctx.exec('sh -s', {
-      stdin: `${cleanup.join('\n')}\n`,
-      timeoutMs: rules.execTimeoutSec * 1000
-    })
-    if (cleaned.code !== 0) throw shellFailure('clean old binding firewall forwarding', cleaned.code)
-    await uciWrite(runtime, 'write binding firewall forwarding', lines, ['firewall'])
-    const reloaded = await runtime.ctx.exec('service firewall reload', {
-      timeoutMs: rules.execTimeoutSec * 1000
-    })
-    if (reloaded.code !== 0) throw shellFailure('reload binding firewall', reloaded.code)
-    if (runtime.disposed) throw new Error(ENGINE_STOPPED)
+  const layout = recordLayout(instance, runtime.options.rules())
+  await installScopedForwardings(runtime, runtime.store, {
+    sectionPrefix: `bmf${instance.slot}_`,
+    sourceZone,
+    destinationZones: destinationZonesRaw,
+    zoneName: layout.zoneName
   })
 }
 
@@ -462,25 +419,7 @@ export async function removeFirewallForwardings(
   runtime: BindingRuntime,
   instance: BindingInstanceRecord
 ): Promise<void> {
-  const rules = runtime.options.rules()
-  const prefix = `bmf${instance.slot}_`
-  const lines: string[] = ['set -e']
-  for (let index = 0; index < 32; index++) {
-    lines.push(`uci -q delete firewall.${prefix}${index} 2>/dev/null || true`)
-  }
-  lines.push('uci commit firewall')
-  await runtime.store.withFirewall(async () => {
-    const written = await runtime.ctx.exec('sh -s', {
-      stdin: `${lines.join('\n')}\n`,
-      timeoutMs: rules.execTimeoutSec * 1000
-    })
-    if (written.code !== 0) throw shellFailure('remove binding firewall forwarding', written.code)
-    const reloaded = await runtime.ctx.exec('service firewall reload', {
-      timeoutMs: rules.execTimeoutSec * 1000
-    })
-    if (reloaded.code !== 0) throw shellFailure('reload binding firewall', reloaded.code)
-    if (runtime.disposed) throw new Error(ENGINE_STOPPED)
-  })
+  await removeScopedForwardings(runtime, runtime.store, `bmf${instance.slot}_`)
 }
 
 /**
@@ -503,11 +442,19 @@ function localRouteFor(
   return device ? [catchAllLocalRoute(table, cidr, device)] : []
 }
 
+/**
+ * `lanCidr` is the whole LAN and `cidrs` is what the rule set selects on, and
+ * they are two different things for a range instance.
+ *
+ * The connected route below is destination-scoped - it is what keeps the router
+ * answering on the LAN it is blackholing - so it stays the whole subnet however
+ * narrow the bound range is. Handing it the range's blocks instead would take
+ * the router off its own network for every address outside them.
+ */
 export async function installCatchAll(
   runtime: BindingRuntime,
   instance: BindingInstanceRecord,
-  cidr: string,
-  replace: boolean
+  options: { lanCidr: string; cidrs: readonly string[]; replace: boolean }
 ): Promise<void> {
   // The instance's own numbers, so a catch-all installed today is removed
   // tomorrow at the preference it was actually written at.
@@ -517,6 +464,13 @@ export async function installCatchAll(
     throw new Error(
       `catch-all preference ${pref} (safety-rule base ${layout.catchAllPrefBase} plus slot ${instance.slot}) is outside the managed range ${layout.catchAllPrefBase}-${MANAGED_PREF_CEILING - 1}; lower "Safety-rule priority base" under Module settings, Rules`
     )
+  }
+  const { lanCidr: cidr, cidrs, replace } = options
+  // Refused rather than written as an empty group. A catch-all that selects no
+  // address at all is an instance that looks installed and is not fail-closed,
+  // which is the one state nothing downstream can detect.
+  if (cidrs.length === 0) {
+    throw new Error('the catch-all resolved to no source range at all; check again')
   }
   const lines = [
     // `replace` rather than flush-then-add: the flush left the table with no
@@ -531,7 +485,12 @@ export async function installCatchAll(
     ...(replace
       ? [`while ip -4 rule del pref ${pref} 2>/dev/null; do :; done`]
       : []),
-    `ip -4 rule add from ${cidr} lookup ${layout.catchAllTable} pref ${pref}`
+    // One rule per block, all at the same preference. The kernel carries a
+    // same-priority group happily, and the loop above already clears a whole
+    // one, so nothing about removal changes when a range needs several.
+    ...cidrs.map(
+      (block) => `ip -4 rule add from ${block} lookup ${layout.catchAllTable} pref ${pref}`
+    )
   ]
   await execScript(runtime, lines, 'install binding catch-all')
 }

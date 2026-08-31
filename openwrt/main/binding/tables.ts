@@ -18,6 +18,7 @@ import { ENGINE_STOPPED, exclusive, shellFailure, uciWrite } from './runtime'
 import { UCI_SECTION } from './uci-doc'
 import type {
   BindingRuntime,
+  ExecDeps,
   TablePreparation,
   WanTableIndex,
   WanTableSource
@@ -123,13 +124,15 @@ export async function reconcileWanTables(
   source: WanTableSource
 ): Promise<void> {
   runtime.manualWanTables = source
-  if (
-    runtime.disposed ||
-    !runtime.latestModel ||
-    runtime.store.read().instances.length === 0
-  ) {
-    return
-  }
+  if (runtime.disposed || !runtime.latestModel) return
+  /**
+   * Nothing this module wrote is on the router, so there is nothing to audit.
+   * The test used to be on instances alone, which quietly excused every router
+   * whose only bindings are one-to-one ones: their tables are written by the
+   * 1-1 create and recorded in `extraTables`, and no instance pool names them.
+   */
+  const stored = runtime.store.read()
+  if (stored.instances.length === 0 && stored.direct.length === 0) return
   await exclusive(runtime, async () => {
     const model = runtime.latestModel
     if (!model || runtime.disposed) return
@@ -144,17 +147,40 @@ export async function reconcileWanTables(
       }
     }
 
-    const missing = new Map<string, number>()
-    const conflicts: string[] = []
+    const audited = new Set<string>()
     for (const instance of data.instances) {
       for (const iface of poolIfaces(model, instance.lan, instance.carrier)) {
-        const wanted = expected.get(iface.name)
-        if (wanted == null || !UCI_SECTION.test(iface.name)) continue
-        const current = observed.get(iface.name)
-        if (current == null) missing.set(iface.name, wanted)
-        else if (current !== wanted) {
-          conflicts.push(`${iface.name}: expected ${wanted}, found ${current}`)
-        }
+        audited.add(iface.name)
+      }
+    }
+    /**
+     * The WAN a one-to-one binding points at is audited on the same terms as a
+     * pool member, because it fails in a way nothing else notices. Its
+     * `option ip4table` is written by the 1-1 create and recorded in
+     * `extraTables`, and `buildWanTableIndex` seeds `byWan` from `extraTables`
+     * before it looks at the dump - so once the option is lost and the router
+     * reboots, which is the exact failure this audit exists for, the 1-1 pass
+     * still believes the table is there, still calls the WAN usable, and writes
+     * `from <ip>/32 lookup <table>` against a table with nothing in it. An
+     * empty table does not fail: the kernel walks on to the main table and the
+     * bound address leaves by the router's default connection instead, with
+     * every surface still showing it as bound.
+     *
+     * Disabled records are skipped because they own no rule to strand.
+     */
+    for (const record of data.direct) {
+      if (record.enabled) audited.add(record.wan)
+    }
+
+    const missing = new Map<string, number>()
+    const conflicts: string[] = []
+    for (const wan of audited) {
+      const wanted = expected.get(wan)
+      if (wanted == null || !UCI_SECTION.test(wan)) continue
+      const current = observed.get(wan)
+      if (current == null) missing.set(wan, wanted)
+      else if (current !== wanted) {
+        conflicts.push(`${wan}: expected ${wanted}, found ${current}`)
       }
     }
     conflicts.sort()
@@ -271,6 +297,27 @@ export function claimExtraTables(
   )
 }
 
+/**
+ * `option ip4table` on a set of WAN sections, and nothing else.
+ *
+ * Deliberately knows nothing about who owns those tables: the conflict re-check
+ * differs per caller - pending instance preparations here, a fresh probe for a
+ * one-to-one binding - while the write itself must not, because the section
+ * name reaches an interpolated `uci set` and that guard is the only thing
+ * between a hand-edited /etc/config/network and a shell injection.
+ */
+export async function writeWanTables(
+  deps: ExecDeps,
+  adds: readonly TablePreparation[]
+): Promise<void> {
+  const lines: string[] = []
+  for (const entry of adds) {
+    if (!UCI_SECTION.test(entry.wan)) throw new Error(`unsafe WAN section ${entry.wan}`)
+    lines.push(`set network.${entry.wan}.ip4table='${entry.table}'`)
+  }
+  await uciWrite(deps, 'write WAN routing tables', lines, ['network'])
+}
+
 export async function applyTableChunk(
   runtime: BindingRuntime,
   chunk: readonly TablePreparation[],
@@ -289,23 +336,22 @@ export async function applyTableChunk(
       }
     }
   }
-  const lines: string[] = []
   for (const entry of chunk) {
+    // In the order the single loop that built the lines checked them, so a
+    // chunk carrying both faults still fails on the section name rather than
+    // on the ownership of a table nobody will get to write.
     if (!UCI_SECTION.test(entry.wan)) throw new Error(`unsafe WAN section ${entry.wan}`)
     const owner = owners.get(entry.table)
     if (owner && owner !== entry.wan) {
       throw new Error(`routing table ${entry.table} was claimed by ${owner}`)
     }
-    lines.push(`set network.${entry.wan}.ip4table='${entry.table}'`)
   }
   // Serialized against every other writer of /etc/config/network. A PPPoE
   // create committing a chunk at the same moment reads the file, applies its
   // own sections and writes the whole thing back, so whichever of the two
   // finishes second silently discards the other - a hundred live sections, or
   // this pool's entire table map, gone with no error anywhere.
-  await runtime.store.withNetwork(() =>
-    uciWrite(runtime, 'write WAN routing tables', lines, ['network'])
-  )
+  await runtime.store.withNetwork(() => writeWanTables(runtime, chunk))
   if (runtime.disposed) throw new Error(ENGINE_STOPPED)
   // The UCI mutation is already durable even if a later ifup fails. Remember
   // it now so a cancelled/partial preparation never loses the table mapping.

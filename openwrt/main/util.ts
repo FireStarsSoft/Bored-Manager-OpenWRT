@@ -142,6 +142,52 @@ export function subnetsOverlap(first: ParsedSubnet, second: ParsedSubnet): boole
 }
 
 /**
+ * The smallest set of CIDR blocks that covers the inclusive range from `from`
+ * to `to` exactly, ascending; `[]` when either address does not parse or the
+ * range runs backwards.
+ *
+ * A binding instance scoped to an IP range still needs its fail-closed
+ * catch-all, and it has to be written as exactly this set of source rules. The
+ * single whole-LAN rule a LAN-scoped instance installs would blackhole every
+ * device in the LAN that sits *outside* the range: the planner filters leases
+ * to the range, so those devices never get an assignment rule to lift them back
+ * out of the catch-all, and creating one range instance would have taken the
+ * rest of the LAN off the internet with nothing on the page to say so.
+ */
+export function rangeToCidrs(fromRaw: string, toRaw: string): string[] {
+  const from = ipv4ToInt(fromRaw)
+  const to = ipv4ToInt(toRaw)
+  if (from == null || to == null || from > to) return []
+  const blocks: string[] = []
+  let current = from
+  // 62 blocks is the worst an IPv4 range can need, so a loop still going at 64
+  // is a bug in the arithmetic below rather than an unusually awkward range -
+  // and this feeds a rule set, so spinning is the one outcome worse than
+  // refusing. The caller reads `[]` as "this range cannot be expressed", which
+  // is where the check refuses the instance.
+  for (let guard = 0; guard < 64; guard++) {
+    // Widen while the block still starts exactly here and still ends inside
+    // the range. `prefixMask` returns unsigned and `&` does not, hence the
+    // `>>> 0`: without it every address from 128.0.0.0 up compares as negative
+    // and the first block swallows the whole range. The size is plain
+    // arithmetic rather than a shift for the same reason - `1 << 32` is 1, so
+    // a /0 block would have measured one address instead of all of them.
+    let prefix = 32
+    while (prefix > 0) {
+      const wider = prefix - 1
+      const network = (current & prefixMask(wider)) >>> 0
+      if (network !== current || network + 2 ** (32 - wider) - 1 > to) break
+      prefix = wider
+    }
+    blocks.push(`${intToIpv4(current)}/${prefix}`)
+    const next = current + 2 ** (32 - prefix)
+    if (next > to) return blocks
+    current = next
+  }
+  return []
+}
+
+/**
  * Whether two addresses share a subnet of the given length, for callers holding
  * an address and a mask rather than a parsed CIDR. The range check is this
  * function's own: an out-of-range prefix reaching `prefixMask` is a wrong

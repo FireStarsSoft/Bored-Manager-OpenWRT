@@ -230,6 +230,20 @@ export interface BindingReconcileInput {
   sticky: readonly BindingStickyChoice[]
   memory?: BindingPlannerMemory
   policy: BindingPlannerPolicy
+  /**
+   * The addresses a one-to-one binding has taken over, which this instance must
+   * leave alone entirely. Passed in rather than read from the store, because
+   * the planner is pure and because the reservation is a fact about the router
+   * as a whole rather than about this instance.
+   */
+  reservedIps?: readonly string[]
+  /**
+   * The address window this instance is scoped to, absent for an instance that
+   * serves its whole LAN. It decides one thing only: which leases enter the
+   * pass. It is handed over as text rather than read off the record so the
+   * planner keeps knowing nothing about records.
+   */
+  range?: { from: string; to: string }
   /** A local deterministic PRNG is seeded from this value. */
   randomSeed?: number
   rebooted?: boolean
@@ -271,6 +285,20 @@ export interface BindingSummaryInstance {
   devices: BindingDeviceSummary
 }
 
+/**
+ * The WAN pool of every instance added together, plus how much of it is spoken
+ * for.
+ *
+ * Summed here rather than where it is drawn because a page spec cannot add
+ * anything up: a `pie` reads its slices off one object and a `meter` reads one
+ * value, so a wall of per-instance rows is not something either can render.
+ * `boundPct` is a whole percent for the same reason - a spec cannot divide.
+ */
+export interface BindingWanAggregate extends BindingWanSummary {
+  /** Bound WANs as a percentage of the pool, 0 when there is no pool at all. */
+  boundPct: number
+}
+
 export interface BindingSnapshot {
   /**
    * When the rows below were last computed from a router sample the engine
@@ -287,6 +315,8 @@ export interface BindingSnapshot {
   instances: BindingSummaryInstance[]
   /** Flattened renderer rows; kept small because there is one per automation instance. */
   rows: BindingListRow[]
+  /** Every instance's pool as one set of counts, for the overview donut and meter. */
+  wans: BindingWanAggregate
 }
 
 export interface BindingListRow extends BindingSummaryInstance {
@@ -337,6 +367,16 @@ export interface BindingEngineOptions {
   agent?: () => AgentCapability
   /** Latest slow-tick UCI section -> table mapping. */
   wanTables?: () => WanTableSource
+  /**
+   * The addresses one-to-one bindings currently own, asked once per pass.
+   *
+   * A closure rather than a value for the same reason `agent` is one: a 1-1
+   * binding can be created between two fast samples, and this engine has to
+   * stop seating that address on the very next tick rather than at the next
+   * restart. Absent means nothing is reserved, which is what every router
+   * without the sibling automation looks like.
+   */
+  reservedIps?: () => readonly string[]
   /** FastSweep uses this to force a fresh interface dump after mutations. */
   requestDump?: () => void
   /**
@@ -397,6 +437,21 @@ export interface BindingCreatePlan {
 export interface ReconcileOutcome {
   instance: BindingInstanceRecord
   result: BindingPlannerResult
+}
+
+/**
+ * What a command runner needs, and nothing more, so a sibling automation with
+ * its own runtime can use the same writers.
+ *
+ * `BindingRuntime` satisfies this structurally, which is the whole point: the
+ * writers below it stayed exactly as they were for every call site in this
+ * folder while becoming callable from a runtime of a different shape.
+ */
+export interface ExecDeps {
+  ctx: ModuleContext
+  /** Read again after every await, so it has to be the live object, not a copy. */
+  disposed: boolean
+  options: { rules: () => OwrtRules }
 }
 
 /**

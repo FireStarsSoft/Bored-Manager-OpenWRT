@@ -7,7 +7,7 @@
  * the last pass believed.
  */
 import type { ParsedSubnet } from '../util'
-import { ipv4ToInt, subnetContains } from '../util'
+import { ipv4ToInt, parseCidr, subnetContains } from '../util'
 import { normalizedMac } from './memory'
 import type {
   BindingDesiredAssignment,
@@ -71,6 +71,33 @@ export function ruleIp(from: string): string | null {
   const slash = text.indexOf('/')
   const ip = slash >= 0 ? text.slice(0, slash) : text
   return ipv4ToInt(ip) == null ? null : ip
+}
+
+/**
+ * The source selector of a rule the kernel handed back, spelled as a CIDR.
+ *
+ * `ip rule show` prints a single-address selector without its prefix: a rule
+ * written as `from 192.168.1.150/32` reads back as `29900:\tfrom 192.168.1.150
+ * lookup 200`, and `parseIpRules` keeps `from` exactly as printed. The per-tick
+ * catch-all repair compares the preference group against the blocks the
+ * instance was written for, and it parsed `from` with `parseCidr`, which
+ * requires a slash - so every /32 block in the group read back as nothing,
+ * matched no wanted block, and the whole group was deleted and re-added on
+ * every single fast sample, for ever. Ordinary ranges end in a /32 constantly
+ * (192.168.1.100-192.168.1.150 does, and a single-address range simply is
+ * one), and in the window between the deletes and the adds the unassigned
+ * in-range devices leaked out of the router's own WAN - the exact fail-closed
+ * property the catch-all exists for.
+ *
+ * `all` is the wildcard the kernel prints for the main-table rules, so it is
+ * spelled back as the block it means. Anything that does not parse becomes ''
+ * rather than a guess, because the comparison above reads a mismatch as
+ * "rebuild this group" and a guess would rebuild the wrong one.
+ */
+export function ruleCidr(from: string): string {
+  const text = String(from ?? '').trim()
+  if (text === 'all') return '0.0.0.0/0'
+  return parseCidr(text.includes('/') ? text : `${text}/32`)?.cidr ?? ''
 }
 
 export function ruleSignature(rule: BindingRuleChange): string {

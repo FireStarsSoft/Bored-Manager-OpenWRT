@@ -193,8 +193,9 @@ describe('OpenWRT parsers', () => {
     }
     expect(
       selectOptions('carriers', model, {
-        version: 2,
+        version: 3,
         instances: [],
+        direct: [],
         extraTables: [],
         stickyMap: [],
         events: [],

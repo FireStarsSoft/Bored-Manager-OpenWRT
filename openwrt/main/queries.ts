@@ -129,7 +129,7 @@ export class Queries {
         bindingBadges: statusBadges(status),
         // Carried so the table can offer Reassign/Unassign on the row itself:
         // both take the instance the device belongs to, and until now the only
-        // way to reach them was to find that instance on the Automation page.
+        // way to reach them was to find that instance on the Connection page.
         instanceId: instance?.id ?? ''
       }
     })

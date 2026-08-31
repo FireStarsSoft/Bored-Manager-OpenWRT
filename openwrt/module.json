@@ -2,10 +2,10 @@
   "apiVersion": 2,
   "id": "openwrt",
   "name": "OpenWRT",
-  "version": "3.2.1",
-  "description": "Manage an OpenWRT router over SSH without its web UI: live dashboard, the PPPoE Dialer and one-to-one LAN device to WAN binding.",
+  "version": "3.3.0",
+  "description": "Manage an OpenWRT router over SSH without its web UI: live dashboard, the PPPoE Dialer, one-to-one LAN device to WAN binding, hand-placed address-to-port bindings, and a monitor that explains every source-routed address on the router.",
   "author": "Bored Manager",
-  "minAppVersion": "0.4.1",
+  "minAppVersion": "0.7.0",
   "defaultEnabled": false,
   "entries": {
     "main": "main/index.ts"
@@ -18,9 +18,9 @@
       "order": 57
     },
     {
-      "id": "automation",
-      "label": "Automation",
-      "icon": "Zap",
+      "id": "connection",
+      "label": "Connection",
+      "icon": "Cable",
       "order": 58
     },
     {
@@ -64,6 +64,14 @@
       "kind": "latest"
     },
     {
+      "event": "direct",
+      "kind": "latest"
+    },
+    {
+      "event": "monitor",
+      "kind": "latest"
+    },
+    {
       "event": "jobs",
       "kind": "latest"
     }
@@ -103,6 +111,15 @@
     "bindingUnassign",
     "bindingReassign",
     "bindingPin",
+    "directRows",
+    "directCheck",
+    "directApply",
+    "directUpdate",
+    "directEnable",
+    "directDisable",
+    "directDelete",
+    "scanRows",
+    "scanNow",
     "rulesEffective",
     "rulesCheck",
     "rulesApply",

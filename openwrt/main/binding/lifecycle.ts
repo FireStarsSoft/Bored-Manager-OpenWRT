@@ -12,7 +12,7 @@ import { recordLayout } from '../records'
 import { recordEvents } from './events'
 import { lanCidr } from './pool'
 import { installCatchAll, removeFirewallForwardings } from './prepare'
-import { applyChange, routerOwnsBinding } from './reconcile'
+import { applyChange, catchAllCidrs, routerOwnsBinding } from './reconcile'
 import {
   ENGINE_STOPPED,
   NO_SAMPLE,
@@ -195,7 +195,14 @@ async function deleteNow(runtime: BindingRuntime, id: string): Promise<OkResult>
     } catch (errorValue) {
       if (current(runtime, generation) && cidr) {
         try {
-          await installCatchAll(runtime, instance, cidr, true)
+          // The same derivation the install used, so a half-deleted range
+          // instance comes back with the blocks it had rather than with a
+          // whole-LAN rule that would blackhole every address outside them.
+          await installCatchAll(runtime, instance, {
+            lanCidr: cidr,
+            cidrs: catchAllCidrs(instance, cidr),
+            replace: true
+          })
           await applyChange(runtime, model, { forceKernel: true, rebooted: false })
         } catch {
           // Keep the original failure; catch-all restore is best effort.

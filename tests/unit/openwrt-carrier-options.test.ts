@@ -57,8 +57,9 @@ const MODEL: RouterModel = {
 }
 
 const EMPTY: OwrtHostData = {
-  version: 2,
+  version: 3,
   instances: [],
+  direct: [],
   extraTables: [],
   stickyMap: [],
   events: [],

@@ -141,7 +141,7 @@ describe('the readiness states a page can be shown in', () => {
   // stayed there, because nothing about an unprobed router resolves on its own.
   const REQUIRED = ['blocked', 'connecting', 'checking', 'attention']
 
-  for (const file of ['pages/dashboard.json', 'pages/automation.json', 'widgets/summary.json']) {
+  for (const file of ['pages/dashboard.json', 'pages/connection.json', 'widgets/summary.json']) {
     it(`has its own branch on ${file}`, () => {
       const states = branchedStates(specNamed(file))
       expect([...REQUIRED].filter((state) => !states.has(state))).toEqual([])
@@ -153,8 +153,8 @@ describe('the collector health a page shows', () => {
   // A failed interface dump latches: the module keeps the last list it could
   // parse and retries every few ticks. Only `fastOk` was ever rendered, so the
   // interface table and the WAN counts froze with no banner at all, and the
-  // Automation page - which is where the consequences show - read no health.
-  for (const file of ['pages/dashboard.json', 'pages/automation.json']) {
+  // Connection page - which is where the consequences show - read no health.
+  for (const file of ['pages/dashboard.json', 'pages/connection.json']) {
     it(`reads fastOk, dumpOk and the reason on ${file}`, () => {
       const spec = specNamed(file)
       const paths = streamPaths(spec)
@@ -209,7 +209,7 @@ describe('the router shell the copy keeps pointing at', () => {
     // cannot be installed from here, and the router-wide sysctls a large
     // binding pool needs. Both now open one.
     expect(terminals.map((entry) => entry.file).sort()).toEqual([
-      'pages/automation.json',
+      'pages/connection.json',
       'pages/settings.json'
     ])
     for (const entry of terminals) expect(entry.command).toBe('sh')
@@ -251,7 +251,7 @@ describe('the drawers that used to poll every row', () => {
   // stayed open. A subnav only polls the tab that is showing, and the tab
   // that shows first asks for the short list.
   it('opens bindingRows on the narrow tab', () => {
-    const spec = specNamed('pages/automation.json')
+    const spec = specNamed('pages/connection.json')
     expect(initialOf(spec, 'bindingRows')).toBe('attention')
     const args = tabArgs(spec, 'bindingRows')
     expect(args['attention']).toEqual(['$row.id', 'attention'])
@@ -262,7 +262,7 @@ describe('the drawers that used to poll every row', () => {
     // A pool holds at most 500 members and the daemon caps the reply the same
     // way, so the interfaces table is deliberately always-complete: a member
     // whose section is missing must be a visible row, not a filtered one.
-    const spec = specNamed('pages/automation.json')
+    const spec = specNamed('pages/connection.json')
     const scoped = nodes(spec).some((node) => {
       const source = node['source'] as Record<string, unknown> | undefined
       return (
@@ -301,7 +301,7 @@ describe('the Cancel button on a job card', () => {
 describe('the PPPoE stat row', () => {
   it('shows every state a member can be in, so the counts add up to Interfaces', () => {
     const shown = new Set<string>()
-    for (const node of nodes(specNamed('pages/automation.json'))) {
+    for (const node of nodes(specNamed('pages/connection.json'))) {
       if (node['type'] !== 'stat') continue
       const source = node['source'] as Record<string, unknown> | undefined
       if (source?.['event'] === 'pppoe') shown.add(String(source['path']))
@@ -317,7 +317,7 @@ describe('the PPPoE stat row', () => {
 describe('the create form table base', () => {
   it('opens on the base this module is configured to offer', () => {
     const froms: Array<Record<string, unknown> | undefined> = []
-    for (const node of nodes(specNamed('pages/automation.json'))) {
+    for (const node of nodes(specNamed('pages/connection.json'))) {
       // `input` is what makes it a form field rather than a table column
       // carrying the same key.
       if (node['key'] !== 'table_base' || node['input'] == null) continue
@@ -579,7 +579,7 @@ describe('the waiting queue on the dashboard', () => {
     }>
 
     // Why a device is waiting was computed on every pass and readable only by
-    // opening the right instance's drawer on the Automation page.
+    // opening the right instance's drawer on the Connection page.
     expect(rows.map((row) => row.host).sort()).toEqual(['desk', 'kiosk', 'phone', 'till'])
     expect(new Set(rows.map((row) => row.instance))).toEqual(
       new Set(['Front of house', 'Back office'])
@@ -670,7 +670,7 @@ describe('bound and waiting over time', () => {
     const config = new ConfigStore(harness.ctx)
     const store = new HostStore(harness.ctx, () => config.effectiveRules())
     const sweep = new FastSweep(harness.ctx, config, store, {
-      bindingTotals: () => ({ bound: 7, waiting: 3 })
+      bindingTotals: () => ({ bound: 7, waiting: 3, wanFree: 2, wanErrBound: 1 })
     })
 
     await sweep.run()

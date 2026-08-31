@@ -18,6 +18,7 @@ import type {
   BindingEngineOptions,
   BindingRuntime,
   BindingSnapshot,
+  ExecDeps,
   WanTableSource
 } from './types'
 
@@ -51,19 +52,24 @@ const EXIT_CODE = /\(exit (-?\d+)\)/
  * that keeps the rejected line - which may be a PPPoE password - out of the
  * error. Only its exit code is carried across, so a failed job item still says
  * which of the writes it was.
+ *
+ * It asks for `ExecDeps` rather than the whole runtime because the one-to-one
+ * automation next door writes the same `/etc/config` sections from a runtime of
+ * its own shape, and a second copy of this chokepoint is exactly how one of the
+ * two would end up putting a refused line into an error message.
  */
 export async function uciWrite(
-  runtime: BindingRuntime,
+  deps: ExecDeps,
   label: string,
   lines: readonly string[],
   commits: ReadonlyArray<'network' | 'firewall'>
 ): Promise<void> {
   try {
     await runUciBatch(
-      runtime.ctx,
+      deps.ctx,
       lines,
       commits,
-      runtime.options.rules().execTimeoutSec * 1000
+      deps.options.rules().execTimeoutSec * 1000
     )
   } catch (error) {
     const code = EXIT_CODE.exec(error instanceof Error ? error.message : '')
@@ -102,7 +108,22 @@ export function createBindingRuntime(
 
 /** Nothing sampled yet, which is not the same statement as a failed pass. */
 export function emptyBindingSnapshot(): BindingSnapshot {
-  return { t: 0, hookOk: true, lastError: '', instances: [], rows: [] }
+  return {
+    t: 0,
+    hookOk: true,
+    lastError: '',
+    instances: [],
+    rows: [],
+    wans: {
+      total: 0,
+      available: 0,
+      bound: 0,
+      error: 0,
+      warning: 0,
+      dialing: 0,
+      boundPct: 0
+    }
+  }
 }
 
 export function current(runtime: BindingRuntime, generation: number): boolean {
@@ -123,19 +144,31 @@ export function exclusive<T>(runtime: BindingRuntime, run: () => Promise<T>): Pr
   return pending
 }
 
+/**
+ * One `sh -s` round trip for a batch of lines, refused the moment the engine
+ * behind it has gone away.
+ *
+ * Structural in its first argument for the same reason `uciWrite` is. The
+ * second `disposed` read is the one that matters: a command takes seconds over
+ * SSH, and a reset arriving in that window has to make this throw rather than
+ * let the caller record the write as landed. So a caller must hand over the
+ * live runtime object - a snapshot copied into an `ExecDeps`-shaped literal
+ * pins the field to whatever it was before the command ran, and that check
+ * never fires again.
+ */
 export async function execScript(
-  runtime: BindingRuntime,
+  deps: ExecDeps,
   lines: readonly string[],
   label: string
 ): Promise<void> {
   if (lines.length === 0) return
-  if (runtime.disposed) throw new Error(ENGINE_STOPPED)
-  const result = await runtime.ctx.exec('sh -s', {
+  if (deps.disposed) throw new Error(ENGINE_STOPPED)
+  const result = await deps.ctx.exec('sh -s', {
     stdin: `set -eu\n${lines.join('\n')}\n`,
-    timeoutMs: runtime.options.rules().execTimeoutSec * 1000
+    timeoutMs: deps.options.rules().execTimeoutSec * 1000
   })
   if (result.code !== 0) throw shellFailure(label, result.code)
-  if (runtime.disposed) throw new Error(ENGINE_STOPPED)
+  if (deps.disposed) throw new Error(ENGINE_STOPPED)
 }
 
 export function currentWanTables(runtime: BindingRuntime): WanTableSource | undefined {

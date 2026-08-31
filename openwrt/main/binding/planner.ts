@@ -9,7 +9,7 @@
  * neighbouring files, so this one is the order those decisions happen in.
  */
 import type { Lease } from '../types'
-import { parseCidr, subnetContains } from '../util'
+import { ipv4ToInt, parseCidr, subnetContains } from '../util'
 import { planBindingEvents } from './events'
 import { clonePlannerMemory, normalizedMac } from './memory'
 import { FreeWanPool, SeededRandom, wanState, wanUsable } from './pool'
@@ -39,6 +39,23 @@ import {
 
 function leaseRank(lease: Lease): number {
   return lease.expires === 0 ? Number.MAX_SAFE_INTEGER : lease.expires
+}
+
+/**
+ * The address window a range-scoped instance may see, or null when it serves
+ * its whole LAN. Resolved once: the alternative is parsing both endpoints again
+ * for every lease on the router on every fast tick. Endpoints that do not parse
+ * or run backwards read as no window at all - the whole LAN, which is the
+ * fallback the store already makes for a stored range it cannot read and the
+ * only one that leaves the instance serving somebody rather than nobody.
+ */
+function leaseWindow(
+  range: { from: string; to: string } | undefined
+): { low: number; high: number } | null {
+  if (!range) return null
+  const low = ipv4ToInt(range.from)
+  const high = ipv4ToInt(range.to)
+  return low == null || high == null || low > high ? null : { low, high }
 }
 
 function activeLease(lease: Lease, now: number): boolean {
@@ -84,12 +101,30 @@ export function planBindingReconciliation(
       )
   )
 
+  /**
+   * The addresses a one-to-one binding owns, which this instance must not seat
+   * at all. Three separate paths can put a device on a WAN and each has to
+   * refuse a reserved address: a device that already held an instance rule when
+   * the 1-1 binding was created would otherwise keep both rules for ever -
+   * steered by the 1-1 rule, since lower preference wins - while its instance
+   * held a WAN out of the pool for a device that never uses it.
+   */
+  const reservedIps = new Set(input.reservedIps ?? [])
+  const bounds = leaseWindow(input.range)
+
   // dnsmasq can briefly contain old and new rows for the same MAC. Prefer the
   // row with the later expiry, retaining file order as a stable tie-breaker.
   const currentLeases = new Map<string, CurrentLease>()
   input.leases.forEach((lease, index) => {
     const mac = normalizedMac(lease.mac)
     if (!mac || !subnetContains(subnet, lease.ip) || !activeLease(lease, now)) return
+    // The range decides which devices exist for this instance and nothing else.
+    // Allocation, sticky choices, remap and the FIFO queue are untouched by it,
+    // and none of them ever walks the addresses between the endpoints.
+    const address = bounds ? ipv4ToInt(lease.ip) : null
+    if (bounds && (address == null || address < bounds.low || address > bounds.high)) {
+      return
+    }
     const old = currentLeases.get(mac)
     if (
       !old ||
@@ -158,6 +193,11 @@ export function planBindingReconciliation(
       if (entry.mac != null || !entry.wan) continue
       const wan = poolByName.get(entry.wan)
       if (!wan || wan.table !== entry.table || usedWans.has(wan.name)) continue
+      // Gate two, matched on the rule's own address because an orphan has no
+      // device behind it to ask. A rule for a reserved address is the stale
+      // instance rule the 1-1 binding replaced, and keeping it alive through
+      // the grace would hold a WAN for an address bound somewhere else.
+      if (reservedIps.has(entry.ip)) continue
       const firstMissingAt = oldOrphans.get(entry.key)?.firstMissingAt ?? now
       if (now - firstMissingAt >= releaseGraceMs) continue
       nextOrphans.push({
@@ -185,6 +225,11 @@ export function planBindingReconciliation(
       const mac = entry.mac
       if (!mac || usedMacs.has(mac) || held.has(mac) || forced.has(mac)) continue
       const device = workingDevices.get(mac)
+      // Gate one, and the one that matters: this device was already bound here
+      // when the 1-1 binding was created. Refusing to adopt its rule is what
+      // puts that rule in `planRuleDiff.delete` and hands its WAN back to the
+      // pool - adopting it leaves two rules and no pass that removes either.
+      if (device && reservedIps.has(device.ip)) continue
       const wan = entry.wan ? poolByName.get(entry.wan) : undefined
       if (
         !device ||
@@ -312,6 +357,10 @@ export function planBindingReconciliation(
     if (!input.instance.running || assignments.has(request.mac)) continue
     const device = workingDevices.get(request.mac)
     if (!device) continue
+    // Gate three. The device keeps its place in the queue and the waiting table
+    // says why it will never leave it, rather than promising a WAN that is
+    // never coming.
+    if (reservedIps.has(device.ip)) continue
     const isForced = forced.has(request.mac)
     let selected: BindingPlannerWan | null = null
     // A hand-placed pin outranks both the sticky choice and the random draw,
@@ -473,7 +522,8 @@ export function planBindingReconciliation(
     currentLeases,
     previousDevices,
     held,
-    unallocatable
+    unallocatable,
+    reservedIps
   })
   const assignmentRows = plannerAssignmentRows({
     instanceId: input.instance.id,

@@ -258,6 +258,23 @@ const BINDING_CREATE: readonly RequirementKey[] = [
 ]
 
 /**
+ * A hand-placed one-to-one binding asks for less than an instance does, and
+ * the difference is dnsmasq. An instance exists to distribute whatever DHCP
+ * hands out, so a router with no lease file has nothing for it to do; a 1-1
+ * binding on a typed address does not care whether anything is leasing at all,
+ * and refusing it on a missing dnsmasq would block the one kind of binding
+ * that still works on a router with static clients. A MAC target does need the
+ * lease file, and says so as a finding in the check rather than as a refusal
+ * here - the address may simply be offline this minute.
+ */
+const DIRECT_CREATE: readonly RequirementKey[] = [
+  'fw4',
+  'fw4Loaded',
+  'ipRule',
+  'netifdRunning'
+]
+
+/**
  * Every method name in `openwrt/module.json`, and what it needs.
  *
  * `null` means the method reads and nothing else: it opens no SSH session,
@@ -346,6 +363,28 @@ export const FEATURES: Record<string, FeatureSpec | null> = {
   bindingUnassign: { kind: 'action', requires: ['ipRule'] },
   bindingReassign: { kind: 'action', requires: ['ipRule'] },
   bindingPin: { kind: 'action', requires: ['ipRule'] },
+
+  // The hand-placed one-to-one bindings. The reads answer on any router at
+  // all, for the same reason every other read here does.
+  directRows: null,
+  directCheck: { kind: 'check', requires: DIRECT_CREATE, conflicts: ['mwan3', 'foreignRules'] },
+  directApply: { kind: 'action', requires: DIRECT_CREATE },
+  // Switching one back on writes a rule, so it is gated exactly as the apply
+  // is - an instance created months ago on a router that has since lost
+  // `ip-full` used to answer with a shell error from inside a reconcile.
+  directEnable: { kind: 'action', requires: DIRECT_CREATE },
+  // A rename and two flags; nothing reaches the router.
+  directUpdate: { kind: 'action', requires: [] },
+  // The way out of a broken state is never refused.
+  directDisable: { kind: 'action', requires: [] },
+  directDelete: { kind: 'action', requires: [] },
+
+  // The binding monitor. Its whole purpose is to describe a router whose
+  // routing somebody else is deciding, so requiring anything of that router
+  // before it will look would be a refusal aimed at the one page written to
+  // explain the refusals.
+  scanRows: null,
+  scanNow: { kind: 'action', requires: [] },
 
   // The rules editor writes numbers into this module's own configuration. It
   // has its own validation, and it must stay usable on a router with problems -

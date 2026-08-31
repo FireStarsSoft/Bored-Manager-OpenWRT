@@ -52,6 +52,12 @@ export interface CapabilityLatch {
    */
   prefBase: () => number
   /**
+   * The base of the one-to-one band, read on the same terms and for the same
+   * reason: the probe has to know which rules are this module's own before it
+   * can call the rest competing.
+   */
+  directPrefBase: () => number
+  /**
    * The interval the fast poller is currently running at, or null while it is
    * stopped. Held so a tab switch can re-time it without going back through the
    * probe the layout key guards.
@@ -59,13 +65,24 @@ export interface CapabilityLatch {
   fastAppliedMs: number | null
   readinessOn: boolean
   poller: ModulePoller
+  /**
+   * Anything else whose cadence follows the same three inputs this file weighs
+   * - connected, the intervals, and the verdict. Called at every point
+   * `startPollers` reaches a decision, so a collector that only runs on a
+   * usable router does not have to wait for the next tab switch to find out
+   * that the probe has landed. Deliberately opaque: readiness has no business
+   * knowing what it is re-arming.
+   */
+  secondaryPollers: () => void
 }
 
 export function createCapabilityLatch(
   ctx: ModuleContext,
   service: FastSweep,
   fastWanted: () => boolean = () => true,
-  prefBase: () => number = () => DEFAULT_RULES.rulePrefBase
+  prefBase: () => number = () => DEFAULT_RULES.rulePrefBase,
+  directPrefBase: () => number = () => DEFAULT_RULES.directPrefBase,
+  secondaryPollers: () => void = () => {}
 ): CapabilityLatch {
   const latch: CapabilityLatch = {
     ctx,
@@ -78,6 +95,8 @@ export function createCapabilityLatch(
     probing: null,
     fastWanted,
     prefBase,
+    directPrefBase,
+    secondaryPollers,
     fastAppliedMs: null,
     readinessOn: false,
     poller: ctx.createPoller('openwrt:readiness', async () => {
@@ -135,7 +154,7 @@ export function refreshCapabilities(latch: CapabilityLatch): Promise<OpenWrtCapa
   if (latch.flight) return latch.flight
   const ctx = latch.ctx
   const generation = latch.generation
-  const pending = probeOpenWrt(ctx, latch.prefBase())
+  const pending = probeOpenWrt(ctx, latch.prefBase(), latch.directPrefBase())
     .then((next) => {
       if (latch.stopped || generation !== latch.generation) return next
       const wasBlocked = isBlocked(latch.capabilities)
@@ -205,6 +224,7 @@ export function startPollers(latch: CapabilityLatch, known?: OpenWrtCapabilities
   const key = `${ctx.connected}|${fastMs}|${slowSec}`
   if (key === latch.applied) {
     retimeFast(latch, fastIntervalFor(latch, fastMs, slowSec))
+    latch.secondaryPollers()
     return
   }
   service.fastPoller.stop()
@@ -214,6 +234,7 @@ export function startPollers(latch: CapabilityLatch, known?: OpenWrtCapabilities
     latch.applied = key
     latch.probing = null
     stopReadinessPoller(latch)
+    latch.secondaryPollers()
     return
   }
   if (latch.probing === key) return
@@ -232,6 +253,7 @@ export function startPollers(latch: CapabilityLatch, known?: OpenWrtCapabilities
         // clears the key.
         if (available.probed) latch.applied = key
         latch.probing = null
+        latch.secondaryPollers()
         return
       }
       latch.applied = key
@@ -244,6 +266,7 @@ export function startPollers(latch: CapabilityLatch, known?: OpenWrtCapabilities
       }
       if (slowSec > 0) service.slowPoller.start(slowSec * 1_000)
       else if (Object.keys(service.uciTables).length === 0) void service.runSlow()
+      latch.secondaryPollers()
     },
     () => {
       if (latch.probing === key) latch.probing = null

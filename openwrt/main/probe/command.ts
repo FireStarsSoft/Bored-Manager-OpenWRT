@@ -11,6 +11,7 @@
 import type { ModuleContext } from '@shared/modules'
 import { splitSections } from '@shared/shell'
 import { DEFAULT_RULES } from '../config'
+import { DIRECT_PREF_SPAN } from '../records'
 import { buildReadiness, emptyCapabilities } from './readiness'
 import {
   emptyAgentFacts,
@@ -49,14 +50,18 @@ const PROBE_TOOLS = [
 ]
 
 /**
- * The probe, parameterized with the preference this module starts writing
- * assignment rules at.
+ * The probe, parameterized with the two preferences this module writes at.
  *
- * That number is the only thing the command needs from the configuration, and
- * it is needed router-side: everything below it outranks every rule the binding
- * engine installs, and everything at or above it is either this module's own or
- * consulted after it. Filtering there rather than here is what keeps the answer
- * small on a busy router.
+ * They are the only thing the command needs from the configuration, and they
+ * are needed router-side: everything below `rulePrefBase` outranks every rule
+ * the binding engine installs, and everything at or above it is either this
+ * module's own or consulted after it. Filtering there rather than here is what
+ * keeps the answer small on a busy router.
+ *
+ * `directPrefBase` is a second argument rather than a whole `OwrtRules` so the
+ * callers that only ever knew about the assignment base keep compiling; it
+ * defaults to the shipped band, which is where a router that never touched the
+ * setting has its 1-1 rules.
  */
 /**
  * Where OpenWrt's `ip-full` package puts the real iproute2 binary. The
@@ -64,11 +69,16 @@ const PROBE_TOOLS = [
  */
 export const IP_FULL_PATH = '/usr/libexec/ip-full'
 
-export function buildProbeCommand(rulePrefBase: number): string {
+export function buildProbeCommand(
+  rulePrefBase: number,
+  directPrefBase: number = DEFAULT_RULES.directPrefBase
+): string {
   // Interpolated into awk, so it is reduced to an integer first and falls back
   // to the default rather than to nothing: an empty `-v B=` would make the
   // comparison `$1+0 < 0` and quietly report every router as conflict-free.
   const base = Math.trunc(rulePrefBase) > 0 ? Math.trunc(rulePrefBase) : DEFAULT_RULES.rulePrefBase
+  const direct =
+    Math.trunc(directPrefBase) > 0 ? Math.trunc(directPrefBase) : DEFAULT_RULES.directPrefBase
   return [
     `echo '===REL==='; cat /etc/openwrt_release 2>/dev/null`,
     `echo '===BOARD==='; ubus -S call system board 2>/dev/null`,
@@ -172,7 +182,14 @@ export function buildProbeCommand(rulePrefBase: number): string {
     // is the durable evidence, `mwan3track` the live one, and a user who has both
     // packages needs to be told which one is deciding rather than shown a list of
     // preferences to interpret.
-    `echo '===CONFLICT==='; if [ -f /etc/config/mwan3 ]; then echo mwan3conf; fi; if pidof mwan3track >/dev/null 2>&1; then echo mwan3run; fi; ip -4 rule show 2>/dev/null | awk -F: -v B=${base} '$1+0 > 0 && $1+0 < B { n++; if (n <= ${FOREIGN_RULE_LIMIT}) printf "rule %s\\n", $0 } END { printf "total %d\\n", n+0 }'`,
+    //
+    // The module's own one-to-one band is cut out of the count. It is below
+    // `rulePrefBase` by construction, so counting preferences alone made every
+    // 1-1 binding a competing rule written by somebody else: create one and the
+    // router immediately reported a conflict, the `foreignRules` gate refused
+    // the next `directCheck`, and the remedy offered was to delete the rule the
+    // user had just asked for.
+    `echo '===CONFLICT==='; if [ -f /etc/config/mwan3 ]; then echo mwan3conf; fi; if pidof mwan3track >/dev/null 2>&1; then echo mwan3run; fi; ip -4 rule show 2>/dev/null | awk -F: -v B=${base} -v D=${direct} -v S=${DIRECT_PREF_SPAN} '$1+0 > 0 && $1+0 < B && !($1+0 >= D && $1+0 < D+S) { n++; if (n <= ${FOREIGN_RULE_LIMIT}) printf "rule %s\\n", $0 } END { printf "total %d\\n", n+0 }'`,
     // The router-side agent, in the same round trip as everything else. A
     // second SSH command per readiness cycle for one small JSON blob is a cost
     // paid on every pooled router the app is connected to, forever.
@@ -432,14 +449,18 @@ function cleanError(error: unknown): string {
  * `rulePrefBase` is the preference the binding engine starts writing at. It
  * decides what counts as a competing rule, so it is asked for rather than
  * assumed - and it travels on into the facts, where the verdict names it.
+ * `directPrefBase` is asked for alongside it for the opposite reason: it
+ * decides what is exempt from that count, because the module's own one-to-one
+ * rules live below `rulePrefBase` and are not competition.
  */
 export async function probeOpenWrt(
   ctx: ModuleContext,
-  rulePrefBase: number = DEFAULT_RULES.rulePrefBase
+  rulePrefBase: number = DEFAULT_RULES.rulePrefBase,
+  directPrefBase: number = DEFAULT_RULES.directPrefBase
 ): Promise<OpenWrtCapabilities> {
   if (!ctx.connected) return emptyCapabilities()
   try {
-    const result = await ctx.exec(buildProbeCommand(rulePrefBase), {
+    const result = await ctx.exec(buildProbeCommand(rulePrefBase, directPrefBase), {
       timeoutMs: PROBE_TIMEOUT_MS
     })
     const sections = splitSections(result.stdout)

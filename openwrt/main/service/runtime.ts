@@ -29,6 +29,13 @@ export interface FastSweepHooks {
   onSlowSample?(sample: OpenWrtSlowSample): void | Promise<void>
   onRouterReboot?(model: RouterModel): void | Promise<void>
   bindingTotals?(): BindingOverviewTotals
+  /**
+   * How many hand-placed one-to-one bindings are on their WAN, and how many are
+   * parked on the blackhole because that WAN is down. Charted together: a
+   * `held` count that climbs is the one shape that says the bindings are doing
+   * exactly what they were asked to do and the router still has a problem.
+   */
+  directTotals?(): { ok: number; held: number }
   pppoeTotals?(): Pick<
     PoolAggregate,
     'total' | 'up' | 'dialing' | 'error' | 'stopped'

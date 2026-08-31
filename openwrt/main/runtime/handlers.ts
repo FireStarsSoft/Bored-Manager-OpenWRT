@@ -29,6 +29,7 @@
 import type { ModuleCheckFinding, ModuleCheckReport } from '@shared/check'
 import type { OkResult } from '@shared/types'
 import { selectOptions } from '../options'
+import { isRecord } from '../util'
 import { installHint, requirementRefusal, requirementWarnings } from '../requirements'
 import { emitUi, type OpenWrtRuntime } from './container'
 import { refreshCapabilities, startPollers } from './readiness'
@@ -45,10 +46,42 @@ import { refreshCapabilities, startPollers } from './readiness'
  * checked here.
  */
 const UNMANAGED_DEVICE =
-  'No WAN Binding instance manages this device, so there is no WAN to give it or take away. Create an instance for its LAN on the Automation page, under WAN Binding; devices on that LAN are assigned on the next sweep.'
+  'No WAN Binding instance manages this device, so there is no WAN to give it or take away. Create an instance for its LAN on the Connection page, under WAN Binding; devices on that LAN are assigned on the next sweep.'
 
 function noInstance(idOrKeys: unknown): boolean {
   return !Array.isArray(idOrKeys) && !String(idOrKeys ?? '').trim()
+}
+
+/**
+ * The values a form-backed method was called with.
+ *
+ * A `form` block sends ONE ARGUMENT PER FIELD, in the order its spec lists
+ * them - a `checkForm` is the one that sends a single object. Written for the
+ * object alone, `bindingUpdate` received the name string where it expected the
+ * whole form, read every field off it as `undefined`, and answered "Save:
+ * done" having changed nothing at all.
+ *
+ * So the positional shape is the one the page uses, and the field order named
+ * at each call site is part of that method's signature. A single object is
+ * still accepted, because that is what a hand-written call sends and what
+ * these methods would receive if their form ever became a `checkForm` - the
+ * same two-shapes courtesy `hintsSet` extends below, and for the same reason.
+ *
+ * An argument that is `undefined` is left out rather than written as an
+ * explicit `undefined`, because the domain distinguishes a field the form did
+ * not send from one it sent empty: the first keeps what the record has, the
+ * second is somebody clearing the box and is refused.
+ */
+function formValues(
+  keys: readonly string[],
+  args: readonly unknown[]
+): Record<string, unknown> {
+  if (args.length === 1 && isRecord(args[0])) return args[0]
+  const values: Record<string, unknown> = {}
+  keys.forEach((key, index) => {
+    if (args[index] !== undefined) values[key] = args[index]
+  })
+  return values
 }
 
 function isReport(value: unknown): value is ModuleCheckReport {
@@ -84,6 +117,7 @@ export function registerHandlers(runtime: OpenWrtRuntime): void {
     ctx,
     binding,
     config,
+    direct,
     events,
     jobs,
     latch,
@@ -91,6 +125,7 @@ export function registerHandlers(runtime: OpenWrtRuntime): void {
     pppoe,
     queries,
     rules,
+    scan,
     service,
     setup,
     store
@@ -152,6 +187,8 @@ export function registerHandlers(runtime: OpenWrtRuntime): void {
     )
   })
   handle('bindingEventRows', (id: unknown) => binding.eventRows(id))
+  handle('directRows', () => direct.rows())
+  handle('scanRows', () => scan.rows())
   handle('eventRows', (source: unknown, limit: unknown) => events.rows(source, limit))
   handle('rulesEffective', () => rules.effective())
   // The one sentence that says which condition is actually stopping an install
@@ -231,9 +268,10 @@ export function registerHandlers(runtime: OpenWrtRuntime): void {
   // configure.
   handle('bindingCheck', (values: unknown) => binding.check(values))
   handle('bindingApply', (payload: unknown) => binding.apply(payload))
-  // The row's edit form: `bindingUpdate(id, values)`, values last, the way
-  // every other form-backed method on this list takes them.
-  handle('bindingUpdate', (id: unknown, values: unknown) => binding.update(id, values))
+  // The row's edit form: name, sticky, remap, in that order. See `formValues`.
+  handle('bindingUpdate', (id: unknown, ...rest: unknown[]) =>
+    binding.update(id, formValues(['name', 'sticky', 'remap'], rest))
+  )
   handle('bindingStart', (id: unknown) => binding.start(id))
   handle('bindingStop', (id: unknown) => binding.stop(id))
   handle('bindingDelete', (id: unknown) => binding.delete(id))
@@ -248,6 +286,21 @@ export function registerHandlers(runtime: OpenWrtRuntime): void {
   handle('bindingPin', (id: unknown, mac: unknown, wan: unknown) =>
     noInstance(id) ? { ok: false, error: UNMANAGED_DEVICE } : binding.pin(id, mac, wan)
   )
+
+  // The hand-placed one-to-one bindings. Its edit form lists name, whenDown,
+  // enabled, in that order.
+  handle('directCheck', (values: unknown) => direct.check(values))
+  handle('directApply', (payload: unknown) => direct.apply(payload))
+  handle('directUpdate', (id: unknown, ...rest: unknown[]) =>
+    direct.update(id, formValues(['name', 'whenDown', 'enabled'], rest))
+  )
+  handle('directEnable', (id: unknown) => direct.enable(id))
+  handle('directDisable', (id: unknown) => direct.disable(id))
+  handle('directDelete', (id: unknown) => direct.delete(id))
+
+  // One button, and it deliberately runs even while the periodic scan is
+  // gated off: somebody is looking at the page by definition.
+  handle('scanNow', () => scan.scanNow())
 
   handle('rulesCheck', (values: unknown) => rules.check(values))
   handle('rulesApply', (payload: unknown) => rules.apply(payload))

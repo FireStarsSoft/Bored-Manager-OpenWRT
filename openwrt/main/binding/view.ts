@@ -11,6 +11,7 @@ import { BADGE, badge, countBadges, statusBadges } from '../badges'
 import { wanState } from './pool'
 import type {
   BindingAssignmentRow,
+  BindingWanAggregate,
   BindingDesiredAssignment,
   BindingDeviceMemory,
   BindingDeviceSummary,
@@ -39,6 +40,35 @@ export function durationLabel(msRaw: number): string {
 
 export function emptyWanSummary(): BindingWanSummary {
   return { total: 0, available: 0, bound: 0, error: 0, warning: 0, dialing: 0 }
+}
+
+/**
+ * Every instance's pool folded into one set of counts.
+ *
+ * A page spec can neither sum a column nor divide two of them, so a donut of
+ * "what is the whole pool doing" and a meter of "how full is it" have to
+ * arrive already computed or not at all.
+ */
+function aggregateWans(
+  instances: readonly BindingSummaryInstance[]
+): BindingWanAggregate {
+  const total = instances.reduce(
+    (sum, instance) => ({
+      total: sum.total + instance.wan.total,
+      available: sum.available + instance.wan.available,
+      bound: sum.bound + instance.wan.bound,
+      error: sum.error + instance.wan.error,
+      warning: sum.warning + instance.wan.warning,
+      dialing: sum.dialing + instance.wan.dialing
+    }),
+    emptyWanSummary()
+  )
+  return {
+    ...total,
+    // Zero rather than a division by nothing. A router with no instance has an
+    // empty pool, and "0% of nothing is bound" is the true reading of it.
+    boundPct: total.total > 0 ? Math.round((total.bound / total.total) * 100) : 0
+  }
 }
 
 export function emptyDeviceSummary(): BindingDeviceSummary {
@@ -70,27 +100,42 @@ export function plannerWaitingRows(context: {
   previousDevices: ReadonlyMap<string, BindingDeviceMemory>
   held: ReadonlySet<string>
   unallocatable: ReadonlySet<string>
+  /**
+   * Addresses a one-to-one binding owns. Optional because the router-owned half
+   * builds these rows from the daemon's own answer, and `bm-wanbind` has no
+   * reserved-address list to report - so there the field is absent rather than
+   * empty, which is the honest statement of "this half cannot know".
+   */
+  reservedIps?: ReadonlySet<string>
 }): BindingWaitingRow[] {
   return context.queue.map((entry, index) => {
     const lease = context.currentLeases.get(entry.mac)?.lease
     const isHeld = context.held.has(entry.mac)
+    const ip = lease?.ip ?? context.previousDevices.get(entry.mac)?.ip ?? ''
     return {
       key: `${context.instanceId}|${entry.mac}`,
       instanceId: context.instanceId,
       mac: entry.mac,
       host: lease?.host ?? context.previousDevices.get(entry.mac)?.host ?? '',
-      ip: lease?.ip ?? context.previousDevices.get(entry.mac)?.ip ?? '',
+      ip,
       position: index + 1,
       waitingSince: entry.enqueuedAt,
       waitingFor: durationLabel(context.now - entry.enqueuedAt),
       // Every row used to read as though a free WAN were the only thing
       // missing. For a held device that is untrue, and for one the preference
       // range could not seat it is unactionable: no WAN coming free will help.
-      reason: isHeld
-        ? 'unassigned by hand'
-        : context.unallocatable.has(entry.mac)
-          ? 'preferences exhausted'
-          : 'waiting for a free WAN',
+      //
+      // A one-to-one binding is checked first of the four because it outranks
+      // the other three as an explanation: the address already has a WAN, from
+      // the other automation, and no action on this page - releasing a hold,
+      // widening the preference range, freeing a WAN - will ever move it.
+      reason: context.reservedIps?.has(ip)
+        ? 'bound one-to-one'
+        : isHeld
+          ? 'unassigned by hand'
+          : context.unallocatable.has(entry.mac)
+            ? 'preferences exhausted'
+            : 'waiting for a free WAN',
       held: isHeld,
       heldLabel: isHeld ? 'Held' : 'Waiting',
       holdBadges: statusBadges(isHeld ? 'held' : 'waiting')
@@ -263,7 +308,8 @@ export function emitSnapshot(
     hookOk: error == null,
     lastError: error ?? '',
     instances,
-    rows: listRows(runtime)
+    rows: listRows(runtime),
+    wans: aggregateWans(instances)
   }
   runtime.ctx.emit('binding', runtime.latestPayload)
 }

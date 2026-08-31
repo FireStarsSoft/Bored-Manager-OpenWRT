@@ -26,10 +26,10 @@ export function newestSticky(data: OwrtHostData): OwrtHostData['stickyMap'] {
 }
 
 /**
- * Drop table assignments whose binding instance is gone.
+ * Drop table assignments whose owning record is gone.
  *
- * `extraTables` is only ever written by a binding preparation, and nothing used
- * to remove an entry: delete an instance and its `[wan, table]` pairs stayed in
+ * `extraTables` is only ever written by a preparation, and nothing used to
+ * remove an entry: delete an instance and its `[wan, table]` pairs stayed in
  * the document for the life of the router, still overriding the WAN-to-table
  * map for every instance created afterwards.
  *
@@ -38,9 +38,20 @@ export function newestSticky(data: OwrtHostData): OwrtHostData['stickyMap'] {
  * record is pushed by the last item of the same job - or one from a build that
  * predates the field, and `normalize` is where those are dealt with, because
  * loading a document from disk is the one moment nothing can be in flight.
+ *
+ * The live set is built from the one-to-one bindings as well as the instances,
+ * because a `dir_` owner is just as real an owner. This runs inside every
+ * `HostStore.read()` *and* every `update()`, so an owner set that knew only
+ * about instances deleted a direct binding's table claim inside the very same
+ * `update()` that recorded the binding - the claim never survived long enough
+ * to be written to disk, and the WAN's `ip4table` was then free for the next
+ * instance to take.
  */
 export function pruneExtraTables(data: OwrtHostData): void {
-  const live = new Set(data.instances.map((instance) => instance.id))
+  const live = new Set<string>([
+    ...data.instances.map((instance) => instance.id),
+    ...data.direct.map((binding) => binding.id)
+  ])
   data.extraTables = data.extraTables.filter((entry) => !entry[2] || live.has(entry[2]))
 }
 

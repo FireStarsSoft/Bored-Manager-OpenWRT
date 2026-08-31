@@ -18,8 +18,17 @@ import { isBindingCarrier } from '../options'
 import { managedLayout } from '../records'
 import { isSafeUciValue } from '../uci'
 import type { BindingInstanceRecord } from '../store'
-import { carrierScopesOverlap, parseCidr, subnetsOverlap, textField } from '../util'
+import {
+  carrierScopesOverlap,
+  ipv4ToInt,
+  parseCidr,
+  rangeToCidrs,
+  subnetContains,
+  subnetsOverlap,
+  textField
+} from '../util'
 import { planCapacity } from './capacity'
+import { routerOwnsBinding } from './reconcile'
 import {
   carrierMatches,
   ifaceScopeKeys,
@@ -28,15 +37,9 @@ import {
 } from './pool'
 import { MANAGED_PREF_CEILING } from './rules'
 import { currentWanTables } from './runtime'
+import { allocateWanTables, zoneFindings } from './shared'
 import { buildWanTableIndex } from './tables'
-import {
-  FIREWALL_ZONE,
-  UCI_SECTION,
-  firewallZoneForNetwork,
-  firewallZoneMasquerades,
-  networkTables,
-  preparationProbe
-} from './uci-doc'
+import { networkTables, preparationProbe } from './uci-doc'
 import type {
   BindingCreatePlan,
   BindingRuntime,
@@ -169,6 +172,76 @@ export async function checkBinding(
     }
   }
 
+  /**
+   * Which addresses on that LAN this instance may hand a WAN to.
+   *
+   * There is deliberately no cross-instance range-overlap check, and there must
+   * not be one: one instance per LAN is still the rule, range or whole-LAN. The
+   * clashes filter below already refuses a second instance on a LAN another one
+   * owns, and the subnet check above refuses two LANs that overlap - so two
+   * ranges can never see the same address in the first place.
+   *
+   * Two instances on one LAN is out of scope rather than merely unimplemented.
+   * `readActualAssignments` scopes rule ownership by the LAN subnet, so a pair
+   * of same-LAN instances would each read the other's client rules as their own
+   * and delete them on every tick, for ever.
+   */
+  const source = textField(values, 'source') === 'range' ? 'range' : 'lan'
+  const from = textField(values, 'from')
+  const to = textField(values, 'to')
+  if (source === 'range') {
+    if (routerOwnsBinding(runtime)) {
+      findings.push({
+        level: 'error',
+        label: 'bm-wanbind owns binding on this router and has no address range',
+        detail: 'The daemon reads its instances from /etc/config/bm_wanbind, whose sections carry a LAN and a carrier and nothing else, so it would bind the whole LAN and the range would exist only in this module. Create a whole-LAN instance, or remove the bm-wanbind package and let the module drive the router itself.'
+      })
+    }
+    const low = ipv4ToInt(from)
+    const high = ipv4ToInt(to)
+    const subnet = cidr ? parseCidr(cidr) : null
+    // Nothing at all when the LAN itself could not be read: the finding above
+    // already says why, and "the range is not inside nothing" would be a
+    // second, confident refusal underneath the real one.
+    if (!cidr) {
+      findings.push({
+        level: 'info',
+        label: 'The address range was not checked because the LAN subnet is unknown'
+      })
+    } else if (low == null || high == null) {
+      findings.push({
+        level: 'error',
+        // The only branch where the value is still unparsed text, so it is the
+        // one refusal here that does not quote it back.
+        label: 'The range start and end must both be IPv4 addresses',
+        detail: 'Write them in dotted form, for example 192.168.1.50 and 192.168.1.99.'
+      })
+    } else if (low > high) {
+      findings.push({
+        level: 'error',
+        label: `The range runs backwards: ${from} is above ${to}`
+      })
+    } else if (!subnet || !subnetContains(subnet, from) || !subnetContains(subnet, to)) {
+      findings.push({
+        level: 'error',
+        label: `The range ${from} - ${to} is not inside ${cidr}`,
+        detail: 'Every rule this instance writes selects a source address behind this LAN, so an address outside the subnet could never match one.'
+      })
+    } else {
+      // No maximum size, on purpose. Every per-device state this module keeps
+      // is driven by a DHCP lease, and nothing here or in the planner ever
+      // walks the addresses between the endpoints - the catch-all is written
+      // from the covering CIDR blocks - so a range spanning a whole /16 costs
+      // exactly what a ten-address one does.
+      const blocks = rangeToCidrs(from, to)
+      findings.push({
+        level: 'pass',
+        label: `Only ${from} - ${to} will be bound, as ${blocks.length} catch-all block(s)`,
+        detail: `Devices on ${cidr} outside that range are left alone and keep the router's default connection.`
+      })
+    }
+  }
+
   const carrierExists = model.ifaces.some(
     (iface) =>
       iface.device === carrier ||
@@ -275,128 +348,29 @@ export async function checkBinding(
       networkTableOwners.set(table, wan)
     }
   }
-  const usedTables = new Set<number>([
-    ...tableIndex.byTable.keys(),
-    ...uciTables.values(),
-    rules.catchAllTable
-  ])
-  const tableAdds: TablePreparation[] = []
-  let candidateTable = rules.catchAllTable - 1
-  for (const iface of pool) {
-    const observed = uciTables.get(iface.name)
-    if (observed != null) continue
-    if (!UCI_SECTION.test(iface.name)) {
-      findings.push({
-        level: 'error',
-        label: `WAN section "${iface.name}" cannot be prepared safely`,
-        detail: 'Its UCI section name contains unsupported characters.'
-      })
-      continue
-    }
-    const conventional = tableIndex.byWan.get(iface.name)
-    if (
-      conventional != null &&
-      conventional !== rules.catchAllTable &&
-      tableIndex.byTable.get(conventional) === iface.name
-    ) {
-      tableAdds.push({ wan: iface.name, table: conventional })
-      continue
-    }
-    while (
-      candidateTable > rules.tableBase &&
-      usedTables.has(candidateTable)
-    ) {
-      candidateTable -= 1
-    }
-    if (candidateTable <= rules.tableBase) {
-      findings.push({
-        level: 'error',
-        label: 'No free numeric routing table remains between the PPPoE and catch-all ranges',
-        // `usedTables` is router-wide, so splitting the pool into smaller
-        // instances frees nothing: widening the range is the only remedy.
-        detail: `Tables ${rules.tableBase + 1}-${rules.catchAllTable - 1} are all spoken for and every WAN needs its own. Widen the range with "Routing-table base" or "Unreachable routing table" under Module settings, Rules - the second is locked while any binding instance exists.`
-      })
-      break
-    }
-    tableAdds.push({ wan: iface.name, table: candidateTable })
-    usedTables.add(candidateTable)
-    candidateTable -= 1
-  }
-  if (tableAdds.length) {
-    findings.push({
-      level: 'info',
-      label: `${tableAdds.length} pre-existing WAN(s) need option ip4table`,
-      detail: tableAdds
-        .slice(0, 12)
-        .map((entry) => `${entry.wan} -> ${entry.table}`)
-        .join(', ')
-        .concat(tableAdds.length > 12 ? `, and ${tableAdds.length - 12} more` : '')
-    })
-  }
+  const tableAdds: TablePreparation[] = allocateWanTables(
+    {
+      wans: pool.map((iface) => iface.name),
+      uciTables,
+      tableIndex,
+      rules
+    },
+    findings
+  )
 
+  // Both stay at their "nothing was read" values when the probe failed: the
+  // findings above already say why, and inventing a zone here would put a
+  // second, confident refusal underneath the real one.
   let lanZone = ''
-  const destinationZones = new Set<string>()
+  let destinationZones: string[] = []
   if (probe) {
-    lanZone = firewallZoneForNetwork(probe.firewall, lan)
-    if (!lanZone) {
-      findings.push({
-        level: 'error',
-        label: `LAN "${lan}" is not assigned to a firewall zone`,
-        detail: 'WAN Binding needs the source zone so it can install scoped forwarding without changing unrelated LANs.'
-      })
-    } else if (!FIREWALL_ZONE.test(lanZone)) {
-      findings.push({
-        level: 'error',
-        label: `LAN firewall zone "${lanZone}" has an unsupported name`
-      })
-    } else {
-      findings.push({
-        level: 'pass',
-        label: `LAN ${lan} uses firewall zone ${lanZone}`
-      })
-    }
-    for (const iface of pool) {
-      const zone = firewallZoneForNetwork(probe.firewall, iface.name)
-      if (zone) {
-        if (FIREWALL_ZONE.test(zone)) {
-          destinationZones.add(zone)
-        } else {
-          findings.push({
-            level: 'error',
-            label: `WAN "${iface.name}" uses firewall zone "${zone}" with an unsupported name`
-          })
-        }
-      } else {
-        // A managed pool member is always in its pool's zone by explicit
-        // `list network` - bm-pppoe-pool writes the membership in the same
-        // breath as the interface - so a PPPoE WAN with no zone here is a
-        // real gap, not the old wildcard-device arrangement.
-        findings.push({
-          level: 'error',
-          label: `WAN "${iface.name}" is not assigned to a firewall zone`,
-          detail: 'Assign the WAN to a masquerading firewall zone before putting it in a one-to-one pool.'
-        })
-      }
-    }
-    destinationZones.add(rules.zoneName)
-    for (const zone of destinationZones) {
-      if (!firewallZoneMasquerades(probe.firewall, zone) && zone !== rules.zoneName) {
-        findings.push({
-          level: 'warning',
-          label: `Firewall zone "${zone}" does not have masquerading enabled`,
-          detail: 'One-to-one WAN binding needs SNAT on the selected WAN zone or clients will not reach the internet.'
-        })
-      }
-    }
-    // A pool may be empty during preparation and receive managed PPPoE WANs
-    // later. Keep its scoped forwarding ready without touching other zones.
-    if (destinationZones.size > 32) {
-      findings.push({
-        level: 'error',
-        label: 'The selected pool spans more than 32 firewall zones',
-        detail: 'Split it into smaller carrier-scoped binding instances.'
-      })
-    }
+    const zones = zoneFindings(
+      probe,
+      { lan, wans: pool.map((iface) => iface.name), moduleZone: rules.zoneName },
+      findings
+    )
+    lanZone = zones.lanZone
+    destinationZones = zones.destinationZones
   }
 
   const dhcp =
@@ -457,7 +431,12 @@ export async function checkBinding(
     // catch-all, the forwardings, the tables - has to aim at the same numbers,
     // and reading them live meant one config edit re-pointed a running
     // instance at a table nothing had ever been written to.
-    layout: managedLayout(rules)
+    layout: managedLayout(rules),
+    // Only stamped for a range. An absent `source` is what every instance
+    // written before ranges existed carries and it already means "the whole
+    // LAN", so writing that out explicitly would make new records differ from
+    // old ones for no behaviour at all.
+    ...(source === 'range' ? { source: { kind: 'range' as const, from, to } } : {})
   }
   const plan: BindingCreatePlan = {
     instance,
@@ -470,7 +449,7 @@ export async function checkBinding(
   findings.push({
     level: 'pass',
     label: `Will prepare and start "${name}"`,
-    detail: `${lan} -> ${carrier}; sticky ${sticky ? 'on' : 'off'}, error remap ${remap ? 'on' : 'off'}.`
+    detail: `${lan}${source === 'range' ? ` (${from} - ${to})` : ''} -> ${carrier}; sticky ${sticky ? 'on' : 'off'}, error remap ${remap ? 'on' : 'off'}.`
   })
   return {
     ok: true,

@@ -2,8 +2,9 @@
  * Editing an instance that already exists.
  *
  * Only three of its fields can change: the display name and the two behaviour
- * flags. `lan` and `carrier` cannot, and not for want of a form field - they
- * are the topology every rule on the router was built from. Moving a running
+ * flags. `lan`, `carrier` and the address range cannot, and not for want of a
+ * form field - they are the topology every rule on the router was built from,
+ * and the range decides which blocks its catch-all selects. Moving a running
  * instance to another LAN would leave its catch-all pointing at the old subnet
  * and its client rules written from addresses that are no longer behind it, so
  * a device would keep a WAN it can no longer reach and a new one would leak
@@ -14,6 +15,7 @@
  * pass, and the fast tick is what applies them.
  */
 import type { OkResult } from '@shared/types'
+import { isSafeUciValue } from '../uci'
 import { isRecord, textField } from '../util'
 import { recordEvents } from './events'
 import { republishSnapshot } from './view'
@@ -49,8 +51,14 @@ export function updateInstance(
   const name = Object.prototype.hasOwnProperty.call(values, 'name')
     ? textField(values, 'name')
     : instance.name
-  if (!name || name.length > 80) {
-    return { ok: false, error: 'instance name must contain 1-80 characters' }
+  // The same sieve the create gate applies, and for the same reason: this name
+  // reaches job labels, event rows and `ctx.log`, so a control character inside
+  // it forges a whole line in each of them. Checking only the length here left
+  // a rename as the way in - the gate was on the door and not on the window,
+  // and an instance created under a clean name could be edited into a dirty
+  // one. The value is deliberately not echoed back into the refusal.
+  if (!name || name.length > 80 || !isSafeUciValue(name)) {
+    return { ok: false, error: 'instance name must contain 1-80 characters on one line' }
   }
   if (
     data.instances.some(
@@ -66,6 +74,26 @@ export function updateInstance(
         ok: false,
         error: `the ${key === 'lan' ? 'LAN interface' : 'WAN carrier'} of an existing instance cannot be changed - its catch-all and every client rule were installed for ${instance.lan} -> ${instance.carrier}; delete this instance and create one for ${asked}`
       }
+    }
+  }
+  // The address range joins them, for the same reason and with the same
+  // remedy. The catch-all standing on the router right now was written as the
+  // covering CIDR blocks of the range this instance was created with: narrow
+  // the range here and every device that fell out of it keeps matching a
+  // blackholed block with no assignment rule ever coming to lift it out, while
+  // widening it leaves the new addresses matching nothing at all.
+  const stored = instance.source?.kind === 'range' ? instance.source : null
+  const askedSource = textField(values, 'source')
+  const askedFrom = textField(values, 'from')
+  const askedTo = textField(values, 'to')
+  if (
+    (askedSource && askedSource !== (stored ? 'range' : 'lan')) ||
+    (stored && askedFrom && askedFrom !== stored.from) ||
+    (stored && askedTo && askedTo !== stored.to)
+  ) {
+    return {
+      ok: false,
+      error: `the address range of an existing instance cannot be changed - its catch-all was installed for ${stored ? `${stored.from} - ${stored.to}` : `the whole of ${instance.lan}`}; delete this instance and create one with the range you want`
     }
   }
   const sticky = boolField(values, 'sticky', instance.sticky)

@@ -138,7 +138,29 @@ function defaultBindingTotals(
   const running = store.read().instances.some((instance) => instance.running)
   return {
     bound: assigned.size,
-    waiting: running ? Math.max(0, model.leases.length - assigned.size) : 0
+    waiting: running ? Math.max(0, model.leases.length - assigned.size) : 0,
+    // Not reconstructible from `ip rule` alone: which WANs are in which pool
+    // and which of them are healthy is the binding half's own judgement. Zero
+    // is the honest answer during activation, and it is a chosen answer rather
+    // than a stumbled-into one - a free-WAN count invented here would be read
+    // as "the pool is full" on exactly the ticks nothing knows yet.
+    wanFree: 0,
+    wanErrBound: 0
+  }
+}
+
+/**
+ * The one-to-one totals, or zeroes.
+ *
+ * Same rule as `bindingTotals` below: a hook that throws during activation
+ * must not take the whole overview with it, and the fallback has to be a
+ * number a chart can draw rather than a gap.
+ */
+function directTotals(runtime: SweepRuntime): { ok: number; held: number } {
+  try {
+    return runtime.hooks.directTotals?.() ?? { ok: 0, held: 0 }
+  } catch {
+    return { ok: 0, held: 0 }
   }
 }
 
@@ -196,6 +218,7 @@ export function buildOverview(
   const poolIfaces = model.ifaces.filter((iface) => isPoolIface(iface, ranges))
   const poolAgg = poolAggregate(runtime, model, poolIfaces)
   const binding = bindingTotals(runtime, model)
+  const direct = directTotals(runtime)
   const nonPool = model.ifaces
     .filter((iface) => !isPoolIface(iface, ranges))
     .sort((a, b) => a.name.localeCompare(b.name))
@@ -221,7 +244,15 @@ export function buildOverview(
       wanErr: poolAgg.error,
       devices: model.leases.length,
       bound: Math.max(0, binding.bound),
-      waiting: Math.max(0, binding.waiting)
+      waiting: Math.max(0, binding.waiting),
+      wanFree: Math.max(0, binding.wanFree),
+      wanErrBound: Math.max(0, binding.wanErrBound),
+      // `wanUp` and `wanErr` above are already this pool's up and error
+      // counts; only the dialling one had nowhere to go, and a chart of
+      // sessions that omits it reads as though a redialling pool were down.
+      pppDial: Math.max(0, poolAgg.dialing),
+      directOk: Math.max(0, direct.ok),
+      directHeld: Math.max(0, direct.held)
     },
     ifaces: nonPool,
     poolAgg,

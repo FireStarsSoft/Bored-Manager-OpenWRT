@@ -1025,7 +1025,7 @@
                                   "title": "Reassign and Unassign need an instance behind the device",
                                   "lines": [
                                     "Both act through the WAN Binding instance that owns the device's LAN. Group by binding state, or read the Binding column: a row marked unmanaged has no instance behind it, and both buttons refuse it and say so.",
-                                    "To bring a LAN under management, create an instance for it on the Automation page, under WAN Binding."
+                                    "To bring a LAN under management, create an instance for it on the Connection page, under WAN Binding."
                                   ]
                                 }
                               ]

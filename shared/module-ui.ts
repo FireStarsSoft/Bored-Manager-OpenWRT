@@ -123,15 +123,44 @@ export interface SectionBlock {
   blocks: Block[]
 }
 
+/**
+ * One rail entry that carries its own content. A leaf is what a reader
+ * actually opens, and exactly one of them is selected at a time.
+ */
+export interface SubnavLeaf {
+  id: string
+  label: string
+  icon?: string
+  blocks: Block[]
+}
+
+/**
+ * A rail entry that opens to reveal leaves, the way the app's own sidebar
+ * expands a module into its pages.
+ *
+ * A group is a heading, never a destination: it holds no blocks of its own,
+ * and selecting one of its leaves is what changes the pane. Nesting stops
+ * here - a group inside a group is refused, because a rail deep enough to
+ * need two levels of disclosure is a page that wanted splitting instead.
+ */
+export interface SubnavGroup {
+  id: string
+  label: string
+  icon?: string
+  items: SubnavLeaf[]
+}
+
+export type SubnavItem = SubnavLeaf | SubnavGroup
+
 export interface SubnavBlock {
   type: 'subnav'
-  items: Array<{
-    id: string
-    label: string
-    icon?: string
-    blocks: Block[]
-  }>
-  /** Id of the item shown first; defaults to the first item. */
+  items: SubnavItem[]
+  /**
+   * Id of the leaf shown first, at either level; defaults to the first leaf in
+   * document order. It has to name a leaf rather than a group: a group has
+   * nothing of its own to show, so a rail that opened on one would render an
+   * empty pane and look broken.
+   */
   initial?: string
 }
 
@@ -145,6 +174,28 @@ export interface NoteBlock {
   tone?: 'info' | 'warning'
 }
 
+/**
+ * A block asking for the reader's eye, and saying in data when it is owed.
+ *
+ * The same shape as `ConditionalWhen`, and evaluated by the same code: a spec
+ * says *when* something is urgent and the app decides what urgent looks like,
+ * so a module still never picks a colour, a timing or an animation. That
+ * division is the whole point - a module that could pick its own would compete
+ * with every other module for attention, and the loudest would win rather than
+ * the most important.
+ *
+ * The movement is an enhancement, never the message. Whatever the block says
+ * while it is still - a red bar, a red card - has to carry the same meaning on
+ * its own, because a reader who has asked their system for less motion will
+ * only ever see the still form.
+ */
+export interface AttentionWhen {
+  source: DataSource
+  path?: string
+  op: 'exists' | 'eq' | 'gt'
+  value?: unknown
+}
+
 export interface StatBlock {
   type: 'stat'
   label: string
@@ -152,6 +203,8 @@ export interface StatBlock {
   format: ValueFormat
   /** Small trend chart under the value. */
   spark?: { source: DataSource; key: string }
+  /** Draws attention to the value while this resolves true. */
+  attention?: AttentionWhen
 }
 
 export interface MeterBlock {
@@ -160,6 +213,8 @@ export interface MeterBlock {
   source: DataSource
   format?: ValueFormat
   max?: number
+  /** Draws attention to the bar while this resolves true. */
+  attention?: AttentionWhen
 }
 
 /**
@@ -246,11 +301,27 @@ export interface PieBlock {
   type: 'pie'
   source: DataSource
   slices: PieSliceDecl[]
-  /** Number drawn in the donut hole. Omit to sum the slices. */
+  /**
+   * Number drawn in the donut hole. Omit to sum the slices.
+   *
+   * Bear in mind that a centre resolving to zero is read as "nothing to draw"
+   * and shows `emptyText` instead of the donut - which is right for a total
+   * and wrong for a percentage, where zero is a real and usually alarming
+   * answer. Bind a count here, not a share.
+   */
   center?: { key: string; label?: string }
   emptyText?: string
   format?: ValueFormat
+  /** Draws attention to the donut while this resolves true. */
+  attention?: AttentionWhen
 }
+
+/**
+ * Where a row's detail blocks are drawn. A spec picks the shape of the
+ * container, never its styling: the app owns the width, the scrim and the
+ * animation, the same way it owns what `attention` looks like.
+ */
+export type DetailView = 'drawer' | 'modal'
 
 export interface KeyValueRow {
   key: string
@@ -339,6 +410,13 @@ export interface TableBlock {
   bulkActions?: ActionSpec[]
   /** Blocks rendered in a drawer when a row is clicked, scoped to that row (`$row.*`). */
   rowDetail?: Block[]
+  /**
+   * How `rowDetail` is presented. The default right-hand drawer suits a short
+   * inspect panel; `modal` is for a detail that is a page in its own right -
+   * several tabs, a form and a table of its own - which a drawer's width turns
+   * into a column of wrapped labels.
+   */
+  detailView?: DetailView
   emptyText?: string
 }
 
@@ -357,11 +435,45 @@ export interface LogBlock {
 }
 
 /** Opens an embedded terminal running a command built from the current scope. */
+/**
+ * A button that opens a real shell on the target machine.
+ *
+ * Two ways to say what it runs, and which one you need is decided by whether a
+ * credential is involved.
+ *
+ * `commandTemplate` is built in the browser from the spec and the row, so it
+ * is right for anything a person could have typed themselves - `docker exec`,
+ * `journalctl -f` - and wrong for anything with a secret in it, since both the
+ * template and the value would be visible.
+ *
+ * `commandMethod` asks the module, on the server, at the moment the button is
+ * pressed. The command is composed where the module's own credentials live and
+ * goes straight to the terminal pool without passing through the browser -
+ * which is what lets a module open something like an IPMI Serial-over-LAN
+ * session. The module is expected to stage anything sensitive itself (writing
+ * it to a private file over `ctx.exec`'s stdin, say) and return a command line
+ * that carries only a path.
+ */
 export interface TerminalBlock {
   type: 'terminal'
   label: string
   /** `{{key}}` placeholders are filled from the current scope. */
-  commandTemplate: string
+  commandTemplate?: string
+  /**
+   * A module method answering `{ command }` - the command line to run. Must be
+   * one of `manifest.methods`. Use instead of `commandTemplate`, never both.
+   */
+  commandMethod?: string
+  /** Scope keys passed to `commandMethod` as positional arguments, in order. */
+  argsFromRow?: string[]
+}
+
+/** What a `commandMethod` answers with. */
+export interface ModuleTerminalCommand {
+  /** The command line to run in a PTY on the target machine. */
+  command: string
+  /** Shown instead of opening anything, when the module cannot build one. */
+  problem?: string
 }
 
 export interface ActionsBlock {
@@ -476,6 +588,16 @@ export interface StatusCardsBlock {
   statusKey: string
   /** Field with a short right-aligned summary in the title row ("3/4 running"). */
   subtitleKey?: string
+  /**
+   * Field holding a boolean; a card whose value is `true` draws attention to
+   * itself. Per card rather than per wall, so a rack with one failed node
+   * points at that node instead of flashing forty cards at once.
+   *
+   * Use it for the few that are urgent, not for everything that is `bad`:
+   * cards already sort worst-first, and a wall where every card moves says
+   * nothing about which one to open.
+   */
+  attentionKey?: string
   /** A collapsible line under the title, for what the module knows about this item. */
   note?: { key: string; label?: string; startOpen?: boolean }
   /**
@@ -508,6 +630,8 @@ export interface StatusCardsBlock {
   rowActions?: ActionSpec[]
   /** Blocks in a drawer when a card is clicked, scoped to that item (`$row.*`). */
   rowDetail?: Block[]
+  /** Same choice a `table` makes; see `TableBlock.detailView`. */
+  detailView?: DetailView
   emptyText?: string
 }
 
@@ -660,8 +784,24 @@ function nestedBlockArrays(block: Record<string, unknown>): Array<{ path: string
   if (Array.isArray(elseBlocks)) out.push({ path: 'else', blocks: elseBlocks })
   if (Array.isArray(items)) {
     for (const [index, item] of items.entries()) {
-      if (isRecord(item) && Array.isArray(item['blocks'])) {
+      if (!isRecord(item)) continue
+      if (Array.isArray(item['blocks'])) {
         out.push({ path: `items[${index}].blocks`, blocks: item['blocks'] })
+      }
+      // A subnav group holds leaves rather than blocks of its own. Without
+      // this the leaves inside one are never checked at all and never counted
+      // against the depth and size caps - a whole half of a page would pass
+      // validation untouched because its parent had no `blocks` key.
+      const nested = item['items']
+      if (Array.isArray(nested)) {
+        for (const [child, leaf] of nested.entries()) {
+          if (isRecord(leaf) && Array.isArray(leaf['blocks'])) {
+            out.push({
+              path: `items[${index}].items[${child}].blocks`,
+              blocks: leaf['blocks']
+            })
+          }
+        }
       }
     }
   }
@@ -736,10 +876,56 @@ function checkObjectArray(
   return true
 }
 
+/** Takes the whole block: the choice is only meaningful next to a `rowDetail`. */
+function checkDetailView(problems: string[], where: string, block: Record<string, unknown>): void {
+  const value = block['detailView']
+  if (value == null) return
+  if (value !== 'drawer' && value !== 'modal') {
+    problems.push(`${where}.detailView must be drawer or modal`)
+  }
+  // Same rule as `bulkActions` needing `selectable`: a container with nothing
+  // to put in it is a spec that reads as configured and does nothing at all.
+  pushIf(
+    problems,
+    !Array.isArray(block['rowDetail']),
+    `${where}.detailView needs rowDetail, or there is nothing for it to open`
+  )
+}
+
 function checkFormat(problems: string[], where: string, format: unknown): void {
   if (format != null && !VALUE_FORMATS.has(format as ValueFormat)) {
     problems.push(`${where}: "${String(format)}" is not a value format`)
   }
+}
+
+/**
+ * A `ConditionalWhen` or an `AttentionWhen` - the same shape, validated once.
+ * `required` distinguishes a `conditional`, which is nothing without it, from
+ * an `attention` clause, which is an optional extra on a block that renders
+ * perfectly well without one.
+ */
+function checkWhen(
+  problems: string[],
+  where: string,
+  value: unknown,
+  manifest: ModuleManifest,
+  options: { required?: boolean } = {}
+): void {
+  if (value == null) {
+    if (options.required === true) problems.push(`${where} is missing`)
+    return
+  }
+  if (!isRecord(value)) {
+    problems.push(`${where} is not an object`)
+    return
+  }
+  checkSource(problems, `${where}.source`, value['source'], manifest)
+  checkOptionalString(problems, `${where}.path`, value['path'])
+  pushIf(
+    problems,
+    value['op'] !== 'exists' && value['op'] !== 'eq' && value['op'] !== 'gt',
+    `${where}.op must be exists, eq or gt`
+  )
 }
 
 /** `where` names the source field itself (`blocks[0].source`, `...fields[1].optionsFrom`). */
@@ -941,37 +1127,58 @@ function checkBlock(problems: string[], where: string, block: unknown, manifest:
       })
       break
     case 'subnav': {
-      const items = b['items']
+      // Ids are unique across the whole tree rather than per level, because a
+      // rail selects exactly one of them at a time: two leaves sharing a name
+      // in different groups would both light up and both open.
       const ids = new Set<string>()
-      if (!Array.isArray(items) || items.length < 1 || items.length > 32) {
-        problems.push(`${where}.items must be an array of 1 to 32 items`)
+      const leafIds = new Set<string>()
+      const checkItems = (list: unknown, path: string, nested: boolean): void => {
+        if (!Array.isArray(list) || list.length < 1 || list.length > 32) {
+          problems.push(`${path} must be an array of 1 to 32 items`)
+          return
+        }
+        for (const [index, item] of list.entries()) {
+          const at = `${path}[${index}]`
+          if (!isRecord(item)) {
+            problems.push(`${at} is not an object`)
+            continue
+          }
+          const id = item['id']
+          if (typeof id !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(id)) {
+            problems.push(`${at}.id is not a valid subnav id`)
+          } else if (ids.has(id)) {
+            problems.push(`${at}.id "${id}" is used twice`)
+          } else {
+            ids.add(id)
+          }
+          checkRequiredString(problems, `${at}.label`, item['label'])
+          if (
+            item['icon'] != null &&
+            (typeof item['icon'] !== 'string' || !MODULE_ICON_NAMES.has(item['icon']))
+          ) {
+            problems.push(`${at}.icon "${String(item['icon'])}" is not a module icon`)
+          }
+          if (item['items'] != null) {
+            if (nested) {
+              problems.push(`${at}.items: a subnav group cannot contain another group`)
+              continue
+            }
+            if (item['blocks'] != null) {
+              problems.push(
+                `${at} declares both blocks and items - a group holds items, a leaf holds blocks`
+              )
+            }
+            checkItems(item['items'], `${at}.items`, true)
+            continue
+          }
+          checkObjectArray(problems, `${at}.blocks`, item['blocks'], { required: true })
+          if (typeof id === 'string' && id) leafIds.add(id)
+        }
       }
-      for (const [index, item] of (Array.isArray(items) ? items : []).entries()) {
-        const at = `${where}.items[${index}]`
-        if (!isRecord(item)) {
-          problems.push(`${at} is not an object`)
-          continue
-        }
-        const id = item['id']
-        if (typeof id !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(id)) {
-          problems.push(`${at}.id is not a valid subnav id`)
-        } else if (ids.has(id)) {
-          problems.push(`${at}.id "${id}" is used twice`)
-        } else {
-          ids.add(id)
-        }
-        checkRequiredString(problems, `${at}.label`, item['label'])
-        if (
-          item['icon'] != null &&
-          (typeof item['icon'] !== 'string' || !MODULE_ICON_NAMES.has(item['icon']))
-        ) {
-          problems.push(`${at}.icon "${String(item['icon'])}" is not a module icon`)
-        }
-        checkObjectArray(problems, `${at}.blocks`, item['blocks'], { required: true })
-      }
+      checkItems(b['items'], `${where}.items`, false)
       if (b['initial'] != null) {
-        if (typeof b['initial'] !== 'string' || !ids.has(b['initial'])) {
-          problems.push(`${where}.initial must name a subnav item`)
+        if (typeof b['initial'] !== 'string' || !leafIds.has(b['initial'])) {
+          problems.push(`${where}.initial must name a subnav leaf`)
         }
       }
       break
@@ -997,6 +1204,7 @@ function checkBlock(problems: string[], where: string, block: unknown, manifest:
       pushIf(problems, typeof b['label'] !== 'string' || !b['label'], `${where}.label is missing`)
       checkSource(problems, `${where}.source`, b['source'], manifest)
       checkFormat(problems, where, b['format'])
+      checkWhen(problems, `${where}.attention`, b['attention'], manifest)
       if (type === 'stat') {
         const spark = b['spark']
         if (spark != null) {
@@ -1075,6 +1283,7 @@ function checkBlock(problems: string[], where: string, block: unknown, manifest:
     }
     case 'pie': {
       checkSource(problems, `${where}.source`, b['source'], manifest)
+      checkWhen(problems, `${where}.attention`, b['attention'], manifest)
       const slices = b['slices']
       pushIf(problems, !Array.isArray(slices) || slices.length === 0, `${where}.slices is empty`)
       for (const [i, slice] of (Array.isArray(slices) ? slices : []).entries()) {
@@ -1265,6 +1474,7 @@ function checkBlock(problems: string[], where: string, block: unknown, manifest:
         }
       }
       checkObjectArray(problems, `${where}.rowDetail`, b['rowDetail'])
+      checkDetailView(problems, where, b)
       // A selection is a list of rowKey values, and the default rowKey is
       // whatever the first column happens to be - fine for a React key, not
       // for deciding which containers to remove.
@@ -1287,6 +1497,7 @@ function checkBlock(problems: string[], where: string, block: unknown, manifest:
       for (const field of ['rowKey', 'titleKey', 'statusKey'] as const) {
         pushIf(problems, typeof b[field] !== 'string' || !b[field], `${where}.${field} is missing`)
       }
+      checkOptionalString(problems, `${where}.attentionKey`, b['attentionKey'])
       const items = b['items']
       if (items == null) problems.push(`${where}.items is missing`)
       else if (!isRecord(items)) problems.push(`${where}.items is not an object`)
@@ -1348,6 +1559,7 @@ function checkBlock(problems: string[], where: string, block: unknown, manifest:
         }
       }
       checkObjectArray(problems, `${where}.rowDetail`, b['rowDetail'])
+      checkDetailView(problems, where, b)
       break
     }
     case 'log': {
@@ -1357,14 +1569,27 @@ function checkBlock(problems: string[], where: string, block: unknown, manifest:
       checkStringArray(problems, `${where}.argsFromScope`, b['argsFromScope'])
       break
     }
-    case 'terminal':
+    case 'terminal': {
       pushIf(problems, typeof b['label'] !== 'string' || !b['label'], `${where}.label is missing`)
+      const template = typeof b['commandTemplate'] === 'string' && b['commandTemplate'] !== ''
+      const method = typeof b['commandMethod'] === 'string' && b['commandMethod'] !== ''
+      // Exactly one, because the two differ in where the command is built and
+      // therefore in what may safely appear in it. A block carrying both would
+      // leave which of those applies up to the renderer.
       pushIf(
         problems,
-        typeof b['commandTemplate'] !== 'string' || !b['commandTemplate'],
-        `${where}.commandTemplate is missing`
+        !template && !method,
+        `${where} needs either commandTemplate or commandMethod`
       )
+      pushIf(
+        problems,
+        template && method,
+        `${where} has both commandTemplate and commandMethod - use one`
+      )
+      if (method) checkMethod(problems, `${where}.commandMethod`, b['commandMethod'], manifest)
+      checkStringArray(problems, `${where}.argsFromRow`, b['argsFromRow'])
       break
+    }
     case 'actions': {
       const actions = b['actions']
       if (
@@ -1399,18 +1624,7 @@ function checkBlock(problems: string[], where: string, block: unknown, manifest:
       break
     }
     case 'conditional': {
-      const when = b['when']
-      if (when == null) problems.push(`${where}.when is missing`)
-      else if (!isRecord(when)) problems.push(`${where}.when is not an object`)
-      else {
-        checkSource(problems, `${where}.when.source`, when['source'], manifest)
-        checkOptionalString(problems, `${where}.when.path`, when['path'])
-        pushIf(
-          problems,
-          when['op'] !== 'exists' && when['op'] !== 'eq' && when['op'] !== 'gt',
-          `${where}.when.op must be exists, eq or gt`
-        )
-      }
+      checkWhen(problems, `${where}.when`, b['when'], manifest, { required: true })
       checkObjectArray(problems, `${where}.blocks`, b['blocks'], { required: true })
       checkObjectArray(problems, `${where}.else`, b['else'])
       break

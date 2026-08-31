@@ -151,3 +151,18 @@ export function trimFinishedJob(job: FinishedJob, maxItems = MAX_FINISHED_JOB_IT
  * collector hide rules the binding engine still claims.
  */
 export const MANAGED_PREF_CEILING = 30_000
+
+/**
+ * How wide the `ip rule` preference band a one-to-one binding draws from is.
+ *
+ * The band starts at `directPrefBase` and is required to end before every
+ * instance's `rulePrefBase`. Both halves of that follow from the same kernel
+ * rule - the lowest preference wins. Below the instance band, a hand-placed
+ * binding beats the assignment an instance would hand the same address, which
+ * is the whole point of naming an address by hand; and because
+ * `readActualAssignments` and the free-preference loop in the planner both
+ * start counting at `rulePrefBase`, a rule down here is invisible to the
+ * instance planner rather than something it can adopt as its own and then
+ * delete on the next tick for having no lease behind it.
+ */
+export const DIRECT_PREF_SPAN = 1_000

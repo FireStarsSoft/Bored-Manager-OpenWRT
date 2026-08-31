@@ -6,6 +6,7 @@ export type OpenWrtOptionKind =
   | 'lan-ifaces'
   | 'carriers'
   | 'binding-carriers'
+  | 'wan-ports'
 
 function uniqueSorted(options: FormFieldOption[]): FormFieldOption[] {
   const byValue = new Map<string, FormFieldOption>()
@@ -158,6 +159,32 @@ export function selectOptions(
             iface.device ? ` on ${iface.device}` : ''
           }`
         }))
+    ).slice(0, 500)
+  }
+
+  // The WAN a single address can be bound to. Unlike a carrier - which names a
+  // device and scopes a whole pool of interfaces under it - this is one UCI
+  // interface section, because a one-to-one binding points at exactly one
+  // routing table and a table belongs to an interface rather than to a device.
+  if (kind === 'wan-ports') {
+    return uniqueSorted(
+      model.ifaces
+        .filter(
+          (iface) =>
+            iface.name !== 'loopback' &&
+            ['pppoe', 'dhcp', 'static'].includes(iface.proto) &&
+            !iface.l3Device.startsWith('br-')
+        )
+        .map((iface) => {
+          // The address is what a person recognises the uplink by; the state
+          // is here because binding to a WAN that is down is allowed and
+          // should be a deliberate choice rather than a surprise.
+          const address = iface.ipv4?.addr ? ` — ${iface.ipv4.addr}` : ''
+          const device = iface.l3Device || iface.device
+          const where = device ? ` on ${device}` : ''
+          const state = iface.up && iface.ipv4 ? '' : iface.pending ? ' (dialing)' : ' (down)'
+          return { value: iface.name, label: `${iface.name}${address}${where}${state}` }
+        })
     ).slice(0, 500)
   }
 

@@ -15,6 +15,7 @@ export {
   serializeHostData,
   serializedBytes,
   type BindingInstanceRecord,
+  type DirectBindingRecord,
   type ModuleEventScope,
   type OwrtHostData,
   type PersistedHostData

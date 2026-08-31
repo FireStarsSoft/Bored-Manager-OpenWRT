@@ -1,12 +1,217 @@
 # Changelog
 
-Module versions are independent of the app's. OpenWRT 2.x and 3.x need Bored
-Manager **0.4.1**, for the `statusCards` and `meter` blocks, badge columns and
-forms that open pre-filled, and OpenWrt **25.12** on the router. The 1.0.x line
-needs **0.3.3**, for the `subnav` and `note` blocks and the `file` form input.
-From 3.0.0, PPPoE pools also need the router packages at **2.x** - the rest of
-the module does not. Which release a module build installs is pinned in
-`main/agent/manifest.ts`.
+Module versions are independent of the app's. From **3.3.0** the module needs
+Bored Manager **0.7.0**, for a rail that expands in place and a row detail that
+opens nearly full screen - both of them app features this module can only opt
+into. OpenWRT 2.x and 3.0.0 to 3.2.1 need **0.4.1**, for the `statusCards` and
+`meter` blocks, badge columns and forms that open pre-filled; every one of them
+needs OpenWrt **25.12** on the router. The 1.0.x line needs **0.3.3**, for the
+`subnav` and `note` blocks and the `file` form input. From 3.0.0, PPPoE pools
+also need the router packages at **2.x** - the rest of the module does not.
+Which release a module build installs is pinned in `main/agent/manifest.ts`.
+
+## 3.3.0
+
+Needs Bored Manager **0.7.0** and OpenWrt **25.12 or newer**. Router packages
+stay pinned at **2.2.0**: nothing on the router side changed, and a router
+running the 2.2.0 packages needs no attention for any of this.
+
+### Why the app floor moved
+
+A module ships JSON block specs and nothing else - no React, no CSS, no chart
+component. So two of this release's surfaces could not be built here at all;
+they were built in the app first and are opted into by the page spec.
+
+- **The Connection rail expands in place.** PPPoE Dialer and WAN Binding are
+  groups now, and their entries live under them in the rail instead of behind a
+  second rail nested inside the page. WAN Binding has six: Overview, Binding
+  1-1, Instances, Create an instance, Monitor, Behaviour. Any of them is one
+  click from anywhere on the page, where operate, create and tune used to be
+  three scrolls apart below a table that can be a thousand rows tall. Below the
+  `md` breakpoint the horizontal strip flattens the groups away, because an
+  accordion inside a strip is not one.
+- **A row's detail opens nearly full screen.** A pool's detail is six tabs, and
+  a `sm:max-w-xl` drawer was the wrong container for it by a wide margin. The
+  pool table and the binding instance table ask for a modal at roughly 94% of
+  the window over a dimmed page. Every other table in this module still opens
+  the drawer, and so does every table in every other module: it is opted into
+  per table and defaults to what was there before.
+
+An app below 0.7.0 refuses to install this release rather than rendering the
+page half-built.
+
+### Binding 1-1: one address out one WAN port
+
+An instance is an automation - it watches a LAN and hands out whatever WANs are
+free. Until now that was the only binding this module could do, and it is not
+what somebody wants when one machine has to leave by one line and no other. A
+one-to-one binding names one target and one WAN port, and nothing about it is
+allocated, remapped or released.
+
+The target is an **IP or a MAC**, chosen per binding. A MAC is resolved through
+the leases on every pass, taking that MAC's longest-running lease rather than
+the first line for it: a device that moved between LANs leaves the abandoned
+lease behind, and a rule written for the old address steers nothing while
+looking exactly like a binding that works. A lease that moves moves the rule; a
+device that leaves keeps its rule for the lease-release grace and then loses
+it; a MAC with no lease at all is a warning on the form rather than a refusal,
+and its rule appears when the device does.
+
+It writes three things: `option ip4table` on the WAN section if it has none,
+a firewall forwarding from the address's own LAN zone under this binding's own
+`bmd<slot>_` prefix, and `ip -4 rule add from <ip>/32 lookup <table> pref
+<pref>` at a preference from a band of 1,000 that sits **below** every
+instance's. The lowest preference wins, so a binding somebody placed by hand
+beats the assignment an instance handed the same device - and because the
+instance planner starts reading at its own base, a rule down here is invisible
+to it and can be neither adopted nor deleted. The planner is told about the
+address as well, on all three of its paths, so a device that already held an
+assignment loses it on the next tick, frees the WAN it was holding, and appears
+in the waiting table reading *bound one-to-one*.
+
+**When the WAN goes down** a binding either holds (the default, fail closed) or
+falls back to the router's ordinary connection, per binding. Hold is an
+explicit re-point at the module's unreachable table, not a rule left where it
+was, and the reason is worth stating plainly: a rule whose lookup table has no
+matching route **does not fail**. The kernel's fib-rule walk carries on to the
+next rule and out of the main table - the default connection. A "hold" that
+left the rule alone would send exactly the traffic it was meant to detain out
+of exactly the link it was meant to avoid, while the page said *held*.
+
+Falling back is a re-point too, at the **main** table rather than at nothing.
+Removing the rule only reaches the default connection on a LAN no instance
+owns; where one does, its fail-closed catch-all would catch the address the
+instant the rule went, and the option somebody chose to keep a device online
+would have taken it off the network altogether. Two further states say so out
+loud rather than lying quietly: a MAC binding whose device turns up on a LAN
+this binding has no firewall path from reads **stranded** and stays fail-closed
+instead of writing a rule fw4 would drop, and two bindings that resolve to one
+address leave the lower-preference one in force with the other reading
+**shadowed** and naming it.
+
+On a router where `bm-wanbind` owns binding, one-to-one bindings are still
+written by this module into their own band; the two writers never touch the
+same preferences. What the daemon cannot do is skip an address, so it will also
+allocate a bound device a pool WAN it never uses - a warning on the create
+form, in those words.
+
+### An instance can watch an address range
+
+A binding instance can be scoped to an IP range inside one LAN instead of the
+whole of it, which is how a network gets one automated block for the machines
+that each need their own line while everything else on the LAN carries on
+normally. Both endpoints must be IPv4, in order, and inside the LAN's subnet.
+There is no maximum size, because nothing anywhere iterates the addresses in a
+range - every per-device decision is lease-driven.
+
+The part that had to be redesigned is the **fail-closed catch-all**. A
+whole-LAN catch-all under a range instance would blackhole every device on the
+LAN outside the range: the planner only assigns leases inside it, so nothing
+else would ever get a rule of its own to outrank the catch-all. So a range
+instance's catch-all is written as the minimal set of CIDR blocks covering
+exactly the range, all sharing the one catch-all preference the instance owns,
+and the per-tick repair compares that preference group as a **set** rather than
+asserting a single rule - which is also what stops it tearing a multi-block
+catch-all back to one whole-LAN rule every thirty seconds.
+
+One instance per LAN is still the rule, range or whole-LAN. The range is fixed
+for the instance's life, like its LAN and its carrier. And a range is refused
+outright while `bm-wanbind` owns binding: the daemon's sections carry a LAN and
+a carrier and nothing else, so it would bind the whole LAN while the range
+existed only in this module's records. The refusal names the package and both
+ways out.
+
+### The binding monitor
+
+The fast sweep filters `ip rule show` down to this module's own preference
+window on the router. That is what keeps a sweep small at a thousand bound
+clients, and it is also why a rule *below* that window has always been able to
+steer every packet while appearing nowhere: bindings read as applied, the
+dashboard is green, and the traffic leaves by another WAN. The readiness card
+has warned about the count since 2.x. It could not say what those rules do.
+
+**Connection → WAN Binding → Monitor** reads the whole table instead - one
+round trip, capped at 500 rule lines, 64 tables and 8 route lines each, with a
+fail-closed sentinel so a router that could not read its own rule table reports
+a failed scan and never an empty one. It has its own parser, because the
+sweep's requires a numeric lookup and a `from` and would silently drop a rule
+with a named table (`lookup vpn`) and every selector-only rule - which is to
+say, precisely what the monitor exists to find.
+
+Each row gets an owner decided by evidence: a **one-to-one binding** (a
+preference in the band with a record stamped to it), an **instance**, a
+**safety catch-all**, the **bm-wanbind daemon**, **mwan3**, or **outside this
+module** - the last being the answer the feature was built to produce. Bands
+come from each instance's stamped layout rather than today's settings, so
+moving a base does not make the module start calling its own rules foreign.
+Beside the owner, each row says which table the address looks up, where that
+table leads, and how that differs from the router's default connection, plus
+the honest variants: *no way out* for a table with no matching route (claimed
+only when the routes pass actually reached that table), *held*, and
+*outranks module* - which is the sentence that finally explains a binding shown
+as applied whose traffic goes somewhere else.
+
+**It never touches a rule.** It has no write path at all, and the rules it is
+best at finding are exactly the ones whose purpose nobody here can know. It
+also costs nothing on a router nobody is watching: the scan runs only while the
+Connection page is open and stops when it closes. The gate is per page rather
+than per tab - that is what the app can answer - so sitting on Pools keeps it
+running.
+
+### Charts on both automations
+
+Neither automation had a chart - only number tiles, on the page where the
+consequences show. PPPoE Dialer's Pools now carries the session states over
+time and pool throughput; WAN Binding's Overview carries bound against
+waiting, the free WANs against errors, the WAN pool as a pie, a bound-percent
+meter and the one-to-one counts. Four history keys are new - `wanFree`,
+`pppDial`, `directOk`, `directHeld` - while `wanUp` and `wanErr` were already
+the pool's up and error counts and are relabelled rather than duplicated, so
+those two series have history from the day they were first recorded. The
+`binding` stream carries a WAN-pool aggregate and a bound percentage, because a
+spec can render a ratio but cannot compute one.
+
+### Automation is now Connection
+
+The page is called **Connection**, in full: label, id and spec filename. It has
+not been only about automation for a while - it holds the dialer, binding, the
+jobs both of them run and the events both of them raise.
+
+One consequence worth knowing before it surprises anybody: **a saved active tab
+pointing at `openwrt/automation` no longer resolves, and the app falls back to
+Overview once.** Pick Connection again and it sticks. Nothing else is affected,
+and no per-router state is touched by the rename.
+
+### Two new settings
+
+Both are in Module settings → Advanced rules, beside the numbering they belong
+with.
+
+- **One-to-one rule priority base** - 1000 to 28000, default 19000. Where the
+  band of 1,000 preferences that one-to-one bindings are stamped from begins.
+  It is deliberately not locked the way the instance bases are: each binding
+  carries the preference it was written with, so moving the base only decides
+  where new ones go. What it may never do is run the band into the instance
+  band, and a saved value that would is discarded when the rules are next read.
+- **Binding scan interval (s)** - 15 to 3600, default 60. How often the Monitor
+  re-reads the rule table while somebody has that page open. Changing it
+  re-times the poller rather than waiting for a reconnect.
+
+### Downgrading below 3.3.0 leaves rules behind
+
+The per-router document is at schema **v3**. A v2 document loads unchanged, as
+v1 did into v2 - but the reverse is not symmetrical, and this is the one thing
+in this release that can bite quietly.
+
+A build below 3.3.0 has never heard of one-to-one bindings. It discards those
+records on load **while their rules stay on the router**, where the older build
+cannot recognise them and this build's own monitor would name them as written
+outside the module. There is then nothing in any app that knows what they were
+or removes them; they have to be taken off by hand at a router shell.
+
+**Delete every one-to-one binding before downgrading.** Deleting takes the
+rule, the `bmd<slot>_` firewall sections and the routing-table claim with it,
+which is exactly what a downgrade does not do.
 
 ## 3.2.1
 

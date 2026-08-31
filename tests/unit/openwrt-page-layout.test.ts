@@ -57,11 +57,18 @@ function railIds(spec: Node): string[] {
   return ((found['items'] as Node[]) ?? []).map((item) => String(item['id']))
 }
 
+/** The leaves inside one top-level group, in order. */
+function groupLeafIds(spec: Node, id: string): string[] {
+  const found = rail(spec)
+  const item = ((found?.['items'] as Node[]) ?? []).find((entry) => entry['id'] === id)
+  return ((item?.['items'] as Node[]) ?? []).map((leaf) => String(leaf['id']))
+}
+
 describe('every page is grouped by a rail', () => {
   const EXPECTED: Record<string, string[]> = {
     'pages/dashboard.json': ['overview', 'history', 'devices', 'interfaces'],
     'pages/settings.json': ['readiness', 'packages', 'jobs', 'display', 'scaling', 'rules'],
-    'pages/automation.json': ['pppoe', 'binding', 'jobs', 'events']
+    'pages/connection.json': ['pppoe', 'binding', 'jobs', 'events']
   }
 
   for (const [file, ids] of Object.entries(EXPECTED)) {
@@ -83,7 +90,10 @@ describe('each automation owns its own configuration', () => {
     const found = rail(spec)
     const item = ((found?.['items'] as Node[]) ?? []).find((entry) => entry['id'] === id)
     const out = new Set<string>()
-    for (const node of nodes(item?.['blocks'])) {
+    // A rail entry is either a leaf carrying blocks or a group carrying
+    // leaves; both automations are groups now, so reading only `blocks` would
+    // find nothing and every assertion below would pass vacuously.
+    for (const node of nodes(item?.['blocks'] ?? item?.['items'])) {
       if (typeof node['checkMethod'] === 'string') out.add(node['checkMethod'])
       if (typeof node['applyMethod'] === 'string') out.add(node['applyMethod'])
       const submit = node['submit'] as Node | undefined
@@ -92,13 +102,17 @@ describe('each automation owns its own configuration', () => {
     return out
   }
 
-  const automation = (): Node => specNamed('pages/automation.json')
+  const automation = (): Node => specNamed('pages/connection.json')
 
   it('no longer has a Create tab holding both of them', () => {
     // "Create" carried the PPPoE form, the binding form, a second copy of the
     // package installer and a second copy of the job monitor - four unrelated
     // jobs in one tab, and neither automation's own tab could create anything.
     expect(railIds(automation())).not.toContain('create')
+    // And no leaf may be called that either: ids are unique across the whole
+    // rail now, so the two create forms cannot share one name.
+    expect(groupLeafIds(automation(), 'pppoe')).not.toContain('create')
+    expect(groupLeafIds(automation(), 'binding')).not.toContain('create')
   })
 
   it('creates a PPPoE pool from the PPPoE tab', () => {
@@ -151,41 +165,51 @@ describe('each automation owns its own configuration', () => {
   })
 })
 
-describe('each automation tab is grouped by its own rail', () => {
-  /** The nested `subnav` an automation tab's blocks consist of, if any. */
-  function nestedRail(spec: Node, id: string): Node | null {
-    const found = rail(spec)
-    const item = ((found?.['items'] as Node[]) ?? []).find((entry) => entry['id'] === id)
-    const blocks = (item?.['blocks'] as Node[]) ?? []
-    const first = blocks[0]
-    return first && first['type'] === 'subnav' ? first : null
-  }
-
-  const itemIds = (nested: Node | null): unknown[] =>
-    ((nested?.['items'] as Node[]) ?? []).map((item) => item['id'])
-
-  it('groups the PPPoE tab into pools, create and daemon settings', () => {
+describe('each automation expands in the rail rather than nesting a second one', () => {
+  it('expands the PPPoE entry into pools, create and daemon settings', () => {
     // Operate, create and tune are three different errands. On one scroll the
     // second and third lived below a table that can be a thousand rows tall.
-    const nested = nestedRail(specNamed('pages/automation.json'), 'pppoe')
-    expect(itemIds(nested)).toEqual(['pools', 'create', 'daemon'])
-    expect(nested?.['initial']).toBe('pools')
+    // They used to be a second rail nested inside the first; they are the
+    // group's own leaves now, so one click reaches any of them.
+    expect(groupLeafIds(specNamed('pages/connection.json'), 'pppoe')).toEqual([
+      'pools',
+      'pool-create',
+      'daemon'
+    ])
   })
 
-  it('groups the WAN Binding tab into instances, create and behaviour', () => {
-    const nested = nestedRail(specNamed('pages/automation.json'), 'binding')
-    expect(itemIds(nested)).toEqual(['instances', 'create', 'behaviour'])
-    expect(nested?.['initial']).toBe('instances')
+  it('expands the WAN Binding entry into its own leaves', () => {
+    expect(groupLeafIds(specNamed('pages/connection.json'), 'binding')).toContain('instances')
+    expect(groupLeafIds(specNamed('pages/connection.json'), 'binding')).toContain(
+      'instance-create'
+    )
+    expect(groupLeafIds(specNamed('pages/connection.json'), 'binding')).toContain('behaviour')
   })
 
-  it('leaves nothing outside those rails', () => {
-    // A block sitting beside the nested rail would show on every view of the
-    // tab - which is the one-long-scroll problem coming back one block at a
-    // time.
+  it('opens on a leaf rather than on a group', () => {
+    // A group has no pane of its own, so a rail that opened on one would draw
+    // an empty page. The renderer refuses it; this is the spec keeping its end.
+    const found = rail(specNamed('pages/connection.json'))
+    const groups = ((found?.['items'] as Node[]) ?? [])
+      .filter((item) => Array.isArray(item['items']))
+      .map((item) => String(item['id']))
+    expect(groups).toEqual(['pppoe', 'binding'])
+    expect(groups).not.toContain(String(found?.['initial']))
+    expect(groupLeafIds(specNamed('pages/connection.json'), 'pppoe')).toContain(
+      String(found?.['initial'])
+    )
+  })
+
+  it('leaves nothing beside those leaves', () => {
+    // A block sitting on the group itself would show on every view of it -
+    // which is the one-long-scroll problem coming back one block at a time.
+    // The renderer refuses a group that carries blocks; this says the spec
+    // never tries.
     for (const id of ['pppoe', 'binding']) {
-      const found = rail(specNamed('pages/automation.json'))
+      const found = rail(specNamed('pages/connection.json'))
       const item = ((found?.['items'] as Node[]) ?? []).find((entry) => entry['id'] === id)
-      expect(((item?.['blocks'] as Node[]) ?? []).length).toBe(1)
+      expect(item?.['blocks']).toBeUndefined()
+      expect(((item?.['items'] as Node[]) ?? []).length).toBeGreaterThan(0)
     }
   })
 })
@@ -202,7 +226,7 @@ describe('the hints toggle reaches everything it claims to', () => {
   })
 
   it('gives every form an explanation that can be switched off', () => {
-    for (const file of ['pages/settings.json', 'pages/automation.json']) {
+    for (const file of ['pages/settings.json', 'pages/connection.json']) {
       const spec = specNamed(file)
       const forms = nodes(spec).filter((node) => node['type'] === 'form' || node['type'] === 'checkForm')
       const fieldNotes = nodes(spec).filter(

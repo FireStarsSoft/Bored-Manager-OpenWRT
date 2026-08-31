@@ -114,14 +114,14 @@ export function checkUninstall(runtime: AgentRuntime, raw: unknown): ModuleCheck
     findings.push({
       level: 'error',
       label: `${blocking.instances.length} binding instance(s) are still running`,
-      detail: `Stop ${blocking.instances.join(', ')} on the Automation page first. Removing the packages underneath a running instance would leave its ip rules and its fail-closed catch-all on the router with nothing maintaining them.`
+      detail: `Stop ${blocking.instances.join(', ')} on the Connection page first. Removing the packages underneath a running instance would leave its ip rules and its fail-closed catch-all on the router with nothing maintaining them.`
     })
   }
   if (blocking.batches.length) {
     findings.push({
       level: 'error',
       label: `${blocking.batches.length} PPPoE pool(s) still exist`,
-      detail: `Delete ${blocking.batches.join(', ')} on the Automation page first. The sessions would stay dialed and the firewall zone would stay in place, and nothing left on the router would know what they were for.`
+      detail: `Delete ${blocking.batches.join(', ')} on the Connection page first. The sessions would stay dialed and the firewall zone would stay in place, and nothing left on the router would know what they were for.`
     })
   }
 

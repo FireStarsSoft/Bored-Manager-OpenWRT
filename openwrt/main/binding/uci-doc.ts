@@ -12,7 +12,7 @@ import { splitSections } from '@shared/shell'
 // zone reader.
 import { tokenizeUciValues } from '../parse'
 import { ENGINE_STOPPED, shellFailure } from './runtime'
-import type { BindingRuntime, RouterPreparationProbe, UciDocument } from './types'
+import type { ExecDeps, RouterPreparationProbe, UciDocument } from './types'
 
 const CHECK_TIMEOUT_MS = 20_000
 
@@ -150,14 +150,14 @@ export function networkTables(document: UciDocument): Map<string, number> {
 }
 
 export async function preparationProbe(
-  runtime: BindingRuntime
+  deps: ExecDeps
 ): Promise<RouterPreparationProbe> {
-  if (runtime.disposed) throw new Error(ENGINE_STOPPED)
-  const result = await runtime.ctx.exec('sh -s', {
+  if (deps.disposed) throw new Error(ENGINE_STOPPED)
+  const result = await deps.ctx.exec('sh -s', {
     stdin: PREPARATION_SCRIPT,
     timeoutMs: CHECK_TIMEOUT_MS
   })
-  if (runtime.disposed) throw new Error(ENGINE_STOPPED)
+  if (deps.disposed) throw new Error(ENGINE_STOPPED)
   if (result.code === 125 || result.stderr.includes('[overflow]')) {
     throw probeTruncated()
   }

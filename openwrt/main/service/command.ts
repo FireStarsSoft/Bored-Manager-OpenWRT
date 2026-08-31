@@ -104,8 +104,15 @@ export function buildFastSweepCommand(
     // fails closed the same way a failed `ip` does, and the trailing `; :`
     // keeps the joined command's exit status at 0 - without it the final
     // `[ -n "" ]` would decide it.
+    //
+    // The window opens at whichever band starts first rather than at
+    // `rulePrefBase`, because the one-to-one band sits below it by
+    // construction. Anchored on `rulePrefBase` alone the filter cut every 1-1
+    // rule out of the sample - and the direct reconcile reads `model.rules` as
+    // the truth about what the router is holding, so it would have found its
+    // own band empty and re-added every rule on every single tick.
     `echo '===RULES==='; BM_RULES=$(mktemp /tmp/.bm-owrt-rules.XXXXXX 2>/dev/null) || BM_RULES=; if [ -n "$BM_RULES" ] && ip -4 rule show >"$BM_RULES" 2>/dev/null; then awk -F: -v B=${Math.trunc(
-      rules.rulePrefBase
+      Math.min(rules.directPrefBase, rules.rulePrefBase)
     )} -v E=${MANAGED_PREF_CEILING} '$1+0 >= B && $1+0 < E' "$BM_RULES"; echo '===RULESOK==='; echo 1; else echo '===RULESOK==='; echo 0; fi; [ -n "$BM_RULES" ] && rm -f "$BM_RULES"; :`
   ]
   if (includeDump) {

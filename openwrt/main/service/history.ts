@@ -41,6 +41,15 @@ export function sampleHistory(runtime: SweepRuntime, at: number): boolean {
     // way to see a pool that ran out overnight.
     bound: overview.counts.bound,
     waiting: overview.counts.waiting,
+    // The three counters that make the other two readable after the fact: a
+    // queue is only alarming next to the WANs that were free while it grew,
+    // and a one-to-one binding parked on the blackhole is invisible in every
+    // other number here.
+    wanFree: overview.counts.wanFree,
+    wanErrBound: overview.counts.wanErrBound,
+    pppDial: overview.counts.pppDial,
+    directOk: overview.counts.directOk,
+    directHeld: overview.counts.directHeld,
     rx: overview.poolAgg.rx,
     tx: overview.poolAgg.tx,
     // Persisted alongside the traffic so the history charts can show a router

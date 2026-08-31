@@ -28,6 +28,10 @@ const activate: ModuleActivate = (ctx: ModuleContext) => {
   return {
     applyPollers() {
       startPollers(runtime.latch)
+      // The monitor keeps its own poller on its own interval, so it has to be
+      // (re)armed here too. This hook is also what runs after a settings save,
+      // which is the only thing that ever re-times it.
+      runtime.scan.applyPollers()
     },
 
     reset() {

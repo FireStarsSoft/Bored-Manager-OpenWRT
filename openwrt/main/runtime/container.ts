@@ -15,11 +15,13 @@ import type { ModuleContext } from '@shared/modules'
 import { AgentManager, guardedJobs } from '../agent'
 import { BindingEngine } from '../binding'
 import { ConfigStore, RulesEditor } from '../config'
+import { DirectEngine } from '../direct'
 import { EventLog } from '../events'
 import { Jobs } from '../jobs'
 import { LimitsManager } from '../limits'
 import { PppoeManager } from '../pppoe'
 import { Queries } from '../queries'
+import { ScanEngine } from '../scan'
 import { FastSweep } from '../service'
 import { SetupManager } from '../setup'
 import { HostStore, type OwrtHostData } from '../store'
@@ -41,6 +43,8 @@ export interface OpenWrtRuntime {
   service: FastSweep
   pppoe: PppoeManager
   binding: BindingEngine
+  direct: DirectEngine
+  scan: ScanEngine
   queries: Queries
   rules: RulesEditor
   setup: SetupManager
@@ -56,6 +60,7 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
 
   let pppoe!: PppoeManager
   let binding!: BindingEngine
+  let direct!: DirectEngine
   let latch!: CapabilityLatch
 
   // Every job that changes the router's network configuration runs under the
@@ -73,7 +78,14 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
     async onSample() {
       pppoe.onSample()
       const model = service.latest
-      if (model) await binding.onSample(model)
+      if (!model) return
+      await binding.onSample(model)
+      // After the instance half, not before: both fold their own writes back
+      // into `model.rules` so an action arriving between ticks plans against
+      // what the router now holds, and the second one to run has to see the
+      // first one's result. The two bands are disjoint, so this is about the
+      // freshness of the snapshot rather than about who wins.
+      await direct.onSample(model)
     },
     async onSlowSample(sample) {
       // Only against a map the router answered for on this tick. The audit
@@ -93,10 +105,23 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
       return binding.snapshot().instances.reduce(
         (total, instance) => ({
           bound: total.bound + instance.devices.bound,
-          waiting: total.waiting + instance.devices.waiting
+          waiting: total.waiting + instance.devices.waiting,
+          // Charted beside `bound` and `waiting` because the three only mean
+          // anything together: a queue that is growing while free WANs sit
+          // unused is a different fault from one that is growing because the
+          // pool is full, and the counters alone cannot tell them apart.
+          wanFree: total.wanFree + instance.wan.available,
+          // This pool's own failures, which is not what `wanErr` counts - that
+          // is the PPPoE dialer's. A chart pairing free WANs with the dialer's
+          // errors reads as a flat zero on a router whose binding carrier is a
+          // DHCP uplink.
+          wanErrBound: total.wanErrBound + instance.wan.error
         }),
-        { bound: 0, waiting: 0 }
+        { bound: 0, waiting: 0, wanFree: 0, wanErrBound: 0 }
       )
+    },
+    directTotals() {
+      return direct.totals()
     },
     pppoeTotals() {
       const latest = pppoe.latest
@@ -147,10 +172,32 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
     agent: () => latch.capabilities.agent,
     wanTables: () => service.uciTables,
     requestDump: () => service.forceDumpNextTick(),
+    // Addresses a hand-placed one-to-one binding has already claimed. The
+    // instance planner leaves them alone entirely - it does not seat them, does
+    // not preserve a rule it finds for them and does not hold a WAN open for
+    // one - because a device carrying both rules would read as bound to a WAN
+    // its traffic never uses. Read per pass, like everything else here.
+    reservedIps: () => {
+      const model = service.latest
+      return model ? direct.reservedIps(model) : []
+    },
     // The routing-table audit belongs to the router, not to any one binding
     // instance, so it goes to the module ring rather than an instance's own.
     event: (kind: string, text: string) => events.record('router', kind, text)
   })
+
+  direct = new DirectEngine({
+    ctx,
+    store,
+    rules: () => config.effectiveRules(),
+    jobs: guarded,
+    agent: () => latch.capabilities.agent,
+    wanTables: () => service.uciTables,
+    latestModel: () => service.latest,
+    requestDump: () => service.forceDumpNextTick(),
+    event: (kind: string, text: string) => events.record('router', kind, text)
+  })
+
 
   const queries = new Queries(
     () => service.latest,
@@ -176,10 +223,44 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
   // every pooled machine the app is connected to. Re-read on every
   // applyPollers(), which the host already runs on each tab switch, connect and
   // settings change.
-  latch = createCapabilityLatch(ctx, service, () => {
-    if (store.read().instances.length > 0 || pppoe.poolCount() > 0) return true
-    return ctx.streamActive('overview') || ctx.tabActive
+  latch = createCapabilityLatch(
+    ctx,
+    service,
+    () => {
+      if (store.read().instances.length > 0 || pppoe.poolCount() > 0) return true
+      return ctx.streamActive('overview') || ctx.tabActive
+    },
+    // Read per probe rather than captured, because the Rules editor moves both
+    // bands while the module is running - and a probe holding the shipped
+    // defaults would report this module's own rules as competing ones.
+    () => config.effectiveRules().rulePrefBase,
+    () => config.effectiveRules().directPrefBase,
+    // The monitor's own poller follows the same verdict, and is built just
+    // below - so it is reached lazily, like the two automations above.
+    () => scan.applyPollers()
+  )
+  // The monitor reads the router's whole rule table rather than the window the
+  // collector filters to, which is the only way a rule somebody else wrote can
+  // be seen at all. Everything it needs to tell those apart from this module's
+  // own is handed to it as a closure, so it never holds a copy that could go
+  // stale between scans.
+  const scan = new ScanEngine({
+    ctx,
+    rules: () => config.effectiveRules(),
+    latestModel: () => service.latest,
+    direct: () => store.read().direct,
+    instances: () => store.read().instances,
+    assignments: () =>
+      binding
+        .snapshot()
+        .instances.flatMap((instance) =>
+          binding
+            .rows(instance.id)
+            .map((row) => ({ ip: row.ip, wan: row.wan, instance: instance.id }))
+        ),
+    capabilities: () => latch.capabilities
   })
+
   const agent = new AgentManager({
     ctx,
     capabilities: () => latch.capabilities,
@@ -245,6 +326,8 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
     service,
     pppoe,
     binding,
+    direct,
+    scan,
     queries,
     rules,
     setup,
@@ -269,6 +352,8 @@ export function snapshots(runtime: OpenWrtRuntime): Record<string, unknown> {
     series: runtime.service.series,
     pppoe: runtime.pppoe.snapshot(),
     binding: runtime.binding.snapshot(),
+    direct: runtime.direct.snapshot(),
+    monitor: runtime.scan.snapshot(),
     jobs: runtime.jobs.snapshot()
   }
 }
@@ -284,6 +369,10 @@ export function resetRuntime(runtime: OpenWrtRuntime): void {
   runtime.jobs.reset()
   runtime.pppoe.reset()
   runtime.binding.reset()
+  runtime.direct.reset()
+  // The rows described one router's rule table, and nothing about them
+  // survives the machine behind this context changing.
+  runtime.scan.reset()
   runtime.rules.clear()
   // A limits token froze values read off one router; the next one is not it.
   runtime.limits.clear()
@@ -306,6 +395,10 @@ export function disposeRuntime(runtime: OpenWrtRuntime): void {
   runtime.jobs.dispose()
   runtime.pppoe.dispose()
   runtime.binding.dispose()
+  runtime.direct.dispose()
+  // Its own poller, so its own stop: the host's backstop only fires when the
+  // module is deactivated, not when this context changes machine.
+  runtime.scan.dispose()
   runtime.rules.clear()
   runtime.limits.clear()
   runtime.store.dispose()

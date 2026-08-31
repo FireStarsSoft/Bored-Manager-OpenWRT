@@ -10,9 +10,9 @@
  */
 import { hasFeature, wanbindFlush, wanbindReconcile, wanbindSection } from '../agent'
 import { recordLayout } from '../records'
-import type { OwrtHostData } from '../store'
+import type { BindingInstanceRecord, OwrtHostData } from '../store'
 import type { RouterModel } from '../types'
-import { parseCidr } from '../util'
+import { rangeToCidrs } from '../util'
 import { recordEvents } from './events'
 import { emptyPlannerMemory, normalizedMac } from './memory'
 import { lanCidr, plannerPolicy, plannerWans, poolIfaces } from './pool'
@@ -22,7 +22,8 @@ import {
   catchAllLocalRoute,
   catchAllRoute,
   chunkRuleCommands,
-  emptyRuleDiff
+  emptyRuleDiff,
+  ruleCidr
 } from './rules'
 import { routerSample } from './router'
 import { ENGINE_STOPPED, currentWanTables, execScript, exclusive } from './runtime'
@@ -48,6 +49,37 @@ const STICKY_TOUCH_MS = 10_000
  * one lower without the router having gone anywhere.
  */
 const REBOOT_SLACK_SEC = 5
+
+/**
+ * The source CIDRs one instance's fail-closed catch-all is written for.
+ *
+ * A whole-LAN instance gets its LAN, exactly as every instance always has. A
+ * range instance gets the minimal set of blocks covering its range and nothing
+ * wider, because the planner only ever hands an assignment to a lease inside
+ * that range: a whole-LAN catch-all would put every other device on the LAN
+ * behind an unreachable table with no assignment rule ever coming to lift it
+ * out, so creating one range instance would take the rest of the LAN off the
+ * internet with nothing on the page saying why.
+ *
+ * It lives here, in one exported function, because the installer and the
+ * per-tick repair both have to arrive at the same set. Two derivations would
+ * disagree the first time a range decomposed into a different number of blocks,
+ * and the repair - which rebuilds whatever does not match - would then tear the
+ * group down and write it again on every fast tick, for ever.
+ *
+ * A range that cannot be decomposed falls back to the whole LAN rather than to
+ * nothing: a catch-all covering no address at all is an instance that has
+ * silently stopped being fail-closed.
+ */
+export function catchAllCidrs(
+  instance: Pick<BindingInstanceRecord, 'source'>,
+  lanCidr: string
+): string[] {
+  const source = instance.source
+  if (source?.kind !== 'range') return [lanCidr]
+  const blocks = rangeToCidrs(source.from, source.to)
+  return blocks.length ? blocks : [lanCidr]
+}
 
 /**
  * Which half does this pass, asked once per tick.
@@ -199,6 +231,10 @@ export async function reconcileModel(
   if (runtime.disposed) return ENGINE_STOPPED
   const rules = runtime.options.rules()
   const data = runtime.store.read()
+  // Asked once for the whole pass rather than per instance: the answer is a
+  // fact about the router, and reading it twice inside one tick could seat an
+  // address in one instance that a later instance was told to leave alone.
+  const reservedIps = runtime.options.reservedIps?.() ?? []
   const instances = [...data.instances].sort(
     (a, b) => a.slot - b.slot || a.id.localeCompare(b.id)
   )
@@ -212,8 +248,21 @@ export async function reconcileModel(
   const outcomes: ReconcileOutcome[] = []
   const assignmentDeletes: string[] = []
   const assignmentAdds: string[] = []
-  const catchDeletes: string[] = []
-  const catchAdds: string[] = []
+  /**
+   * The catch-all repair, one entry per instance that needs one, each holding
+   * that instance's deletes followed by its own adds.
+   *
+   * They are kept apart rather than flattened into one deletes-then-adds list
+   * because every chunk below is a separate `execScript`, and therefore a
+   * separate round trip to the router. Flattened, a chunk boundary could fall
+   * between one instance's deletes and its adds - and for as long as that round
+   * trip was in flight that instance had no catch-all standing at all, so its
+   * unassigned clients leaked onto the router's default WAN, which is the one
+   * thing the catch-all exists to prevent. A range instance repairs several
+   * blocks at one preference instead of a single rule, which is what made the
+   * group wide enough for a boundary to land inside it.
+   */
+  const catchGroups: string[][] = []
   /**
    * The unreachable-default tables to (re)establish. Every instance normally
    * names the same one, but the number comes from each instance's own recorded
@@ -273,6 +322,13 @@ export async function reconcileModel(
       sticky,
       memory: runtime.memory.get(instance.id),
       policy: plannerPolicy(rules, layout),
+      reservedIps,
+      // Only a range instance carries one; the planner reads an absent range as
+      // "the whole LAN", which is what every instance written before ranges
+      // existed means.
+      ...(instance.source?.kind === 'range'
+        ? { range: { from: instance.source.from, to: instance.source.to } }
+        : {}),
       /**
        * Reseeded every tick, on purpose. The planner is a pure function of
        * its input and seeds its own PRNG from this number, so tests pass a
@@ -295,33 +351,59 @@ export async function reconcileModel(
     applyRuleDiffInMemory(virtualRules, result.ruleDiff)
 
     const pref = layout.catchAllPrefBase + instance.slot
+    const wanted = catchAllCidrs(instance, cidr)
     const atPref = model.rules.filter((rule) => rule.pref === pref)
+    /**
+     * One preference now holds a group of rules rather than a single one - the
+     * kernel is happy to carry several at the same priority, and the existing
+     * `while ip -4 rule del pref N` removal already takes a whole group off - so
+     * the comparison is a set: every wanted block present exactly once, all of
+     * them on the catch-all table, and nothing else sharing the preference.
+     *
+     * Sorted before it is compared because `ip rule show` is under no
+     * obligation to hand a same-priority group back in the order it was
+     * written; compared positionally, a router that reordered them would have
+     * had its catch-all torn down and rebuilt on every fast tick.
+     *
+     * Read through `ruleCidr` and not `parseCidr` because the kernel prints a
+     * /32 selector without its prefix, and a range that ends in a /32 - which
+     * most of them do - would otherwise never match what it was written with,
+     * for exactly the same for-ever rebuild the sort above prevents.
+     */
+    const present = atPref
+      .map((rule) => (rule.table === layout.catchAllTable ? ruleCidr(rule.from) : ''))
+      .sort()
     const correct =
-      atPref.length === 1 &&
-      atPref[0]?.table === layout.catchAllTable &&
-      parseCidr(atPref[0]?.from ?? '')?.cidr === cidr
+      present.length === wanted.length &&
+      present.join(' ') === [...wanted].sort().join(' ')
     if (!correct) {
       repairCatchAll = true
       catchTables.add(layout.catchAllTable)
       if (iface?.l3Device) {
         catchLocalRoutes.add(catchAllLocalRoute(layout.catchAllTable, cidr, iface.l3Device))
       }
+      const group: string[] = []
       for (let count = 0; count < atPref.length; count++) {
-        catchDeletes.push(`ip -4 rule del pref ${pref} 2>/dev/null || true`)
+        group.push(`ip -4 rule del pref ${pref} 2>/dev/null || true`)
       }
-      catchAdds.push(
-        `ip -4 rule add from ${cidr} lookup ${layout.catchAllTable} pref ${pref}`
-      )
+      for (const block of wanted) {
+        group.push(
+          `ip -4 rule add from ${block} lookup ${layout.catchAllTable} pref ${pref}`
+        )
+      }
+      catchGroups.push(group)
       for (const rule of [...virtualRules]) {
         if (rule.pref === pref) {
           virtualRules.splice(virtualRules.indexOf(rule), 1)
         }
       }
-      virtualRules.push({
-        pref,
-        from: cidr,
-        table: layout.catchAllTable
-      })
+      for (const block of wanted) {
+        virtualRules.push({
+          pref,
+          from: block,
+          table: layout.catchAllTable
+        })
+      }
     } else if (flags.forceKernel) {
       catchTables.add(layout.catchAllTable)
       if (iface?.l3Device) {
@@ -337,11 +419,16 @@ export async function reconcileModel(
         [...[...catchTables].map((table) => catchAllRoute(table)), ...catchLocalRoutes],
         'repair binding catch-all'
       )
-      for (const chunk of chunkRuleCommands(
-        [...catchDeletes, ...catchAdds],
-        rules.ruleChunkLines
-      )) {
-        await execScript(runtime, chunk, 'reconcile binding catch-all rules')
+      // Chunked per instance, so the cap still bounds how long a single command
+      // is without ever putting one instance's deletes and adds on either side
+      // of a round trip. An instance whose own group is wider than the cap is
+      // split anyway - there is no way to send more lines than the router will
+      // take at once - but that is one instance's exposure rather than every
+      // instance planned after the boundary.
+      for (const group of catchGroups) {
+        for (const chunk of chunkRuleCommands(group, rules.ruleChunkLines)) {
+          await execScript(runtime, chunk, 'reconcile binding catch-all rules')
+        }
       }
     }
     const ruleLines = [...assignmentDeletes, ...assignmentAdds]

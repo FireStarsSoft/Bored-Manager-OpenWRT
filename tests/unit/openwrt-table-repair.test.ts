@@ -105,6 +105,38 @@ function hostData(): unknown {
   }
 }
 
+/**
+ * A router whose only binding is a one-to-one one: no instance, so no pool for
+ * the audit to walk, and the WAN's table was written by the 1-1 create and
+ * recorded in `extraTables` alone.
+ */
+function directHostData(): unknown {
+  return {
+    version: 3,
+    instances: [],
+    direct: [
+      {
+        id: 'dir1',
+        name: 'NAS',
+        target: { kind: 'ip', ip: '192.168.1.20' },
+        wan: 'wan',
+        enabled: true,
+        whenDown: 'hold',
+        pref: 19_000,
+        table: 30_001,
+        lan: 'lan',
+        slot: 0,
+        createdAt: 1
+      }
+    ],
+    extraTables: [['wan', 30_001, 'dir1']],
+    stickyMap: [],
+    events: [],
+    moduleEvents: [],
+    jobs: []
+  }
+}
+
 /** The two pool members own tables 10001 and 10002, as the dump reports. */
 const BOTH: Array<[string, number]> = [
   ['pd00001', 10_001],
@@ -126,13 +158,13 @@ interface Audited {
   store: HostStore
 }
 
-function auditor(overrides: Partial<OwrtRules> = {}): Audited {
+function auditor(overrides: Partial<OwrtRules> = {}, data: unknown = hostData()): Audited {
   const events: Array<{ kind: string; text: string }> = []
   const commands: string[] = []
   const writes: string[] = []
   let failNext = false
   let rejectNext = false
-  const harness = moduleHarness('openwrt', () => ok(), { hostData: hostData() })
+  const harness = moduleHarness('openwrt', () => ok(), { hostData: data })
   harness.exec.mockImplementation(async (command, execOptions) => {
     commands.push(command)
     // Matched loosely on purpose: which `uci` invocation the audit uses is
@@ -395,6 +427,65 @@ describe('a repair that did not land', () => {
     // folder may use it.
     expect(run.commands.filter((command) => command.startsWith('uci'))).toEqual([
       'uci batch'
+    ])
+  })
+})
+
+describe('a WAN used only by a one-to-one binding', () => {
+  it('is audited and repaired even though no instance pool names it', async () => {
+    /**
+     * The audit returned immediately when the store held no instances, and
+     * even with one it only ever walked that instance's own pool - so a WAN
+     * whose `option ip4table` was written by a 1-1 create was never looked at.
+     * That is the one place it cannot be left unlooked at: the create also
+     * records the table in `extraTables`, and `buildWanTableIndex` seeds
+     * `byWan` from `extraTables` first, so after the option is lost and the
+     * router reboots the 1-1 pass still believes the table is there, still
+     * calls the WAN usable, and writes `from <ip>/32 lookup <table>` against a
+     * table with nothing in it. An empty table does not fail - the kernel
+     * walks on to the main table - so the bound address quietly leaves by the
+     * router's default connection with every surface still showing it bound.
+     */
+    const run = auditor({}, directHostData())
+
+    await run.audit(BOTH)
+
+    expect(run.writes).toEqual(["set network.wan.ip4table='30001'\ncommit network\n"])
+    expect(run.commands).toContain('/etc/init.d/network reload')
+    expect(run.events).toEqual([
+      {
+        kind: 'wan-table-repaired',
+        text: 'Restored option ip4table on 1 WAN(s) and reloaded the network (wan)'
+      }
+    ])
+  })
+
+  it('is left alone once the binding is disabled', async () => {
+    // A disabled record owns no rule on the router, so there is nothing for a
+    // missing table to strand and no reason to rewrite the WAN's config.
+    const data = directHostData() as { direct: Array<{ enabled: boolean }> }
+    data.direct[0]!.enabled = false
+    const run = auditor({}, data)
+
+    await run.audit(BOTH)
+
+    expect(run.writes).toEqual([])
+    expect(run.events).toEqual([])
+  })
+
+  it('still stops after the same bounded number of attempts', async () => {
+    // Widening what is audited must not widen how hard it retries: three
+    // rounds of `uci set` + `commit network` + `network reload`, then silence.
+    const run = auditor({}, directHostData())
+
+    for (let tick = 0; tick < 6; tick++) await run.audit(BOTH)
+
+    expect(run.writes).toHaveLength(3)
+    expect(kinds(run.events)).toEqual([
+      'wan-table-repaired',
+      'wan-table-repaired',
+      'wan-table-repaired',
+      'wan-table-repair-stopped'
     ])
   })
 })

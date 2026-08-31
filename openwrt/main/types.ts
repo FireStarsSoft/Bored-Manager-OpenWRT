@@ -140,6 +140,20 @@ export interface OpenWrtSeriesPoint {
    */
   bound: number
   waiting: number
+  /**
+   * The rest of what the two automations are doing, kept beside the pair above
+   * for the same reason: each of these is unreadable on its own. `wanFree`
+   * against `waiting` separates a full pool from a stalled one; `pppDial`
+   * against `wanUp` separates a pool that is redialling from one that is
+   * simply down; and `directHeld` against `directOk` is the only way to see a
+   * hand-placed binding whose WAN went away, since holding it is the correct
+   * behaviour and nothing else reports it.
+   */
+  wanFree: number
+  wanErrBound: number
+  pppDial: number
+  directOk: number
+  directHeld: number
   /** Router health, so a throughput dip can be read against the load that caused it. */
   load1: number
   memPct: number
@@ -160,6 +174,17 @@ export interface OpenWrtOverviewCounts {
   devices: number
   bound: number
   waiting: number
+  /**
+   * The four the charts need and the tiles do not. They live here rather than
+   * being derived where they are drawn because a spec cannot sum anything: a
+   * `chart` block reads keys off a point, so every number a chart shows has to
+   * exist as a key by the time the point is written.
+   */
+  wanFree: number
+  wanErrBound: number
+  pppDial: number
+  directOk: number
+  directHeld: number
 }
 
 export interface PoolAggregate {
@@ -237,4 +262,19 @@ export interface OpenWrtOverview {
 export interface BindingOverviewTotals {
   bound: number
   waiting: number
+  /**
+   * WANs in a pool that are healthy and carrying nobody. Summed across
+   * instances rather than reported per instance, because this is the number a
+   * chart draws beside the waiting queue.
+   */
+  wanFree: number
+  /**
+   * WANs in a pool that have failed. Not the same number as `wanErr`, which
+   * counts failed sessions in the PPPoE dialer's own pool: an instance can be
+   * bound to a carrier the dialer never touches, and a dialer pool can be
+   * failing while no instance uses it. Charting one against the other read as
+   * a flat zero on the first router and as somebody else's problem on the
+   * second.
+   */
+  wanErrBound: number
 }
