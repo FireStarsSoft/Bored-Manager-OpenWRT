@@ -10,16 +10,15 @@
  */
 import { hasFeature, wanbindFlush, wanbindReconcile, wanbindSection } from '../agent'
 import { recordLayout } from '../records'
-import type { BindingInstanceRecord, OwrtHostData } from '../store'
+import type { OwrtHostData } from '../store'
 import type { RouterModel } from '../types'
-import { rangeToCidrs } from '../util'
+import { catchAllCidrs, lanLocalRoute } from './catch-all'
 import { recordEvents } from './events'
 import { emptyPlannerMemory, normalizedMac } from './memory'
 import { lanCidr, plannerPolicy, plannerWans, poolIfaces } from './pool'
 import { planBindingReconciliation } from './planner'
 import {
   applyRuleDiffInMemory,
-  catchAllLocalRoute,
   catchAllRoute,
   chunkRuleCommands,
   emptyRuleDiff,
@@ -49,37 +48,6 @@ const STICKY_TOUCH_MS = 10_000
  * one lower without the router having gone anywhere.
  */
 const REBOOT_SLACK_SEC = 5
-
-/**
- * The source CIDRs one instance's fail-closed catch-all is written for.
- *
- * A whole-LAN instance gets its LAN, exactly as every instance always has. A
- * range instance gets the minimal set of blocks covering its range and nothing
- * wider, because the planner only ever hands an assignment to a lease inside
- * that range: a whole-LAN catch-all would put every other device on the LAN
- * behind an unreachable table with no assignment rule ever coming to lift it
- * out, so creating one range instance would take the rest of the LAN off the
- * internet with nothing on the page saying why.
- *
- * It lives here, in one exported function, because the installer and the
- * per-tick repair both have to arrive at the same set. Two derivations would
- * disagree the first time a range decomposed into a different number of blocks,
- * and the repair - which rebuilds whatever does not match - would then tear the
- * group down and write it again on every fast tick, for ever.
- *
- * A range that cannot be decomposed falls back to the whole LAN rather than to
- * nothing: a catch-all covering no address at all is an instance that has
- * silently stopped being fail-closed.
- */
-export function catchAllCidrs(
-  instance: Pick<BindingInstanceRecord, 'source'>,
-  lanCidr: string
-): string[] {
-  const source = instance.source
-  if (source?.kind !== 'range') return [lanCidr]
-  const blocks = rangeToCidrs(source.from, source.to)
-  return blocks.length ? blocks : [lanCidr]
-}
 
 /**
  * Which half does this pass, asked once per tick.
@@ -276,6 +244,13 @@ export async function reconcileModel(
    * Written whenever the blackhole beside them is, so the two never exist apart.
    */
   const catchLocalRoutes = new Set<string>()
+  /**
+   * What each instance's connected route will be once the commands below land,
+   * folded into `runtime.lanRoutes` only after they have. Remembering it any
+   * earlier is remembering a route the repair below then believes is standing
+   * and is not.
+   */
+  const routeWrites = new Map<string, string>()
   let repairCatchAll = flags.forceKernel
 
   for (const instance of instances) {
@@ -283,6 +258,11 @@ export async function reconcileModel(
     const iface = model.ifaces.find((entry) => entry.name === instance.lan)
     const cidr = lanCidr(iface)
     if (!cidr) {
+      // Nothing was written and nothing can be, so nothing is remembered
+      // either: a LAN that comes back has to have its connected route put in
+      // again, and a stale entry saying it is already there is what would stop
+      // that happening.
+      runtime.lanRoutes.delete(instance.id)
       outcomes.push({
         instance,
         result: {
@@ -376,12 +356,39 @@ export async function reconcileModel(
     const correct =
       present.length === wanted.length &&
       present.join(' ') === [...wanted].sort().join(' ')
-    if (!correct) {
+    /**
+     * The connected route is not in `ip -4 rule show`, so nothing in the sample
+     * can say whether it is still there - which is why what this module last
+     * saw land is remembered instead, and why a difference is enough to write
+     * it again.
+     *
+     * It goes missing on its own. The kernel drops every route whose device
+     * goes down, in every table, and the LAN device goes down for reasons that
+     * have nothing to do with binding: a `service network reload` recreates a
+     * VLAN netdev, restarting wifi takes a wireless-only LAN's device with it,
+     * a bridge with no carrier goes down when the last port is unplugged. The
+     * `unreachable default` beside it has no device and survives all three, so
+     * the router was left blackholing its own LAN - no SSH, no DHCP answers, no
+     * ARP - until a reboot or an unrelated rule mismatch happened to rebuild
+     * the group. Comparing only the rules, this pass saw a correct catch-all
+     * and wrote nothing, for ever.
+     */
+    const localRoute = lanLocalRoute(iface, cidr, layout.catchAllTable)
+    // A sample that names no device for this LAN ends the belief along with it:
+    // whatever was written is for a device this router is no longer describing,
+    // and remembering it would be what stops the route going back in when the
+    // device is named again.
+    if (!localRoute) runtime.lanRoutes.delete(instance.id)
+    const routeStale = localRoute !== '' && runtime.lanRoutes.get(instance.id) !== localRoute
+    if (!correct || routeStale || flags.forceKernel) {
       repairCatchAll = true
       catchTables.add(layout.catchAllTable)
-      if (iface?.l3Device) {
-        catchLocalRoutes.add(catchAllLocalRoute(layout.catchAllTable, cidr, iface.l3Device))
+      if (localRoute) {
+        catchLocalRoutes.add(localRoute)
+        routeWrites.set(instance.id, localRoute)
       }
+    }
+    if (!correct) {
       const group: string[] = []
       for (let count = 0; count < atPref.length; count++) {
         group.push(`ip -4 rule del pref ${pref} 2>/dev/null || true`)
@@ -404,11 +411,6 @@ export async function reconcileModel(
           table: layout.catchAllTable
         })
       }
-    } else if (flags.forceKernel) {
-      catchTables.add(layout.catchAllTable)
-      if (iface?.l3Device) {
-        catchLocalRoutes.add(catchAllLocalRoute(layout.catchAllTable, cidr, iface.l3Device))
-      }
     }
   }
 
@@ -419,6 +421,8 @@ export async function reconcileModel(
         [...[...catchTables].map((table) => catchAllRoute(table)), ...catchLocalRoutes],
         'repair binding catch-all'
       )
+      // Only now, and only for the instances whose line was in that command.
+      for (const [id, line] of routeWrites) runtime.lanRoutes.set(id, line)
       // Chunked per instance, so the cap still bounds how long a single command
       // is without ever putting one instance's deletes and adds on either side
       // of a round trip. An instance whose own group is wider than the cap is

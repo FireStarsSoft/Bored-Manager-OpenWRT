@@ -14,12 +14,17 @@ import {
   type ModuleCheckFinding,
   type ModuleCheckReport
 } from '@shared/check'
+// The interface classifier and the refusal it feeds, from the one-to-one
+// folder's barrel: that gate refuses a WAN port reading as a LAN with the
+// mirror of this sentence, and one decision may not have two voices.
+import { lanIsUplinkRefusal, routerLayout } from '../direct'
 import { isBindingCarrier } from '../options'
-import { managedLayout } from '../records'
+import { managedLayout, MAX_STORED_BINDINGS } from '../records'
 import { isSafeUciValue } from '../uci'
 import type { BindingInstanceRecord } from '../store'
 import {
   carrierScopesOverlap,
+  ifaceDevices,
   ipv4ToInt,
   parseCidr,
   rangeToCidrs,
@@ -28,6 +33,7 @@ import {
   textField
 } from '../util'
 import { planCapacity } from './capacity'
+import { poolIdentityFindings, poolIsLanFindings, poolOverlapFindings } from './pool-identity'
 import { routerOwnsBinding } from './reconcile'
 import {
   carrierMatches,
@@ -39,7 +45,7 @@ import { MANAGED_PREF_CEILING } from './rules'
 import { currentWanTables } from './runtime'
 import { allocateWanTables, zoneFindings } from './shared'
 import { buildWanTableIndex } from './tables'
-import { networkTables, preparationProbe } from './uci-doc'
+import { dhcpServedNetworks, networkTables, preparationProbe } from './uci-doc'
 import type {
   BindingCreatePlan,
   BindingRuntime,
@@ -366,12 +372,48 @@ export async function checkBinding(
   if (probe) {
     const zones = zoneFindings(
       probe,
-      { lan, wans: pool.map((iface) => iface.name), moduleZone: rules.zoneName },
+      {
+        lan,
+        wans: pool.map((iface) => iface.name),
+        moduleZone: rules.zoneName,
+        // The netdevs each interface answers to, so a zone written with
+        // `list device` instead of `list network` can still be found. It has to
+        // be passed here and at the matching site in `prepare.ts`: a check that
+        // resolves a zone by device while its apply does not would re-read a
+        // different answer and throw "the LAN firewall zone changed".
+        devices: new Map(model.ifaces.map((iface) => [iface.name, ifaceDevices(iface)]))
+      },
       findings
     )
     lanZone = zones.lanZone
     destinationZones = zones.destinationZones
+    // Is the interface under "DHCP LAN interface" one of the router's own
+    // networks at all? The dropdown used to answer with `iface.name !== 'wan'`,
+    // and removing that guess left nothing behind: a second ISP on `wan2` was
+    // offered here and accepted, since the findings below only warn when
+    // /etc/config/dhcp serves the interface - which an uplink does not - and
+    // `zoneFindings` hands the uplink's own zone back as `lanZone`.
+    //
+    // Only inside this branch, because only here has the router been read; and
+    // `unclear` says nothing, because that is the classifier reporting that the
+    // configuration does not settle it, and a refusal there is the confident
+    // sentence about an unread router that this whole body of work replaced.
+    //
+    // One layout for both halves of the question. The pool walk below asks the
+    // same map about the interfaces the carrier scooped up, which is the mirror
+    // of this refusal and was for a while the half that was missing: the layout
+    // was computed here, one entry was read out of it, and every verdict about
+    // a pool member was thrown away.
+    const layout = routerLayout(model, probe)
+    const lanVerdict = layout.byName.get(lan)
+    if (lanVerdict?.role === 'uplink') findings.push(lanIsUplinkRefusal(lanVerdict))
+    poolIdentityFindings(
+      { lan, carrier, pool, served: dhcpServedNetworks(probe.dhcp) },
+      findings
+    )
+    poolIsLanFindings({ pool, layout }, findings)
   }
+  poolOverlapFindings({ cidr, pool }, findings)
 
   const dhcp =
     probe && cidr
@@ -395,6 +437,27 @@ export async function checkBinding(
     detail: `The instance will install an unreachable default in table ${rules.catchAllTable}; LANs and carriers outside this exact pair are untouched.`
   })
 
+  // --------------------------------------------------------------- how many
+  // The store's ceiling, which the catch-all slot gate below does not stand in
+  // for. On a router still carrying the shipped "Safety-rule priority base" the
+  // slots run out first - there are a hundred of them - and this never fires.
+  // Lowered to 2,000, which Module settings permits and which is exactly what an
+  // operator running many IP-range instances does, the range opens to 28,000
+  // slots and nothing else was counting records. The per-router document keeps
+  // 512 instances, so the 513th create succeeded, wrote its client rules, its
+  // fail-closed catch-all and its `bmf<slot>_` firewall sections onto the
+  // router - and the next read of the document threw that record away, leaving
+  // a LAN swallowed by a catch-all no surface can show and no record can remove.
+  // Instances still being prepared count, because each of them is a record about
+  // to arrive.
+  if (data.instances.length + runtime.preparations.size >= MAX_STORED_BINDINGS) {
+    findings.push({
+      level: 'error',
+      label: `This router already has the ${MAX_STORED_BINDINGS} binding instances the module can keep a record of`,
+      detail: `An instance exists only for as long as its record does - the record is what makes the rules on the router this module's - and the per-router document holds ${MAX_STORED_BINDINGS} of them. Delete an instance you no longer need from the Binding instances list, then check again.`
+    })
+  }
+
   const usedSlots = new Set(data.instances.map((instance) => instance.slot))
   for (const rule of model.rules) {
     if (
@@ -410,7 +473,7 @@ export async function checkBinding(
     findings.push({
       level: 'error',
       label: 'No catch-all preference slot remains in the managed range',
-      detail: `Each instance claims one ip rule priority from ${rules.catchAllPrefBase} up to ${MANAGED_PREF_CEILING - 1}, and all ${MANAGED_PREF_CEILING - rules.catchAllPrefBase} are taken. Delete a binding instance you no longer need, or lower "Safety-rule priority base" under Module settings, Rules - it has to stay above every client rule.`
+      detail: `Each instance claims one ip rule priority from ${rules.catchAllPrefBase} up to ${MANAGED_PREF_CEILING - 1}, and all ${MANAGED_PREF_CEILING - rules.catchAllPrefBase} are taken. Delete a binding instance you no longer need, or lower "Safety-rule priority base" under Module settings, Advanced rules - it has to stay above every client rule.`
     })
   }
 

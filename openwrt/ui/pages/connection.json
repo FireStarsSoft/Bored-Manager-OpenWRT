@@ -104,7 +104,7 @@
                       "type": "note",
                       "title": "The automations are held back until the probe answers",
                       "lines": [
-                        "The machine is connected and the readiness probe is running. Nothing has been read off the router yet, so the batches and binding instances below would be drawn against no sample at all - and both create forms would refuse anyway, because neither can tell what this router supports.",
+                        "The machine is connected and the readiness probe is running. Nothing has been read off the router yet, so the pools and the binding instances further down this page would be drawn against no sample at all - and all three creates would refuse anyway, because none of them can tell what this router supports: Create a pool under PPPoE Dialer, and Bind one address to one WAN port and Create a WAN Binding instance under WAN Binding.",
                         "The probe repeats about every thirty seconds while this page is open. Check now asks immediately; if it never gets past this, Module settings names what the router is failing to answer."
                       ]
                     },
@@ -183,7 +183,7 @@
                       "title": "Part of this page may refuse to run",
                       "tone": "warning",
                       "lines": [
-                        "Something optional is missing. Creating a batch or a binding instance will say so with a specific reason; OpenWRT Module settings names it and installs it where it can."
+                        "Something optional is missing. This page carries three creates - a pool, a binding instance and a one-to-one binding - and whichever of them the missing piece holds back will refuse with a specific reason and offer the install form for it on its own tab. OpenWRT Module settings names it and installs it too."
                       ]
                     }
                   ]
@@ -209,8 +209,8 @@
                           "title": "Nothing on this page is being acted on",
                           "tone": "warning",
                           "lines": [
-                            "WAN Binding reconciles on the fast probe, and the fast probe has stopped producing samples. No device is being assigned, no lease change is noticed, and no failed WAN is remapped until it recovers. The session and assignment tables below are the last good reading.",
-                            "Reason below is what the last attempt returned. Refresh now, on either tab, retries immediately; if it keeps failing, check that the machine entry is still connected over SSH."
+                            "WAN Binding reconciles on the fast probe, and the fast probe has stopped producing samples. No device is being assigned, no lease change is noticed, and no failed WAN is remapped until it recovers. The session and assignment tables further down this page are the last good reading.",
+                            "Reason below is what the last attempt returned. Refresh now, on any of the tabs that carry it, retries immediately; if it keeps failing, check that the machine entry is still connected over SSH."
                           ]
                         },
                         {
@@ -1359,7 +1359,7 @@
                                           "tone": "warning",
                                           "lines": [
                                             "Every interface in the pool is taken down and its section removed, with its tagged VLAN device and derived MAC. Every routing table the members used stops being written. The pool's zone memberships are removed, and the zone itself goes when no other pool uses it and WAN Binding is not installed. The record is removed last, so an interrupted delete can simply be run again.",
-                                            "The router refuses while a bm-wanbind instance hands clients to this carrier, and this page refuses while a binding instance is running on it - stop the instance first, on the WAN Binding tab.",
+                                            "The router refuses while a bm-wanbind instance hands clients to this carrier, and this page refuses while a binding instance is running on it - stop the instance first, with Stop on its row under WAN Binding, Instances.",
                                             "The accounts themselves are not touched; they live wherever the list came from."
                                           ]
                                         },
@@ -2172,7 +2172,7 @@
                                   "lines": [
                                     "The tiles and the donut add up every binding instance's WAN pool at once. A router with four instances has four separate pools, and the question worth asking about all of them together is how many ports are left to hand out.",
                                     "Available is a healthy WAN nobody holds and Bound is one a device is using, so those two together are the pool. Warning is a WAN that came back so recently the module does not trust it yet, Error is one that failed, and Dialing is a PPPoE session still negotiating - none of the three can be handed to a device, which is why a full pool with a large Error count still leaves people waiting.",
-                                    "The one-to-one tiles count hand-placed bindings instead of pool ports. Held is the one to watch: those addresses have a rule pointing at the unreachable table, so they have no way out at all until the WAN they name comes back.",
+                                    "The one-to-one tiles count hand-placed bindings instead of pool ports. Held is the one to watch, and it counts every binding whose rule points at the unreachable table: the ones whose WAN is down, and the ones whose device has walked off the LAN it was bound on while its owner had chosen Keep it off the internet. Either way that address has no way out at all until the WAN comes back or the device comes home.",
                                     "The charts read this module's own history and follow the range picker above the page, so they keep filling in for as long as the module is running rather than only while this tab is open."
                                   ]
                                 }
@@ -2439,6 +2439,113 @@
                               "when": {
                                 "source": {
                                   "kind": "stream",
+                                  "event": "capabilities",
+                                  "path": "missingFor.binding"
+                                },
+                                "op": "eq",
+                                "value": true
+                              },
+                              "blocks": [
+                                {
+                                  "type": "section",
+                                  "title": "Install what binding needs",
+                                  "columns": 2,
+                                  "blocks": [
+                                    {
+                                      "type": "list",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "capabilities",
+                                        "path": "missingPackages"
+                                      },
+                                      "columns": [
+                                        {
+                                          "key": "name",
+                                          "label": "Package"
+                                        },
+                                        {
+                                          "key": "for",
+                                          "label": "Needed for"
+                                        }
+                                      ],
+                                      "limit": 32,
+                                      "emptyText": "nothing is missing"
+                                    },
+                                    {
+                                      "type": "checkForm",
+                                      "checkMethod": "setupCheck",
+                                      "applyMethod": "setupApply",
+                                      "checkLabel": "Check what would be installed",
+                                      "applyLabel": "Install now",
+                                      "fields": [
+                                        {
+                                          "key": "pppoe",
+                                          "label": "PPPoE support (ppp, ppp-mod-pppoe, kmod-pppoe)",
+                                          "input": "checkbox",
+                                          "initial": false
+                                        },
+                                        {
+                                          "key": "macvlan",
+                                          "label": "macvlan (kmod-macvlan) - per-slot MACs in Direct mode",
+                                          "input": "checkbox",
+                                          "initial": false
+                                        },
+                                        {
+                                          "key": "ipfull",
+                                          "label": "Policy routing (ip-full)",
+                                          "input": "checkbox",
+                                          "initial": true
+                                        },
+                                        {
+                                          "key": "dnsmasq",
+                                          "label": "DHCP leases (dnsmasq)",
+                                          "input": "checkbox",
+                                          "initial": true
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "conditional",
+                                      "when": {
+                                        "source": {
+                                          "kind": "stream",
+                                          "event": "ui",
+                                          "path": "hintsOn"
+                                        },
+                                        "op": "eq",
+                                        "value": true
+                                      },
+                                      "blocks": [
+                                        {
+                                          "type": "note",
+                                          "title": "Why this is offered here",
+                                          "tone": "warning",
+                                          "lines": [
+                                            "This router is missing a package binding depends on. The form below this one checks before it writes, so a create here would refuse and name it - and naming it, then sending you to another page, is a longer way round than doing it.",
+                                            "It is the same flow as Module settings: the check reads free space and whether the router has a route to the internet and changes nothing, and only names from this module's own fixed list ever reach a command line.",
+                                            "Applying runs a job and then re-reads the router. What that re-read finds is what unlocks the form."
+                                          ]
+                                        },
+                                        {
+                                          "type": "note",
+                                          "title": "What each field means",
+                                          "lines": [
+                                            "Policy routing (ip-full) - The one thing a create on this tab is actually gated on, since a one-to-one binding is a policy rule and nothing else. Some targets ship the BusyBox applet, which has no ip rule subcommand at all.",
+                                            "DHCP leases (dnsmasq) - Not what this form needs. A binding on a typed address does not ask for it at all: nothing has to be leasing for a rule on a typed address to work. It is ticked because this section is raised for binding as a whole, and the instance half - Create an instance, two tabs along - does require it. It is also where a binding that names a MAC finds its address, so on a router without it such a binding is created and then waits for a lease nothing will ever read.",
+                                            "PPPoE support (ppp, ppp-mod-pppoe, kmod-pppoe) - What the pool form under PPPoE Dialer needs; nothing on this tab uses it. A group already present is skipped."
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "conditional",
+                              "when": {
+                                "source": {
+                                  "kind": "stream",
                                   "event": "ui",
                                   "path": "hintsOn"
                                 },
@@ -2453,8 +2560,17 @@
                                     "A one-to-one binding is a single policy rule: traffic from this one address looks up the routing table belonging to the WAN port named here, before the router's main table is consulted at all. The rule is written at its own priority, below every priority a binding instance writes in, so where the two would both apply this one is read first and the address leaves through the port chosen here whatever the instance would have handed it.",
                                     "Nothing else about the device changes. It keeps its DHCP lease, its LAN and its firewall zone; what is added is that one rule and the firewall forwarding that lets that LAN reach that WAN.",
                                     "Keep it off the internet is what happens by default when the WAN goes down: the rule is re-pointed at the module's unreachable table, so the address has no way out and whoever is using it sees a dead connection rather than a different one. This is deliberate, and it is not what a rule left pointing at an empty table would do - the kernel does not fail that lookup, it falls through to the next rule and then to the main table, and the device quietly leaves by the router's default connection. That silent exit is the whole reason this setting exists.",
-                                    "Let it use the default connection is the opposite trade. While the WAN is down the rule is removed, the address goes out the router's normal way, and the rule is put back the moment the WAN is usable again. Choose it when being reachable at all matters more than which port the traffic left by."
+                                    "Let it use the default connection is the opposite trade, and it is still a rule rather than the absence of one. While the WAN is down the rule stays at this binding's own priority and is re-pointed at the main table, so the address leaves by the router's ordinary default connection; it goes back to the WAN's own table the moment that WAN is usable again. On a LAN a binding instance owns, taking the rule off the router instead would be a total outage: that instance's fail-closed catch-all matches the address the instant the one-to-one rule is gone, so the option chosen to keep a device online would have taken it off the network entirely. A rule naming the main table reaches the default connection from underneath that catch-all, and reads the same on a router carrying no instance at all. Choose it when being reachable at all matters more than which port the traffic left by."
                                   ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "actions",
+                              "actions": [
+                                {
+                                  "label": "Refresh now",
+                                  "method": "sweepNow"
                                 }
                               ]
                             },
@@ -2545,8 +2661,10 @@
                                       "lines": [
                                         "Binding name - A label for people, unique among the one-to-one bindings on this router. It reaches job labels and the event trail, so it is one line of ordinary text.",
                                         "What this binding names - An IP address binds whatever holds that address. A device MAC follows the device instead: the rule is rewritten when its DHCP lease moves to another address, and it is kept for the lease release grace once the lease disappears before it is withdrawn.",
-                                        "Address or MAC - The address itself, or twelve hexadecimal digits in colon form. An IP has to sit inside one of this router's own LAN subnets, because that LAN is what supplies the firewall zone the forwarding is written from. A MAC that has never taken a lease can only be bound on a router with a single LAN, for the same reason.",
-                                        "WAN port - The uplink this address leaves through. The list is built from the last router sample, so a port added since this tab was opened is not in it - run Refresh now on the Instances tab, then come back.",
+                                        "Address or MAC - The address itself, or twelve hexadecimal digits in colon form. An IP has to sit inside a subnet carried by an interface this router describes as one of its own LANs rather than as an uplink, because that interface's firewall zone is what the forwarding is written from - so an address can be inside a subnet the router really carries and still be refused, if the interface carrying it reads as the way this router reaches the internet.",
+                                        "That reading is never taken from what an interface is called. It is weighed from what the configuration states about it: the dnsmasq sections in /etc/config/dhcp, whether its firewall zone masquerades on a router where another zone does, the IPv6 prefix it delegates, whether it names a gateway, whether its address is one the public internet routes to, and the protocol netifd reports. Where those statements do not settle it the interface is called unclear and is still searched, so a LAN the router says nothing useful about does not disappear. A refusal names the interface, the subnets it looked in and the evidence it read, which is how a misclassified LAN can be told apart from a mistyped octet.",
+                                        "A MAC with no current DHCP lease has no address to place, so it can only be bound on a router with exactly one candidate LAN - counting the interfaces whose role the configuration does not settle. On a router with two or more, connect the device once and check again: choosing between them would be a guess written into a firewall forwarding.",
+                                        "WAN port - The uplink this address leaves through. The list is built from the last router sample, so a port added since this tab was opened is not in it - press Refresh now above and check the form again, which is what the refusals that name a WAN this module has not seen are asking for. A PPPoE pool cannot crowd the rest of the router out of this list: the sessions fill what is left after every other interface has a place. Nothing else is hidden from it either, so one of this router's own LANs can appear here - Check this binding is what refuses that pick, and it names the interface and the evidence rather than leaving the row out.",
                                         "When that WAN is down - The note above describes both choices. The default keeps the address off the internet rather than letting it out by a route nobody chose; it can be changed later from the row without touching anything else."
                                       ]
                                     }
@@ -2641,7 +2759,7 @@
                                       "align": "right"
                                     },
                                     {
-                                      "key": "whenDown",
+                                      "key": "whenDownLabel",
                                       "label": "When down"
                                     },
                                     {
@@ -2762,8 +2880,8 @@
                                               "title": "What each field means",
                                               "lines": [
                                                 "Binding name - A label for people; it has to stay unique among the one-to-one bindings on this router.",
-                                                "When that WAN is down - Keep it off the internet re-points the rule at the unreachable table so the address has no way out; Let it use the default connection removes the rule instead and puts it back when the WAN recovers. The change is applied on the next pass.",
-                                                "Enabled - Switching it off removes the rule from the router and stops reserving the address, so a binding instance serving that LAN is free to hand the device a WAN of its own again. The record is kept, so switching it back on writes the same rule at the same priority."
+                                                "When that WAN is down - Keep it off the internet re-points the rule at the unreachable table so the address has no way out; Let it use the default connection re-points it at the main table instead, which reaches the router's default connection from underneath any instance catch-all. Neither one removes the rule: it stays at the Rule priority shown under What was stamped, and what is on the router below, and Rule as it should stand there names the table it is looking up, so it can be compared with ip -4 rule show by eye. The change is applied on the next pass.",
+                                                "Enabled - Switching it off removes the rule from the router and stops reserving the address, so a binding instance serving that LAN is free to hand the device a WAN of its own again. The record is kept, so switching it back on writes the same rule at the same priority. Switching it back on is the same action as the row's Enable button - the rule is written while you wait, and if the router will not take it the Save is refused and the binding is left switched off. Anything else you changed in the same Save - Binding name, When that WAN is down - reaches the router through nothing at all, so it is written through first and kept whatever the switch-on does next: the refusal names those fields back to you and ends by saying Enabled is still off and no rule was written. Both refusals read that way, the one saying this router cannot write policy rules at all and the one quoting what the router answered when the rule was sent. So does the one you are likeliest to meet: a module whose readiness check has not answered yet refuses every switch-on with The router has not been checked yet, and the rename typed into the same form is saved all the same - run the check that refusal points at, then switch it on."
                                               ]
                                             }
                                           ]
@@ -2846,7 +2964,7 @@
                                   "lines": [
                                     "An instance owns exactly one logical LAN and one physical WAN carrier. Interfaces outside that pair remain independent.",
                                     "A sticky client keeps its WAN by MAC address. Optional remapping moves it only after the WAN has stayed failed beyond the grace period.",
-                                    "A newly leased device is assigned a random free WAN; when none is free it waits in FIFO order. New instances are created under Create an instance on this tab."
+                                    "A newly leased device is assigned a random free WAN; when none is free it waits in FIFO order. New instances are created on the Create an instance tab, the next one along."
                                   ]
                                 },
                                 {
@@ -2880,7 +2998,7 @@
                                       "type": "note",
                                       "lines": [
                                         "At that size the check reports conntrack, neighbour-table and flow-offload findings. They are router-wide values that affect every service on the box, so they are applied from one deliberate place rather than silently during a create: Module settings, Router limits, which reads them live, sizes a recommendation to this router, applies through the router's own agent or over SSH, and persists them under /etc/sysctl.d/ so they survive a reboot.",
-                                        "The dnsmasq lease limits the same check reports are handled right here - the checkbox on the create form below raises them for you.",
+                                        "The dnsmasq lease limits the same check reports are not router-wide, so they are handled by the create itself - the checkbox called Raise dnsmasq lease limits when needed, on the form under Create an instance, raises them for you.",
                                         "The shell below runs on the router itself, for anything beyond what those two cover."
                                       ]
                                     }
@@ -2970,6 +3088,10 @@
                                       "label": "LAN"
                                     },
                                     {
+                                      "key": "scope",
+                                      "label": "Addresses"
+                                    },
+                                    {
                                       "key": "carrier",
                                       "label": "WAN carrier"
                                     },
@@ -3029,9 +3151,10 @@
                                   "filterKeys": [
                                     "name",
                                     "lan",
+                                    "scope",
                                     "carrier"
                                   ],
-                                  "emptyText": "No WAN Binding instance has been configured - the form is under Create an instance on this tab",
+                                  "emptyText": "No WAN Binding instance has been configured - the form is on the Create an instance tab",
                                   "rowActions": [
                                     {
                                       "label": "Start",
@@ -3064,6 +3187,28 @@
                                       "type": "section",
                                       "title": "Settings",
                                       "blocks": [
+                                        {
+                                          "type": "keyValue",
+                                          "source": {
+                                            "kind": "stream",
+                                            "event": "binding",
+                                            "path": "$row"
+                                          },
+                                          "rows": [
+                                            {
+                                              "key": "lan",
+                                              "label": "LAN"
+                                            },
+                                            {
+                                              "key": "carrier",
+                                              "label": "WAN carrier"
+                                            },
+                                            {
+                                              "key": "scope",
+                                              "label": "Addresses served"
+                                            }
+                                          ]
+                                        },
                                         {
                                           "type": "form",
                                           "fields": [
@@ -3108,9 +3253,10 @@
                                           "blocks": [
                                             {
                                               "type": "note",
-                                              "title": "The LAN and the carrier are fixed",
+                                              "title": "The LAN, the carrier and the address range are fixed",
                                               "lines": [
-                                                "Every client rule and the safety catch-all were installed for this exact pair, so changing either would leave rules on the router pointing at a subnet that is no longer behind this instance. Delete the instance and create one for the new pair instead."
+                                                "Every client rule and the safety catch-all were installed for this exact LAN, carrier and address range, so changing any of the three would leave rules on the router pointing at addresses that are no longer behind this instance. Delete the instance and create one for the scope you want instead.",
+                                                "Addresses served is the window this instance may hand a WAN to - the whole LAN, or the range it was created with. A device whose lease falls outside that window never enters this instance's pass, so it appears in none of the tables below and is not waiting for anything."
                                               ]
                                             },
                                             {
@@ -3703,7 +3849,7 @@
                                           "type": "note",
                                           "title": "What each field means",
                                           "lines": [
-                                            "PPPoE support (ppp, ppp-mod-pppoe, kmod-pppoe) - What the PPPoE batch form below needs. A group already present is skipped.",
+                                            "PPPoE support (ppp, ppp-mod-pppoe, kmod-pppoe) - What the pool form under PPPoE Dialer needs; nothing on this tab uses it. A group already present is skipped.",
                                             "Policy routing (ip-full) - What the WAN Binding form below needs. Some targets ship the BusyBox applet, which has no ip rule subcommand at all.",
                                             "DHCP leases (dnsmasq) - Where WAN Binding finds the devices it assigns. Without it the device table stays empty."
                                           ]
@@ -3711,6 +3857,15 @@
                                       ]
                                     }
                                   ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "actions",
+                              "actions": [
+                                {
+                                  "label": "Refresh now",
+                                  "method": "sweepNow"
                                 }
                               ]
                             },
@@ -3827,10 +3982,11 @@
                                     },
                                     {
                                       "type": "note",
-                                      "title": "The two select lists are read once, when this tab opens",
+                                      "title": "Two of the three lists are read once, when this tab opens",
                                       "lines": [
-                                        "Physical WAN carrier, DHCP LAN interface and WAN carrier are all built from the last router sample. Before the first sweep lands they are empty, and an interface added since this tab was opened is not in them.",
-                                        "Refresh the router sample below, then leave this tab and come back: the lists are rebuilt each time the tab becomes visible."
+                                        "DHCP LAN interface and WAN carrier are both built from the last router sample. Before the first sweep lands they are empty, and an interface added since this tab was opened is not in them. Which addresses on that LAN is not one of these: its two choices are fixed and always offered.",
+                                        "Press Refresh now at the top of this tab, then leave this tab and come back: the lists are rebuilt each time the tab becomes visible.",
+                                        "Each list holds at most 500 rows, and the count is not what hides a device from you. On WAN carrier the only rows that ever fall off it are the tail of a PPPoE pool past that number: every device the pool is not riding on is kept, and so is the carrier the pool rides on. DHCP LAN interface cannot be filled by a pool at all, since a session's own protocol keeps it out of that list. So a device missing from either list is a device the router had not reported when this tab opened, which is what Refresh now puts back - the one thing it cannot put back is a pool member past the five hundredth row."
                                       ]
                                     },
                                     {
@@ -3839,6 +3995,7 @@
                                       "lines": [
                                         "Instance name - A unique display label for this one LAN and one carrier pair.",
                                         "DHCP LAN interface - The logical OpenWRT interface whose IPv4 DHCP leases are assigned. It must have a subnet and a dnsmasq DHCP section; when dnsmasq itself is missing, Module settings can install it.",
+                                        "That list hides nothing. Every interface carrying an IPv4 address and running static or dhcp is in it, this router's own uplinks included, because a dropdown cannot read /etc/config to tell a LAN from a WAN - and hiding the interface somebody came here to use, with nothing on screen to say why, costs more than offering one they will not pick. Pick the interface the clients are on: an instance hands a WAN to every DHCP client it sees on the interface named here and writes its firewall forwardings from that interface's own zone, so one rooted on an uplink would be distributing the pool upstream of this router rather than behind it. Check the scope warns when /etc/config/dhcp switches the DHCP server off for the interface, which is what a stock uplink's own section does, and it refuses the pick outright when the router's own configuration - a next hop under option gateway, a firewall zone that masquerades, an address the public internet routes to, a protocol that dials or takes a lease - reads that interface as an uplink. The refusal names the interface and quotes the lines it read, and says what to change if it has read the router wrong. Where nothing in /etc/config settles which side of the router an interface is on it says nothing at all, so that pick is still yours to get right.",
                                         "Which addresses on that LAN - Every DHCP client is the whole LAN, which is what every instance did before this option existed. Only an address range narrows it: leases inside the range are given a WAN of their own, and every other device on that LAN is left completely alone - it keeps using the router's normal connection, and no rule is written for it either way.",
                                         "First address / Last address - Read only when the range is chosen, and both have to sit inside the subnet of the LAN chosen above. A rule this instance writes selects on a source address behind that LAN, so an address outside the subnet could never match one, and the check refuses rather than writing a rule nothing can hit. The range is turned into whole address blocks for the safety rule, so a wide range costs a handful of rules rather than one per address.",
                                         "The choice of whole LAN or range cannot be changed afterwards, for the same reason the LAN and the carrier cannot: every client rule and the safety rule were installed for exactly this scope. Delete the instance and create it again to change it.",
@@ -3879,7 +4036,7 @@
                                     "Every other table on this page shows what this module wrote. This one reads the router's whole ip rule table on a timer - not only the narrow priority window the module writes in - so a rule somebody added by hand, one left behind by another package, or one from an older release of this module is visible here and nowhere else in the app.",
                                     "Each row says which routing table the rule sends that address to, which WAN that table's default route actually leaves through, and how that compares with the main table's default. That is the whole question the page answers: whether an address is on the router's normal connection or somewhere else, and who put it there.",
                                     "Nothing on this page ever changes a rule it did not write. A row marked as written outside this module is reported and left exactly where it is - quietly deleting somebody else's policy rule from a page they never opened is not a thing this module will do.",
-                                    "The scan runs while the Connection page is open - any tab of it, not only this one - at the interval under Module settings, Rules. Scan now asks for one pass immediately."
+                                    "The scan runs while the Connection page is open - any tab of it, not only this one - at the interval under Module settings, Advanced rules, in the field called Binding scan interval. Scan now asks for one pass immediately."
                                   ]
                                 }
                               ]
@@ -4583,7 +4740,7 @@
                               "title": "What lands here",
                               "lines": [
                                 "Everything the automation decided on its own: a device bound or moved, a session created or deleted, a firewall rule that verified empty, a watchdog redial, a router reboot the module recovered from.",
-                                "Binding events belong to one instance and also appear in that instance's own drawer on the WAN Binding tab. PPPoE and router events belong to the router rather than to any instance, so this table is the only place in the app that shows them.",
+                                "Binding events belong to one instance and also appear in that instance's own row detail under WAN Binding, Instances. PPPoE and router events belong to the router rather than to any instance, so this table is the only place in the app that shows them.",
                                 "The list is bounded per router, so the oldest entries are dropped. Nothing here ever carries router command output, because a rejected uci line can contain a PPPoE password."
                               ]
                             }

@@ -166,3 +166,28 @@ export const MANAGED_PREF_CEILING = 30_000
  * delete on the next tick for having no lease behind it.
  */
 export const DIRECT_PREF_SPAN = 1_000
+
+/**
+ * How many binding instances, and how many one-to-one bindings, a per-router
+ * document will hold.
+ *
+ * The number is about the 512 KB host-data budget rather than about routers.
+ * The document is written whole, `fitHostData` may only spend the expendable
+ * rings to make a refused write fit, and a topology record is deliberately
+ * never one of those - so both arrays have to be bounded well inside the
+ * budget or the flush simply starts failing and nothing created afterwards
+ * survives a restart. Both arrays full come to roughly 370 KB of it, which
+ * still leaves the sticky floor, the two event rings and the job history
+ * somewhere to live; a thousand one-to-one records alone would take 360 KB and
+ * leave the instances nowhere at all.
+ *
+ * It lives out here because the reader in `store/schema` and the create gate in
+ * `direct/check` are the two places that have to agree on it, in two folders,
+ * and they did not agree. The reader stopped at 512 records and dropped the
+ * rest; the gate refused only once every preference in the thousand-wide band
+ * was claimed. Bindings past the ceiling were therefore creatable, and vanished
+ * from the module on the next read of the document while their `ip rule`, their
+ * `bmd<slot>_` firewall sections and their `ip4table` claim stayed on the
+ * router with nothing left that could name them, let alone remove them.
+ */
+export const MAX_STORED_BINDINGS = 512

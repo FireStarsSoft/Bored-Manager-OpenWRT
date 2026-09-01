@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest'
 import type { ModuleExecResult } from '@shared/modules'
 import type { OkResult } from '@shared/types'
 import activate from '../../openwrt/main/index'
-import { ConfigStore } from '../../openwrt/main/config'
+import { BindingEngine } from '../../openwrt/main/binding'
+import { ConfigStore, DEFAULT_RULES } from '../../openwrt/main/config'
+import { buildRow, type DirectState } from '../../openwrt/main/direct'
 import { FastSweep } from '../../openwrt/main/service'
-import { HostStore } from '../../openwrt/main/store'
+import { HostStore, type DirectBindingRecord } from '../../openwrt/main/store'
 import type { OpenWrtOverview, OpenWrtSeriesPoint } from '../../openwrt/main/types'
 import { moduleHarness, sharedModuleConfig } from '../helpers/module-harness'
 import { isProbeCommand, routerProbeOutput } from '../helpers/router'
@@ -653,6 +655,188 @@ describe('the interfaces the dashboard table cannot list', () => {
     // fraction of never reached a screen either.
     expect(keys.has('ifTotal')).toBe(true)
     expect(keys.has('ifOmitted')).toBe(true)
+  })
+})
+
+describe('the columns the two binding tables name', () => {
+  /** One one-to-one row, built by the only builder either side of the module uses. */
+  function directRow(): Record<string, unknown> {
+    const record: DirectBindingRecord = {
+      id: 'dir_000001',
+      name: 'Till at the front counter',
+      target: { kind: 'ip', ip: '192.168.1.50' },
+      wan: 'wan',
+      enabled: true,
+      whenDown: 'hold',
+      pref: DEFAULT_RULES.directPrefBase,
+      table: 42,
+      lan: 'lan',
+      slot: 0,
+      createdAt: 1
+    }
+    const entry = {
+      id: record.id,
+      ip: '192.168.1.50',
+      missingSince: 0,
+      state: 'bound' as const,
+      since: 1
+    }
+    return buildRow(record, entry, 2, DEFAULT_RULES.catchAllTable) as unknown as Record<
+      string,
+      unknown
+    >
+  }
+
+  /** One instance row, from a store holding one instance and nothing else. */
+  function instanceRow(): Record<string, unknown> {
+    const harness = moduleHarness('openwrt', () => ok(), {
+      hostData: {
+        version: 3,
+        instances: [instance('bind1', 'Front of house', 'lan', 0)],
+        direct: [],
+        extraTables: [],
+        stickyMap: [],
+        events: [],
+        moduleEvents: [],
+        jobs: []
+      },
+      config: sharedModuleConfig(null)
+    })
+    const store = new HostStore(harness.ctx, () => DEFAULT_RULES)
+    const binding = new BindingEngine(harness.ctx, store, { rules: () => DEFAULT_RULES })
+    const row = binding.list()[0] as unknown as Record<string, unknown>
+    binding.dispose()
+    return row
+  }
+
+  // A column naming a key the row does not carry renders an empty cell and
+  // nothing anywhere says why - which is how the When down column printed a
+  // raw `hold` for months and how the scope of a range instance reached no
+  // surface at all. Both directions are covered: the spec may not name a key
+  // the row has stopped publishing, and this fails on the day it does.
+  /** The column keys of every table drawn from one source, however it is fed. */
+  function columnKeys(match: (source: Record<string, unknown>) => boolean): string[] {
+    const out = new Set<string>()
+    for (const node of nodes(specNamed('pages/connection.json'))) {
+      if (node['type'] !== 'table') continue
+      const source = node['source'] as Record<string, unknown> | undefined
+      if (!source || !match(source)) continue
+      for (const column of (node['columns'] as Array<Record<string, unknown>>) ?? []) {
+        if (typeof column['key'] === 'string') out.add(column['key'])
+      }
+    }
+    return [...out]
+  }
+
+  it('are keys the one-to-one row actually publishes', () => {
+    const row = directRow()
+    const named = columnKeys((source) => source['method'] === 'directRows')
+    expect(named.filter((key) => !(key in row))).toEqual([])
+    expect(named.length).toBeGreaterThan(0)
+  })
+
+  it('are keys the instance row actually publishes', () => {
+    const row = instanceRow()
+    const named = columnKeys(
+      (source) => source['event'] === 'binding' && source['path'] === 'rows'
+    )
+    expect(named.filter((key) => !(key in row))).toEqual([])
+    expect(named.length).toBeGreaterThan(0)
+  })
+
+  it('opens the When that WAN is down select on the stored value, not on its label', () => {
+    // The row's edit form is initialised from a key on the row. Pointing it at
+    // the human wording would leave the select matching none of its own
+    // options, so it would open blank and a Save would rewrite the choice the
+    // user never touched. The column renders the wording under another key.
+    const row = directRow()
+    const selects = nodes(specNamed('pages/connection.json')).filter(
+      (node) => node['key'] === 'whenDown' && node['input'] === 'select'
+    )
+    const opened = selects.filter((node) => typeof node['initialFromScope'] === 'string')
+    expect(opened.length).toBeGreaterThan(0)
+    for (const node of opened) {
+      const values = ((node['options'] as Array<Record<string, unknown>>) ?? []).map(
+        (option) => option['value']
+      )
+      expect(values).toContain(row[String(node['initialFromScope'])])
+    }
+  })
+})
+
+describe('the two stranded rows on the one-to-one table', () => {
+  /**
+   * One one-to-one binding in a given state, with `When that WAN is down` set
+   * either way and everything else held identical - which is the whole point:
+   * these two rows differ by one stored word and by nothing else a person can
+   * see, so whatever the State column says about them has to carry it.
+   */
+  function stateRow(state: DirectState, whenDown: 'hold' | 'fallback'): ReturnType<typeof buildRow> {
+    const record: DirectBindingRecord = {
+      id: 'dir_000001',
+      name: 'Till at the front counter',
+      target: { kind: 'ip', ip: '192.168.1.50' },
+      wan: 'wan',
+      enabled: true,
+      whenDown,
+      pref: DEFAULT_RULES.directPrefBase,
+      table: 42,
+      lan: 'lan',
+      slot: 0,
+      createdAt: 1
+    }
+    return buildRow(
+      record,
+      {
+        id: record.id,
+        ip: '192.168.1.50',
+        missingSince: 0,
+        state,
+        since: 1
+      },
+      2,
+      DEFAULT_RULES.catchAllTable
+    )
+  }
+
+  /** The State column as it is actually read: a row of words, left to right. */
+  const chips = (row: ReturnType<typeof buildRow>): string[] =>
+    row.stateBadges.map((badge) => badge.label)
+
+  it('do not look alike, because they are opposites', () => {
+    // Parked, the device is off the internet. Fallen back, it is on the
+    // internet through the router's ordinary WAN - which for a device pinned
+    // to a metered or whitelisted line is exactly what its owner was paying to
+    // prevent. The row used to print the same two red chips for both.
+    expect(chips(stateRow('stranded', 'hold'))).not.toEqual(
+      chips(stateRow('stranded', 'fallback'))
+    )
+  })
+
+  it('say `no way out` for the parked one, in the words the held row uses', () => {
+    expect(chips(stateRow('stranded', 'hold'))).toEqual(['moved off its LAN', 'no way out'])
+    expect(chips(stateRow('held', 'hold'))).toContain('no way out')
+  })
+
+  it('say `on the main table` for the other, in the words the fallback row uses', () => {
+    expect(chips(stateRow('stranded', 'fallback'))).toEqual([
+      'moved off its LAN',
+      'on the main table'
+    ])
+    expect(chips(stateRow('fallback', 'fallback'))).toContain('on the main table')
+    // The chip that would be read as "this device is offline" must not be on
+    // the row of a device that is very much online.
+    expect(chips(stateRow('stranded', 'fallback'))).not.toContain('no way out')
+  })
+
+  it('name the table their own Table cell names, so the two cells cannot drift', () => {
+    const parked = stateRow('stranded', 'hold')
+    expect(parked.rule).toContain(`lookup ${DEFAULT_RULES.catchAllTable}`)
+    expect(chips(parked)).toContain('no way out')
+
+    const fellBack = stateRow('stranded', 'fallback')
+    expect(fellBack.rule).toContain('lookup main')
+    expect(chips(fellBack)).toContain('on the main table')
   })
 })
 

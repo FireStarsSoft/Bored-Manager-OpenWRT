@@ -10,6 +10,50 @@
  */
 import type { IfaceState, RouterModel } from './types'
 
+/** The four spellings UCI accepts for a true boolean; `uci show` quotes them all. */
+const UCI_TRUE = new Set(['1', 'on', 'true', 'yes'])
+
+/**
+ * Whether a value read out of /etc/config means true.
+ *
+ * fw4 and netifd take `1`, `on`, `true` and `yes` to mean the same thing, and
+ * LuCI happens to write only the first of them - so a reader that compares
+ * against `'1'` is right about every configuration LuCI produced and wrong about
+ * every hand-edited or migrated one, which is precisely the population these
+ * readers exist to be correct on. `option masq 'on'` is what made the point: a
+ * WAN zone spelled that way read as not masquerading, which both printed a
+ * permanent warning about a correctly configured router and swung the interface
+ * classifier three points towards calling that uplink a LAN.
+ *
+ * It lives here rather than beside any one of its readers because it had been
+ * written down four times - in the binding folder, in the classifier, in the
+ * capacity reader and in `parse.ts` - and three of the four copies were applied
+ * to some of their booleans and not to others. One narrow spelling of a fact
+ * OpenWrt states several legal ways is the bug this module keeps making, and it
+ * is not one a second copy of the right answer fixes.
+ */
+export function uciBoolean(value: string): boolean {
+  return UCI_TRUE.has(value)
+}
+
+/**
+ * The netdev names one interface answers to, for the firewall zone that names
+ * its members by device rather than by network.
+ *
+ * Both are offered because they differ on exactly the interfaces this matters
+ * on: a PPPoE uplink terminates on `eth1` and carries `pppoe-wan`, and a zone
+ * may legitimately be written against either. Deduplicated because on every
+ * other interface they are the same string, and an empty one is not a name.
+ *
+ * It is here rather than beside the classifier because the check that decides a
+ * zone and the apply that re-reads it have to answer this question the same way
+ * or the apply throws "the LAN firewall zone changed" on the very routers the
+ * device lookup exists to unblock.
+ */
+export function ifaceDevices(iface: IfaceState): string[] {
+  return [...new Set([iface.device, iface.l3Device].filter((device) => device !== ''))]
+}
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

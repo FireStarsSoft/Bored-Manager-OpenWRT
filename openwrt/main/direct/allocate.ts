@@ -14,14 +14,6 @@ import type { DirectBindingRecord } from '../store'
 import type { IfaceState, RouterModel } from '../types'
 import { parseCidr, subnetContains } from '../util'
 
-/**
- * The three protocols an interface has to be running before anything here reads
- * it as a WAN port - the same list `directWans` collects the router's WANs with
- * and the same one the WAN dropdown offers, so both halves of a create agree on
- * what a WAN is.
- */
-const WAN_PROTOS = ['pppoe', 'dhcp', 'static']
-
 export function makeDirectId(taken: ReadonlySet<string>): string {
   for (let attempt = 0; attempt < 50; attempt++) {
     const id = `dir_${Math.random().toString(36).slice(2, 8)}`
@@ -69,43 +61,8 @@ export function freeDirectSlot(
 }
 
 /**
- * Whether this interface is one a binding could have named as its WAN, which is
- * the whole reason it may not also be read as a LAN: a WAN port never supplies
- * a firewall *source* zone.
- *
- * `pppoe` and `dhcp` say uplink on their own, and those two were once the whole
- * of this test. `static` does not - it is the protocol every LAN on the router
- * runs - so the uplink among the static interfaces is told apart the way the
- * WAN dropdown tells it apart, by the device the interface terminates on: a LAN
- * is a bridge, an uplink is the port itself. Without that second half a second
- * WAN given a static address was a LAN candidate, and any address falling
- * inside its subnet was stamped with it - so the scoped forwarding was written
- * from the uplink's own zone rather than from the zone the device is really on,
- * which both opens a forwarding nobody asked for and leaves the device with no
- * firewall path at all.
- */
-function isWanPort(iface: IfaceState): boolean {
-  if (!WAN_PROTOS.includes(iface.proto)) return false
-  return !(iface.l3Device || iface.device).toLowerCase().startsWith('br-')
-}
-
-/**
- * The interfaces an address could be behind: everything with an IPv4 subnet
- * that is neither the uplink this binding is about to use nor an uplink of any
- * other kind.
- */
-export function lanCandidates(model: RouterModel, wan: string): IfaceState[] {
-  return model.ifaces.filter(
-    (iface) =>
-      iface.name !== 'loopback' &&
-      iface.name !== wan &&
-      !isWanPort(iface) &&
-      lanCidr(iface) != null
-  )
-}
-
-/**
- * Which of those the address actually sits in, longest prefix first.
+ * Which of a set of candidates the address actually sits in, longest prefix
+ * first.
  *
  * Longest prefix rather than first match because a router that carries both a
  * /24 and a /25 inside it has two true answers, and the specific one is the

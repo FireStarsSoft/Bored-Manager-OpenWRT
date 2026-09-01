@@ -24,6 +24,16 @@ export interface ScanRuleLine {
    * invisible to this module.
    */
   table: string
+  /**
+   * The rule names a table whose token this reader would not accept, so `table`
+   * is empty for a rule that plainly has one.
+   *
+   * The two cases have to stay apart because the sentence for them is
+   * different and only one of them is true of each rule: a rule with no table
+   * is one the kernel acts on directly, and saying that about a rule pointing
+   * at a table nobody here could read is inventing a fact about the router.
+   */
+  tableUnread: boolean
   /** The `from` selector as printed: an address, a CIDR, or `all`. */
   from: string
   /** The source address with a `/32` dropped; empty for `from all` and no `from`. */
@@ -211,6 +221,25 @@ export interface ScanAssignment {
   instance: string
 }
 
+/**
+ * The address one stored one-to-one binding currently has a rule standing for.
+ *
+ * Kept apart from the record because the record cannot answer it. A binding
+ * that names a MAC is written for whatever that MAC answers to, and the leases
+ * stop answering the instant the device drops off - while the one-to-one pass
+ * deliberately keeps the rule installed at the last address it saw for the whole
+ * of Lease release grace (s), so that a laptop closed for thirty seconds does not
+ * lose and regain its WAN. Only the pass's own memory knows that address, and
+ * without it the monitor reads a rule this module wrote, and is about to remove
+ * itself, as one written outside this module.
+ */
+export interface ScanInstalledAddress {
+  /** The `DirectBindingRecord` id this rule belongs to. */
+  id: string
+  /** The address the last pass wrote a rule for; empty when it wrote none. */
+  ip: string
+}
+
 export interface ScanEngineOptions {
   ctx: ModuleContext
   rules: () => OwrtRules
@@ -220,6 +249,14 @@ export interface ScanEngineOptions {
   instances: () => readonly BindingInstanceRecord[]
   /** Every address the binding half currently believes it has placed, and where. */
   assignments: () => ReadonlyArray<ScanAssignment>
+  /**
+   * What the one-to-one pass last wrote a rule for, per record; see
+   * `ScanInstalledAddress`. Optional so that a container which has not wired it
+   * yet still compiles - an absent memory only costs the grace window its
+   * attribution, which is exactly the state this option was added to end, and
+   * never makes the classifier claim a rule it did not write.
+   */
+  installed?: () => ReadonlyArray<ScanInstalledAddress>
   capabilities: () => OpenWrtCapabilities
 }
 
@@ -231,6 +268,8 @@ export interface ScanClassifyInput {
   direct: readonly DirectBindingRecord[]
   instances: readonly BindingInstanceRecord[]
   assignments: readonly ScanAssignment[]
+  /** The rule each one-to-one binding actually has standing; see `ScanInstalledAddress`. */
+  installed?: readonly ScanInstalledAddress[]
   capabilities: OpenWrtCapabilities
 }
 

@@ -37,6 +37,16 @@ import type {
  * and rebuilt, and nothing else in /etc/config/firewall is read or touched. Two
  * automations can therefore own disjoint bands of sections in the same file
  * without either one having to know the other exists.
+ *
+ * `zoneName` is the module-owned masquerading zone the caller has a pool
+ * behind, and it is written here because that caller is what brings the zone
+ * into existence. A caller with no pool omits it and gets forwardings alone:
+ * naming one WAN section by hand is no reason to conjure an empty masquerading
+ * zone onto a router that has no instance and no pool, and a zone written by a
+ * create that nothing removes on delete reads, correctly, as residue. Omitting
+ * it never takes masquerading away from a zone that does exist - this only ever
+ * wrote those seven lines, it never deleted them, and a WAN that really is in
+ * the pool zone is still forwarded to it by name.
  */
 export async function installScopedForwardings(
   deps: ExecDeps,
@@ -45,7 +55,8 @@ export async function installScopedForwardings(
     sectionPrefix: string
     sourceZone: string
     destinationZones: readonly string[]
-    zoneName: string
+    /** The module's own zone, for the callers that own one. */
+    zoneName?: string
   }
 ): Promise<void> {
   const rules = deps.options.rules()
@@ -74,7 +85,8 @@ export async function installScopedForwardings(
     )
   }
   const prefix = options.sectionPrefix
-  const lines = [
+  const lines: string[] = []
+  if (zoneName) {
     // The module-owned masquerading zone, named by the caller from what it
     // stamped at creation rather than from what settings now say - a rename
     // must not re-point forwardings at a zone holding none of these WANs.
@@ -83,14 +95,16 @@ export async function installScopedForwardings(
     // `list network` entries and rebuilds them on every pool change - the old
     // `pppoe-<prefix>+` device wildcard this path used to claim is gone with
     // the model that needed it.
-    `set firewall.${zoneName}=zone`,
-    `set firewall.${zoneName}.name=${shQuote(zoneName)}`,
-    `set firewall.${zoneName}.input='REJECT'`,
-    `set firewall.${zoneName}.output='ACCEPT'`,
-    `set firewall.${zoneName}.forward='REJECT'`,
-    `set firewall.${zoneName}.masq='1'`,
-    `set firewall.${zoneName}.mtu_fix='1'`
-  ]
+    lines.push(
+      `set firewall.${zoneName}=zone`,
+      `set firewall.${zoneName}.name=${shQuote(zoneName)}`,
+      `set firewall.${zoneName}.input='REJECT'`,
+      `set firewall.${zoneName}.output='ACCEPT'`,
+      `set firewall.${zoneName}.forward='REJECT'`,
+      `set firewall.${zoneName}.masq='1'`,
+      `set firewall.${zoneName}.mtu_fix='1'`
+    )
+  }
   const cleanup: string[] = []
   for (let index = 0; index < 32; index++) {
     cleanup.push(`uci -q delete firewall.${prefix}${index} 2>/dev/null || true`)
@@ -149,6 +163,23 @@ export async function removeScopedForwardings(
 }
 
 /**
+ * What was actually looked at, for a network no firewall zone claimed.
+ *
+ * The refusal underneath used to say only that the interface was not assigned
+ * to a zone, which is a statement about the router rather than about the search
+ * - and on a router whose zone names its members with `list device` it was
+ * simply false: the operator had already done the one thing the message told
+ * them to do, and nothing on the page could tell them why it was not believed.
+ * So both spellings are named, and so is which of the two this call could read.
+ */
+function zoneSearch(network: string, devices: readonly string[]): string {
+  const looked = `No zone in /etc/config/firewall lists ${network} under "list network"`
+  return devices.length === 0
+    ? `${looked}, and the device names a zone could carry under "list device" instead were not available to this check.`
+    : `${looked}, and none names ${devices.join(' or ')} under "list device" either.`
+}
+
+/**
  * The firewall half of a create gate: which zone the LAN sits in, which zones
  * its WANs sit in, and every reason those answers stop a create.
  *
@@ -156,20 +187,41 @@ export async function removeScopedForwardings(
  * write forwardings for exactly the set the check passed on - re-reading the
  * firewall between the two is how a zone renamed in that window ends up
  * forwarded from a source zone that no longer exists.
+ *
+ * `moduleZone` is for the caller that has a pool: the pool's WANs arrive and
+ * leave under it, so its forwarding has to be in place before there is anything
+ * in it to forward to. A caller naming one WAN section by hand has no such
+ * future members and omits it, and then the only destination zones are the ones
+ * the router actually puts its WANs in - including the pool zone itself, when
+ * the chosen WAN really is a member of it.
+ *
+ * `devices` is what lets a zone that names its members with `list device` be
+ * read at all: only a caller holding the interface state knows which netdevs a
+ * logical interface answers to, and this function is handed names. It is
+ * optional because omitting it is exactly the reading this gate always had - but
+ * a caller that supplies it here must supply it to the pre-apply re-read as
+ * well, or the two will resolve different zones for one router and the job will
+ * refuse with "the LAN firewall zone changed".
  */
 export function zoneFindings(
   probe: RouterPreparationProbe,
-  options: { lan: string; wans: readonly string[]; moduleZone: string },
+  options: {
+    lan: string
+    wans: readonly string[]
+    moduleZone?: string
+    devices?: ReadonlyMap<string, readonly string[]>
+  },
   findings: ModuleCheckFinding[]
 ): { lanZone: string; destinationZones: string[] } {
   const { lan, moduleZone } = options
+  const devicesOf = (name: string): readonly string[] => options.devices?.get(name) ?? []
   const destinationZones = new Set<string>()
-  const lanZone = firewallZoneForNetwork(probe.firewall, lan)
+  const lanZone = firewallZoneForNetwork(probe.firewall, lan, devicesOf(lan))
   if (!lanZone) {
     findings.push({
       level: 'error',
       label: `LAN "${lan}" is not assigned to a firewall zone`,
-      detail: 'WAN Binding needs the source zone so it can install scoped forwarding without changing unrelated LANs.'
+      detail: `${zoneSearch(lan, devicesOf(lan))} WAN Binding needs the source zone so it can install scoped forwarding without changing unrelated LANs.`
     })
   } else if (!FIREWALL_ZONE.test(lanZone)) {
     findings.push({
@@ -183,7 +235,7 @@ export function zoneFindings(
     })
   }
   for (const wan of options.wans) {
-    const zone = firewallZoneForNetwork(probe.firewall, wan)
+    const zone = firewallZoneForNetwork(probe.firewall, wan, devicesOf(wan))
     if (zone) {
       if (FIREWALL_ZONE.test(zone)) {
         destinationZones.add(zone)
@@ -201,12 +253,17 @@ export function zoneFindings(
       findings.push({
         level: 'error',
         label: `WAN "${wan}" is not assigned to a firewall zone`,
-        detail: 'Assign the WAN to a masquerading firewall zone before putting it in a one-to-one pool.'
+        detail: `${zoneSearch(wan, devicesOf(wan))} Assign the WAN to a masquerading firewall zone before putting it in a one-to-one pool.`
       })
     }
   }
-  destinationZones.add(moduleZone)
+  if (moduleZone) destinationZones.add(moduleZone)
   for (const zone of destinationZones) {
+    // The module's own zone is exempt only because this create is what writes
+    // it, masquerading and all, a moment later. A pool zone that reached this
+    // set by being the zone a hand-picked WAN sits in is not exempt: it is
+    // already on the router, nothing here is about to rewrite it, and a WAN
+    // whose zone does not SNAT is worth saying out loud.
     if (!firewallZoneMasquerades(probe.firewall, zone) && zone !== moduleZone) {
       findings.push({
         level: 'warning',
@@ -287,7 +344,7 @@ export function allocateWanTables(
         label: 'No free numeric routing table remains between the PPPoE and catch-all ranges',
         // `usedTables` is router-wide, so splitting the pool into smaller
         // instances frees nothing: widening the range is the only remedy.
-        detail: `Tables ${rules.tableBase + 1}-${rules.catchAllTable - 1} are all spoken for and every WAN needs its own. Widen the range with "Routing-table base" or "Unreachable routing table" under Module settings, Rules - the second is locked while any binding instance exists.`
+        detail: `Tables ${rules.tableBase + 1}-${rules.catchAllTable - 1} are all spoken for and every WAN needs its own. Widen the range with "Routing-table base" or "Unreachable routing table" under Module settings, Advanced rules - the second is locked while any binding instance exists.`
       })
       break
     }

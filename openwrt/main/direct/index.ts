@@ -22,6 +22,23 @@
 export { DirectEngine } from './engine'
 export { planDirectReconciliation, directWans } from './reconcile'
 export { freeDirectPref, freeDirectSlot, lanForAddress } from './allocate'
+// The one place that decides what an interface is. Published because the
+// regression net for that decision is a test file rather than another folder,
+// and because a name-based guess is exactly what it replaced.
+//
+// The two refusals leave the folder for a second reason: the instance half next
+// door asks the same question from both ends - is the LAN its form was given
+// really an uplink, and is any member of the pool really one of the router's own
+// LANs - and the sentences it says have to be these. Said twice in two files,
+// the halves of one decision drift, and the operator gets two different accounts
+// of why the router will not do what they asked.
+export {
+  chooseLan,
+  lanCandidates,
+  lanIsUplinkRefusal,
+  routerLayout,
+  wanIsLanRefusal
+} from './layout'
 export { directPolicy } from './pass'
 export { buildRow, countTotals, durationLabel } from './view'
 export { leaseAddresses, normalizeMac, resolveTarget, targetLabel, MAC_ADDRESS } from './target'
@@ -37,5 +54,9 @@ export type {
   DirectRow,
   DirectSnapshot,
   DirectState,
-  DirectTotals
+  DirectTotals,
+  IfaceRole,
+  IfaceVerdict,
+  LanSearch,
+  RouterLayout
 } from './types'

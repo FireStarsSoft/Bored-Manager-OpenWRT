@@ -39,12 +39,25 @@ export function durationLabel(msRaw: number): string {
 /**
  * What a state means, in chips.
  *
- * `held` gets two of them on purpose. One word cannot carry both halves of what
- * hold does, and the half that matters to whoever is looking at the row is the
- * second: the address is not slow or degraded, it has no way out at all until
- * its WAN comes back.
+ * Each of the four states that means something is wrong gets two of them, and
+ * the pair always has the same shape: the first names the condition, the second
+ * names where the address actually comes out. One word cannot carry both halves
+ * of what hold does, and the half that matters to whoever is looking at the row
+ * is the second: the address is not slow or degraded, it has no way out at all
+ * until its WAN comes back.
+ *
+ * `stranded` is the state where that second chip has to be asked rather than
+ * assumed. The two `When that WAN is down` answers send a stranded binding to
+ * opposite ends of the router - parked on the blackhole with the device off the
+ * internet, or re-pointed at main and out through the router's ordinary WAN -
+ * and this row used to print the same two alarming chips for both. So the
+ * binding quietly leaking past the metered line it had been pinned to looked
+ * identical, at a glance, to the one that had been switched off, which is the
+ * whole failure the stranded wording exists to prevent. It asks `onCatchAll`
+ * and then borrows the very words `held` and `fallback` already use, so the
+ * page has one vocabulary for one condition rather than two.
  */
-function stateBadges(state: DirectState, shadowedBy: string): ValueBadge[] {
+function stateBadges(state: DirectState, whenDown: string, shadowedBy: string): ValueBadge[] {
   if (state === 'bound') return statusBadges('bound')
   if (state === 'held') return [...statusBadges('held'), badge('no way out', BADGE.bad)]
   if (state === 'fallback') {
@@ -55,7 +68,16 @@ function stateBadges(state: DirectState, shadowedBy: string): ValueBadge[] {
     return [badge('WAN down', BADGE.bad), badge('on the main table', BADGE.warn)]
   }
   if (state === 'stranded') {
-    return [badge('moved off its LAN', BADGE.bad), badge('no firewall path', BADGE.bad)]
+    // The second chip used to read "no firewall path", which is true of both
+    // halves - the forwarding this binding was stamped with really is gone
+    // either way - and therefore says nothing about the only difference that
+    // matters to the person reading the row.
+    return [
+      badge('moved off its LAN', BADGE.bad),
+      onCatchAll(state, whenDown)
+        ? badge('no way out', BADGE.bad)
+        : badge('on the main table', BADGE.warn)
+    ]
   }
   if (state === 'shadowed') {
     // The second chip names the binding rather than saying "another binding",
@@ -69,6 +91,38 @@ function stateBadges(state: DirectState, shadowedBy: string): ValueBadge[] {
   }
   if (state === 'waiting') return statusBadges('waiting')
   return [badge('disabled')]
+}
+
+/**
+ * The two `When that WAN is down` choices, worded exactly as the select on the
+ * create form and on the row's own edit form words them.
+ *
+ * The column used to print the stored value, and `fallback` is also the word
+ * the State chips use for a binding whose WAN is down right now - so one table
+ * carried the same word for a setting and for a condition, and a row reading
+ * "fallback / fallback" said nothing at all. Naming the option the user picked
+ * is the house rule anyway; this is the map that keeps the row and the two
+ * selects saying the same eleven words.
+ */
+const WHEN_DOWN_LABELS: Readonly<Record<string, string>> = {
+  hold: 'Keep it off the internet',
+  fallback: 'Let it use the default connection'
+}
+
+/**
+ * Whether the rule this binding is written to carry points at the blackhole -
+ * the catch-all table with nothing but an unreachable default in it.
+ *
+ * `held` is the obvious half. The other is a `stranded` binding whose owner
+ * chose to park it: the device has walked off the LAN its firewall forwarding
+ * was written from, and the pass writes it exactly the rule a hold writes, so
+ * the address has precisely as little way out. All three callers ask this one
+ * question rather than each spelling the pair out, because the row's Table
+ * cell, the row's own State chips and the Overview tile disagreeing about the
+ * same binding is what let a detained device be reported as nothing at all.
+ */
+function onCatchAll(state: DirectState, whenDown: string): boolean {
+  return state === 'held' || (state === 'stranded' && whenDown === 'hold')
 }
 
 /**
@@ -108,9 +162,7 @@ function installedTable(
   catchAllTable: number
 ): string {
   if (state === 'bound') return String(record.table)
-  if (state === 'held' || (state === 'stranded' && record.whenDown === 'hold')) {
-    return String(catchAllTable)
-  }
+  if (onCatchAll(state, record.whenDown)) return String(catchAllTable)
   if (state === 'fallback' || (state === 'stranded' && record.whenDown === 'fallback')) {
     return 'main'
   }
@@ -134,19 +186,29 @@ export function buildRow(
     table: record.table,
     pref: record.pref,
     whenDown: record.whenDown,
+    whenDownLabel: WHEN_DOWN_LABELS[record.whenDown] ?? record.whenDown,
     enabled: record.enabled,
     state,
-    stateBadges: stateBadges(state, entry?.shadowedBy ?? ''),
+    stateBadges: stateBadges(state, record.whenDown, entry?.shadowedBy ?? ''),
     since: entry?.since ?? 0,
     sinceLabel: entry?.since ? durationLabel(now - entry.since) : '',
     rule: ruleLine(record, entry, catchAllTable)
   }
 }
 
+/**
+ * The two numbers the Overview tiles and the one-to-one chart are drawn from.
+ *
+ * `held` counts the rule rather than the word: every binding whose rule points
+ * at the blackhole, which is `held` and also a parked `stranded`. Counting the
+ * state name alone left a device that had roamed onto another VLAN overnight
+ * sitting on the unreachable table with the tile reporting nothing detained -
+ * the one reading the tile exists to prevent.
+ */
 export function countTotals(rows: readonly DirectRow[]): DirectTotals {
   return {
     ok: rows.filter((row) => row.state === 'bound').length,
-    held: rows.filter((row) => row.state === 'held').length
+    held: rows.filter((row) => onCatchAll(row.state, row.whenDown)).length
   }
 }
 

@@ -42,6 +42,39 @@ export const NO_EXIT: ScanExit = {
 }
 
 /**
+ * The one interface a set of claimants can be narrowed to, or null.
+ *
+ * Neither spelling of a netdev is unique. Two UCI networks share one bridge the
+ * moment somebody adds a management address to a LAN, every PPPoE session in a
+ * pool carries the same ethernet as its `device`, and - on every dual-stacked
+ * OpenWrt there has ever been - `wan` and `wan6` sit on the same netdev by both
+ * spellings at once. Answering with whichever of them `find` reached first
+ * named a WAN the traffic has nothing to do with, inside a sentence written to
+ * be believed: on a stock router that was `wan6`, an interface with no IPv4
+ * address at all, printed as the WAN an address is bound to.
+ *
+ * So the tie is broken on the one thing this folder knows about the traffic it
+ * is explaining: every command it runs is `ip -4`, and the rule, the table and
+ * the default route in front of it are all IPv4. An interface holding no IPv4
+ * address is not what an IPv4 default route leaves through, whatever share of
+ * the netdev it owns. When that still leaves two, there is no evidence here to
+ * choose between them and the answer is null, which degrades the sentence to
+ * the bare netdev name: less than the reader wanted, and true.
+ *
+ * The address and not the protocol name. Ruling out `dhcpv6` and its relatives
+ * by name would be the same mistake one folder over - a list of protocol names
+ * that has to be complete to be right, and is not: an IPv6-only interface can
+ * be `proto static` with nothing but an `ip6addr` on it, and it would pass.
+ * Whether the router gave the interface an IPv4 address is the whole question,
+ * asked directly.
+ */
+function narrow(claimants: readonly IfaceState[]): IfaceState | null {
+  if (claimants.length <= 1) return claimants[0] ?? null
+  const carriesIpv4 = claimants.filter((iface) => !!iface.ipv4?.addr)
+  return carriesIpv4.length === 1 ? carriesIpv4[0] : null
+}
+
+/**
  * The interface a netdev belongs to, in that order of confidence.
  *
  * Both spellings are checked because both are true at different times: a
@@ -50,21 +83,18 @@ export const NO_EXIT: ScanExit = {
  * only one of the two is how `pppoe-bm0` came back unresolved on exactly the
  * routers this feature is for.
  *
- * They are two passes rather than one `||` because the second spelling is not
- * unique and the first is. Every PPPoE session in a pool carries the same
- * shared carrier as its `device`, so a default route that leaves through the
- * raw carrier matched whichever session happened to sit first in `ifaces` -
- * and the row then named a WAN the traffic has nothing to do with, in a
- * sentence written to be believed. An ambiguous fallback answers null instead,
- * which degrades the sentence to the bare netdev name: less than the reader
- * wanted, and true.
+ * They stay two passes rather than becoming one search over both, and an
+ * `l3_device` group that cannot be narrowed ends the answer rather than falling
+ * through. The stronger evidence has already spoken: it said several interfaces
+ * hold this netdev as their own layer-3 device, and reaching past it to a
+ * weaker match is how a third interface that merely carries the port would come
+ * to be named instead of one of the two that actually answer for it.
  */
 function ifaceForDevice(model: RouterModel | null, device: string): IfaceState | null {
   if (!model || !device) return null
-  const exact = model.ifaces.find((iface) => iface.l3Device === device)
-  if (exact) return exact
-  const carried = model.ifaces.filter((iface) => iface.device === device)
-  return carried.length === 1 ? carried[0] : null
+  const routed = model.ifaces.filter((iface) => iface.l3Device === device)
+  if (routed.length) return narrow(routed)
+  return narrow(model.ifaces.filter((iface) => iface.device === device))
 }
 
 /** The routes captured for one lookup token, main included. */
@@ -156,8 +186,16 @@ export interface EvidenceInput {
  */
 function actionSentence(rule: ScanRuleLine): string {
   const table = tableLabel(rule.table)
+  const matched = rule.ip || rule.selector || 'all traffic'
+  // A table this reader could not accept is not a rule without a table, and
+  // the difference is the whole sentence: one says the kernel acts on the rule
+  // itself, which is a fact about the router, and it was being said about
+  // rules that plainly name somewhere to look.
+  if (rule.tableUnread) {
+    return `A priority-${rule.pref} rule matching ${matched} names a routing table this scan could not read, so where it sends that traffic is not shown here.`
+  }
   if (!rule.table) {
-    return `A priority-${rule.pref} rule matching ${rule.ip || rule.selector || 'all traffic'} names no routing table, so the kernel acts on it directly rather than looking anything up.`
+    return `A priority-${rule.pref} rule matching ${matched} names no routing table, so the kernel acts on it directly rather than looking anything up.`
   }
   if (rule.ip) {
     return `${rule.ip} has a priority-${rule.pref} policy rule that sends its traffic to routing table ${table} before the main table is consulted.`
@@ -183,10 +221,23 @@ function exitSentence(input: EvidenceInput): string {
   return `Table ${table}'s default route leaves through ${label || 'an interface this router did not name'}; ${mainClause(input.main)}.`
 }
 
-/** The third: the consequence, which is the only part most people read. */
+/**
+ * The third: the consequence, which is the only part most people read.
+ *
+ * The same-device case is first because the other two are false about it. A
+ * one-to-one binding is allowed to point at the WAN the rest of the router
+ * already uses - somebody pinning the NAS to the primary while a pool moves
+ * everything else - and a table whose default leaves through the same interface
+ * main's does is not taking that address anywhere else. "This address does not
+ * use the router's default connection" was printed there anyway, on the one row
+ * whose entire job is to explain the evidence sitting beside it.
+ */
 function consequenceSentence(input: EvidenceInput): string {
   if (!input.rule.ip) return ''
   if (input.unreachable || input.exit.blackholed || !input.exit.route) return ''
+  if (input.exit.device && input.exit.device === input.main.device) {
+    return `This is the same interface the main table's own default uses, so the rule does not move this address off the router's default connection.`
+  }
   if (input.exit.wan) {
     return `So this address does not use the router's default connection - it is bound to ${input.exit.wan}.`
   }

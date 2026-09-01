@@ -324,6 +324,16 @@ export interface BindingListRow extends BindingSummaryInstance {
   /** The two editable flags, carried so the row's edit form can open on them. */
   sticky: boolean
   remap: boolean
+  /**
+   * Which addresses this instance serves: `whole LAN`, or the window it was
+   * stamped with, as `192.168.1.100 - 192.168.1.199`.
+   *
+   * On the row rather than on `BindingSummaryInstance` because it is a fact
+   * about the record, not about the last pass: it is fixed at creation, the
+   * three places that build a summary all build it from a reconcile, and a row
+   * for an instance that has never reconciled still has to say what it covers.
+   */
+  scope: string
   /** What this instance is doing, as chips: the counts that are not zero. */
   stateBadges: ValueBadge[]
   wanTotal: number
@@ -466,6 +476,19 @@ export interface BindingRuntime {
   checkSession: CheckSession<BindingCreatePlan>
   latestModel: RouterModel | null
   lastUptime: number | null
+  /**
+   * The connected route each instance's catch-all table was last seen to
+   * accept, by instance id, exactly as it was written.
+   *
+   * It is remembered because it cannot be read back: `ip -4 rule show` is the
+   * only thing the fast sweep collects, and a route is not a rule. The kernel
+   * removes every route whose device goes down - in every table, not just main
+   * - so a LAN device that bounces takes this one with it while the blackhole
+   * beside it survives, and the router is then left unreachable on the LAN it
+   * is binding. Comparing what was written against what the LAN needs now is
+   * what turns that into one `ip route replace` on the next tick.
+   */
+  lanRoutes: Map<string, string>
   memory: Map<string, BindingPlannerMemory>
   cache: Map<string, InstanceCache>
   latestPayload: BindingSnapshot

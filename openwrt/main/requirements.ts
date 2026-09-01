@@ -373,7 +373,14 @@ export const FEATURES: Record<string, FeatureSpec | null> = {
   // is - an instance created months ago on a router that has since lost
   // `ip-full` used to answer with a shell error from inside a reconcile.
   directEnable: { kind: 'action', requires: DIRECT_CREATE },
-  // A rename and two flags; nothing reaches the router.
+  // A rename and a change to When that WAN is down reach nothing. The third
+  // field on the same form does: ticking Enabled writes the flag to the record
+  // and the next pass writes the rule from it, which is the action `directEnable`
+  // above is gated for. That one save is escalated to this entry's requirements
+  // in `runtime/handlers.ts`, because whether a save is an enable depends on the
+  // values submitted and on what the record already holds - neither of which a
+  // table of standing conditions can see. What the table still owns is the
+  // sentence, so both doors refuse a router in exactly the same words.
   directUpdate: { kind: 'action', requires: [] },
   // The way out of a broken state is never refused.
   directDisable: { kind: 'action', requires: [] },

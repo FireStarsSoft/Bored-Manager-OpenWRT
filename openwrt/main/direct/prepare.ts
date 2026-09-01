@@ -22,6 +22,7 @@ import {
   writeWanTables
 } from '../binding'
 import type { JobSpec } from '../jobs'
+import { ifaceDevices } from '../util'
 import { lanForAddress } from './allocate'
 import { runDirectPass } from './pass'
 import { exclusive } from './runtime'
@@ -207,12 +208,16 @@ function preparationJob(
     name: 'Install the firewall forwarding',
     run: async (cancelled) => {
       if (cancelled()) throw new Error('cancelled')
+      // Forwardings and nothing else. The module's masquerading zone belongs to
+      // the instance half, which has a pool to put in it; this write names the
+      // zones the router already has these WANs in, so a router carrying no
+      // instance is left with exactly the `bmd<slot>_` sections a delete can
+      // take off again.
       await exclusive(runtime, () =>
         installScopedForwardings(runtime, runtime.store, {
           sectionPrefix: sectionPrefix(record.slot),
           sourceZone: plan.lanZone,
-          destinationZones: plan.destinationZones,
-          zoneName: runtime.options.rules().zoneName
+          destinationZones: plan.destinationZones
         })
       )
       progress.forwardingInstalled = true
@@ -306,7 +311,14 @@ async function revalidate(runtime: DirectRuntime, plan: DirectPlan): Promise<voi
     throw new Error(`${address} is no longer inside ${plan.lanCidr}; check the form again`)
   }
   const probe = await preparationProbe(runtime)
-  if (firewallZoneForNetwork(probe.firewall, record.lan) !== plan.lanZone) {
+  // The same netdevs the check passed, for the same reason: a device-named zone
+  // has to resolve identically here or this throws on the router it unblocked.
+  const lanZoneNow = firewallZoneForNetwork(
+    probe.firewall,
+    record.lan,
+    lanIface ? ifaceDevices(lanIface) : []
+  )
+  if (lanZoneNow !== plan.lanZone) {
     throw new Error('the LAN firewall zone changed; check the form again')
   }
   if (!probe.network.sectionTypes.has(`network.${record.wan}`)) {

@@ -7,7 +7,7 @@ import type {
   ProcNetDevSnapshot,
   RouterSystemState
 } from './types'
-import { finite, isRecord } from './util'
+import { finite, isRecord, uciBoolean } from './util'
 
 function json(text: string): unknown {
   try {
@@ -314,7 +314,11 @@ export function parseSysctlReport(text: string): {
     if (!match) continue
     if (match[1] === 'flow_offload') {
       const raw = match[2].trim().replace(/^'+|'+$/g, '')
-      flowOffload = raw === '1'
+      // `option flow_offloading 'on'` is as true as `'1'` to fw4, so reading
+      // only the one spelling told the Router limits page that a router already
+      // running software flow offload had it switched off - and offered to turn
+      // on what was on, with no way to turn it off.
+      flowOffload = uciBoolean(raw)
       continue
     }
     const value = integer(match[2].trim(), -1)
@@ -404,8 +408,11 @@ export function parseFirewallZones(text: string): FirewallZone[] {
     } else if (option === 'network') {
       const list = networks.get(section) ?? []
       // Both spellings of a UCI list reach us: one line per value on some
-      // releases, `'lan' 'guest'` on one line on others.
-      list.push(...tokenizeUciValues(value))
+      // releases, `'lan' 'guest'` on one line on others - and `option network
+      // 'lan guest'`, which quotes both names inside a single token. fw4 splits
+      // that one on whitespace, so a token holding two names is two members
+      // rather than a member nothing can match.
+      list.push(...tokenizeUciValues(value).flatMap((token) => token.split(/\s+/)))
       networks.set(section, list)
     }
   }

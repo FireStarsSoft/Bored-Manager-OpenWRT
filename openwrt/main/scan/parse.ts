@@ -53,20 +53,22 @@ export const WELL_KNOWN_TABLES: ReadonlyMap<string, number> = new Map([
 ])
 
 /**
- * The preference the kernel puts each of its own baseline rules at. A rule that
- * matches a name *and* its preference *and* selects nothing is the baseline
- * every Linux machine boots with; anything else claiming one of those tables is
- * somebody's policy rule and has to be reported.
+ * Which table the kernel's own rule at each preference points at, by number.
  *
- * A `Map` for the reason above: this one is looked up by the table token too,
- * and `KERNEL_BASELINE.toString` on an object literal is a function being asked
- * whether it equals a preference number - a question that should never have
- * been askable of a rule table the router wrote.
+ * By number, because `local`, `main` and `default` are names out of
+ * `/etc/iproute2/rt_tables` and not facts about the kernel. A router without
+ * that file - a BusyBox-only image, or one where somebody trimmed it - prints
+ * the same three rules as `lookup 255`, `lookup 254` and `lookup 253`, and this
+ * map keyed by the name did not recognise one of them: the three were reported
+ * as foreign policy rules at the top of the table, and `scanRulesLookWhole`
+ * then read the reply as one that had lost its baseline in transit and threw
+ * the whole scan away. The monitor showed nothing at all on a router whose rule
+ * table it had read perfectly.
  */
-export const KERNEL_BASELINE: ReadonlyMap<string, number> = new Map([
-  ['local', 0],
-  ['main', 32_766],
-  ['default', 32_767]
+export const KERNEL_BASELINE: ReadonlyMap<number, number> = new Map([
+  [0, 255],
+  [32_766, 254],
+  [32_767, 253]
 ])
 
 function cap(value: string): string {
@@ -96,14 +98,19 @@ export function tableLabel(token: string): string {
 /**
  * Whether this is one of the three rules the kernel installs on its own.
  *
- * Both halves of the test matter. Without the preference check a hand-written
- * `from all lookup main pref 100` - a real way to defeat every policy rule
- * below it - would be dismissed as the baseline. Without the selector check a
- * rule that narrows the baseline to one subnet would be too.
+ * All three halves of the test matter. Without the preference check a
+ * hand-written `from all lookup main pref 100` - a real way to defeat every
+ * policy rule below it - would be dismissed as the baseline. Without the
+ * selector check a rule that narrows the baseline to one subnet would be too.
+ * And the table is compared as a number rather than as a token, so that the
+ * same three rules are recognised on a router that prints them with names and
+ * on one that prints them with numbers: they are one rule table said two ways.
  */
 export function isKernelBaseline(rule: ScanRuleLine): boolean {
+  const table = tableNumber(rule.table)
   return (
-    KERNEL_BASELINE.get(rule.table) === rule.pref &&
+    table !== null &&
+    KERNEL_BASELINE.get(rule.pref) === table &&
     rule.from === 'all' &&
     rule.selector === ''
   )
@@ -122,9 +129,21 @@ function selectorText(body: string): string {
     .trim()
 }
 
+/** The character set the command guards a table token with, and the same cap. */
+const TABLE_TOKEN = /^[A-Za-z0-9_.-]{1,64}$/
+
 /**
  * One `ip -4 rule show` line. Returns null for anything that is not a rule -
  * a blank line, or whatever a BusyBox `ip` prints when it disagrees.
+ *
+ * The table is read as a whole word and then checked, rather than matched
+ * against the acceptable characters directly. Matched directly, the pattern
+ * took the leading run of them and stopped: a rule pointing at a table named
+ * `x;reboot` - and an rt_tables name is whatever the administrator typed - came
+ * back as a rule pointing at table `x`, which on that router is a different
+ * table with a different way out, stated as fact in a sentence built to be
+ * believed. A token this reader will not accept is recorded as one it could not
+ * read, which is not the same thing as a rule that names no table at all.
  */
 function parseRuleLine(raw: string): ScanRuleLine | null {
   const head = raw.match(/^\s*(\d{1,10})\s*:\s*(.*)$/)
@@ -133,7 +152,8 @@ function parseRuleLine(raw: string): ScanRuleLine | null {
   if (!Number.isSafeInteger(pref)) return null
   const body = head[2].trim()
   if (!body) return null
-  const table = body.match(/\b(?:lookup|table)\s+([A-Za-z0-9_.-]{1,64})\b/)?.[1] ?? ''
+  const named = body.match(/\b(?:lookup|table)\s+(\S{1,80})/)?.[1] ?? ''
+  const table = TABLE_TOKEN.test(named) ? named : ''
   const from = body.match(/\bfrom\s+(\S{1,64})/)?.[1] ?? ''
   // `from all` is the kernel's way of writing "no source selector", so it is
   // recorded as printed and resolved to no address. A `/32` is dropped because
@@ -143,6 +163,7 @@ function parseRuleLine(raw: string): ScanRuleLine | null {
   return {
     pref,
     table,
+    tableUnread: named !== '' && table === '',
     from,
     ip,
     selector: selectorText(body),

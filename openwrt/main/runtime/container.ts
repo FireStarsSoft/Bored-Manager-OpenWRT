@@ -258,6 +258,14 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
             .rows(instance.id)
             .map((row) => ({ ip: row.ip, wan: row.wan, instance: instance.id }))
         ),
+    // What the one-to-one pass actually has standing on the router, which is
+    // not what the records and the leases say between them: a binding naming a
+    // MAC keeps its rule at the last address it was seen at for the whole of
+    // Lease release grace (s). Without this the monitor files that rule - at a
+    // preference in this module's own band - under "written outside this
+    // module" for the length of every grace, and tells the reader to go and
+    // remove a rule this module owns and is about to withdraw itself.
+    installed: () => direct.rows().map((row) => ({ id: row.id, ip: row.address })),
     capabilities: () => latch.capabilities
   })
 

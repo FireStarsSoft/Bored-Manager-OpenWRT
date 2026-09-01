@@ -116,6 +116,19 @@ function pinRefusal(
       planner ? WAN_TROUBLE[wanState(planner, rules.wanWarnUptimeSec)] : WAN_TROUBLE.missing
     }. Wait for the WAN state column on the Assignments table to say available or bound, then pin again.`
   }
+  /**
+   * The address is a one-to-one binding's, so this instance leaves it alone on
+   * every path that could seat it. Accepted, the pin would be recorded, the
+   * planner would drop the device at the same gate it always does, and the
+   * action would have reported success for something that was never going to
+   * happen - which is the approximation the rest of this function exists to
+   * refuse.
+   */
+  const reservedIps = new Set(runtime.options.reservedIps?.() ?? [])
+  const leasedIp = model.leases.find((lease) => normalizedMac(lease.mac) === mac)?.ip ?? ''
+  if (leasedIp && reservedIps.has(leasedIp)) {
+    return `${leasedIp} is bound one-to-one, and ${instance.name} leaves an address that is bound one-to-one entirely alone - so a pin here would name a WAN no rule of this instance ever gets to use. Change the one-to-one binding for that address instead.`
+  }
   if (
     !instance.sticky &&
     !model.leases.some((lease) => normalizedMac(lease.mac) === mac)

@@ -29,6 +29,7 @@
 import type { ModuleCheckFinding, ModuleCheckReport } from '@shared/check'
 import type { OkResult } from '@shared/types'
 import { selectOptions } from '../options'
+import type { DirectBindingRecord } from '../store'
 import { isRecord } from '../util'
 import { installHint, requirementRefusal, requirementWarnings } from '../requirements'
 import { emitUi, type OpenWrtRuntime } from './container'
@@ -82,6 +83,36 @@ function formValues(
     if (args[index] !== undefined) values[key] = args[index]
   })
   return values
+}
+
+/**
+ * Whether this save is really an Enable.
+ *
+ * The Enabled checkbox on a one-to-one binding's edit form is a second door
+ * into the action the row's Enable button is gated for: the save writes the
+ * flag to the record and the next pass writes the rule from it. So the two have
+ * to be told apart here, before the domain is called, and only the off-to-on
+ * direction counts - a rename, a change to When that WAN is down, and a save
+ * that leaves an already-running binding on all reach the router through
+ * nothing at all.
+ *
+ * The spellings below are the ones `boolField` in `direct/lifecycle.ts` reads -
+ * a checkbox sends a boolean and a hand-written invoke may send its text - and
+ * the two have to agree: a value counted as on there and not here is a save
+ * that walks past the gate and then writes the rule, which is the entire fault
+ * this exists to stop. A field the form left out is not a raise either way -
+ * `formValues` drops it, and the domain keeps whatever the record holds.
+ */
+function raisesEnabled(
+  records: readonly DirectBindingRecord[],
+  idRaw: unknown,
+  values: Record<string, unknown>
+): boolean {
+  const record = records.find((entry) => entry.id === String(idRaw ?? ''))
+  // No such binding is the domain's sentence to say, not the gate's.
+  if (!record || record.enabled) return false
+  const asked = values.enabled
+  return asked === true || asked === 'true' || asked === 'on' || asked === '1'
 }
 
 function isReport(value: unknown): value is ModuleCheckReport {
@@ -291,9 +322,43 @@ export function registerHandlers(runtime: OpenWrtRuntime): void {
   // enabled, in that order.
   handle('directCheck', (values: unknown) => direct.check(values))
   handle('directApply', (payload: unknown) => direct.apply(payload))
-  handle('directUpdate', (id: unknown, ...rest: unknown[]) =>
-    direct.update(id, formValues(['name', 'whenDown', 'enabled'], rest))
-  )
+  handle('directUpdate', (id: unknown, ...rest: unknown[]) => {
+    const values = formValues(['name', 'whenDown', 'enabled'], rest)
+    // A save that ticks Enabled is an Enable, and has to be refused on the same
+    // terms the Enable button is. On a router that has lost `ip-full` the
+    // button answered "This router cannot steer traffic by routing table" with
+    // a remedy while this form answered "Save: done" and then failed inside the
+    // next pass, where nobody was looking. The sentence is fetched from
+    // `directEnable`'s own entry rather than re-listed here, so the two doors
+    // cannot drift apart the next time that entry is edited.
+    //
+    // It is handed to the domain rather than returned from here, and that is
+    // the whole of the difference from what this gate used to do. Returning it
+    // short-circuited the save: nothing at all was written, so a router that
+    // has lost `ip-full` - and every router for the first seconds after it is
+    // connected, because a module that has not finished probing refuses this
+    // too - swallowed the Binding name typed into the same form, under a hint
+    // two lines above promising it was kept. `direct/lifecycle.ts` saves the
+    // fields that reach the router through nothing, then refuses the switch-on
+    // in these words and says what it kept. The key is written last so a
+    // hand-written invoke cannot smuggle a verdict of its own in.
+    //
+    // This gate answers only whether the router is capable, which is all a
+    // capability verdict can say. Whether the rule actually writes on a router
+    // that is capable is the domain's to find out, and `direct/lifecycle.ts`
+    // now runs the pass and takes the flag back when it fails, rather than
+    // leaving a save that got past here to be discovered by a later reconcile.
+    const verdict = raisesEnabled(store.read().direct, id, values)
+      ? requirementRefusal('directEnable', latch.capabilities)
+      : null
+    // `directEnable` is declared an action, so its refusal is an `OkResult` and
+    // carries the sentence in `error`. The report shape is checked for rather
+    // than assumed: reading `.error` off a check report would hand the domain
+    // an empty verdict, which is a save let straight through.
+    const blocked = verdict && !isReport(verdict) ? verdict.error ?? '' : ''
+    if (verdict && !blocked) return verdict
+    return direct.update(id, blocked ? { ...values, enableRefusal: blocked } : values)
+  })
   handle('directEnable', (id: unknown) => direct.enable(id))
   handle('directDisable', (id: unknown) => direct.disable(id))
   handle('directDelete', (id: unknown) => direct.delete(id))

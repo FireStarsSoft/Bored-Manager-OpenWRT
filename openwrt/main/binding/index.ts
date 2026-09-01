@@ -64,7 +64,7 @@ export { planBindingReconciliation } from './planner'
 // The one derivation of an instance's catch-all source set, published because
 // the installer, the per-tick repair and anything that has to reason about what
 // this module wrote at a catch-all preference all have to agree on it.
-export { catchAllCidrs } from './reconcile'
+export { catchAllCidrs } from './catch-all'
 export { BindingEngine } from './engine'
 export { ENGINE_STOPPED, NO_SAMPLE, execScript, shellFailure, uciWrite } from './runtime'
 export {
@@ -78,6 +78,7 @@ export { lanCidr, wanState, wanUsable } from './pool'
 export {
   FIREWALL_ZONE,
   UCI_SECTION,
+  dhcpSectionNetwork,
   firewallZoneForNetwork,
   networkTables,
   preparationProbe

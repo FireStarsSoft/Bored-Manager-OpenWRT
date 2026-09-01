@@ -410,7 +410,11 @@ describe('a bound device that turns up on another LAN', () => {
 
     expect(result.rows[0]?.state).toBe('stranded')
     expect(result.rows[0]?.address).toBe(GUEST)
-    expect(result.totals).toEqual({ ok: 0, held: 0 })
+    // Counted as held, because the next test proves the rule it is written to
+    // carry looks up the blackhole table. This assertion read `held: 0` until
+    // the Overview tile that exists to surface exactly this condition was found
+    // reporting nothing on the one router that needs it.
+    expect(result.totals).toEqual({ ok: 0, held: 1 })
     expect(result.events.map((event) => event.kind)).toEqual(['stranded'])
     expect(result.events[0]?.text).toContain('no firewall path')
   })
@@ -909,13 +913,22 @@ describe('a second uplink that happens to carry a static address', () => {
     // old test - so the binding was stamped with a "LAN" that is really a WAN
     // and its firewall forwarding would have been written from the uplink's own
     // zone, leaving the device with no path from the zone it is actually on.
+    //
+    // The refusal names it now rather than staying silent about it. Saying only
+    // "not inside any LAN subnet" was true and useless: it is the same sentence
+    // a router whose LANs were all misclassified produced, which is how that
+    // bug survived a release.
     const run = createFixture({ extraIfaces: [UPLINK2] })
 
     const report = await run.engine.check({ ...CREATE_VALUES, address: '192.168.50.20' })
 
     expect(report.ok).toBe(false)
-    expect(labels(report)).toContain('192.168.50.20 is not inside any LAN subnet on this router')
-    expect(labels(report)).not.toContain('uplink2')
+    expect(labels(report)).toContain(
+      '192.168.50.20 is on uplink2, which this router uses as an uplink rather than as a LAN'
+    )
+    // Named, but never chosen: nothing here says the binding would be written
+    // from it, which is the fault the exclusion exists to prevent.
+    expect(labels(report)).not.toContain('is on LAN uplink2')
   })
 
   it('still finds the bridge behind an address that really is on the LAN', async () => {

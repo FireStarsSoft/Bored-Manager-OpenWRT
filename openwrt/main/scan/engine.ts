@@ -33,9 +33,14 @@ const NOT_CONNECTED =
  * an empty table. "This router has no policy rules" is the one sentence this
  * feature must never say wrongly: it is the exact opposite of the answer a
  * person opened the page to get.
+ *
+ * Both halves of the router's `else` are named, because the sentinel carries
+ * one flag for two failures: `ip -4 rule show` exiting non-zero, and the
+ * `mktemp` that holds its output failing first. Naming only the first sent a
+ * reader whose /tmp had filled up looking at their `ip` command.
  */
 const UNREADABLE =
-  'the router could not read its own ip rule table, so this scan was discarded rather than reported as a router with no rules'
+  'the router did not produce its ip rule table - either ip -4 rule show failed or the temporary file the scan captures it to could not be created - so this scan was discarded rather than reported as a router with no rules'
 
 const TRUNCATED =
   'the scan reply exceeded the command output limit, so it was discarded rather than reported as a partial rule table'
@@ -235,6 +240,13 @@ export class ScanEngine {
       direct: this.options.direct(),
       instances: this.options.instances(),
       assignments: this.options.assignments(),
+      // What the one-to-one pass has actually got standing on the router, read
+      // here rather than derived from the records: a binding that names a MAC
+      // keeps its rule at the last address it was seen at for the whole of
+      // Lease release grace (s), and the records and the leases between them
+      // cannot say that. Read per pass like everything else, so a scan never
+      // classifies against a memory the reconcile has already moved on from.
+      installed: this.options.installed?.() ?? [],
       capabilities: this.options.capabilities()
     })
     if (!this.current(generation)) return ENGINE_STOPPED

@@ -2,7 +2,7 @@
   "apiVersion": 2,
   "id": "openwrt",
   "name": "OpenWRT",
-  "version": "3.3.0",
+  "version": "3.3.1",
   "description": "Manage an OpenWRT router over SSH without its web UI: live dashboard, the PPPoE Dialer, one-to-one LAN device to WAN binding, hand-placed address-to-port bindings, and a monitor that explains every source-routed address on the router.",
   "author": "Bored Manager",
   "minAppVersion": "0.7.0",

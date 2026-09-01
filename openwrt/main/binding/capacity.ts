@@ -13,9 +13,10 @@
  */
 import type { ModuleCheckFinding } from '@shared/check'
 import type { IfaceState, Lease } from '../types'
-import { parseCidr, subnetContains } from '../util'
+import { parseCidr, subnetContains, uciBoolean } from '../util'
 import {
   DHCP_SECTION,
+  dhcpSectionNetwork,
   numericOption,
   sectionsOfType,
   uciOption
@@ -52,9 +53,19 @@ function planDhcp(
 ): DhcpPreparation | undefined {
   const { lan, cidr, pool } = context
   const dhcpSections = sectionsOfType(probe.dhcp, 'dhcp', 'dhcp')
-  const dhcpSection = dhcpSections.find(
-    (section) => uciOption(probe.dhcp, 'dhcp', section, 'interface') === lan || section === lan
-  )
+  // The section that says which network it serves wins over one that merely
+  // shares its name, and the name is only a fallback for a section that says
+  // nothing. Asked as one test, a `config dhcp 'lan'` carrying
+  // `option interface 'guest'` - which is what a LAN renamed in
+  // /etc/config/network leaves behind - was matched first and this whole plan
+  // was then made against the wrong LAN's lease ceiling. The fallback itself is
+  // `dhcpSectionNetwork`, the one rule every reader of /etc/config/dhcp here
+  // follows; only the order of preference between the two lives in this file.
+  const dhcpSection =
+    dhcpSections.find(
+      (section) => uciOption(probe.dhcp, 'dhcp', section, 'interface') === lan
+    ) ??
+    dhcpSections.find((section) => dhcpSectionNetwork(probe.dhcp, section) === lan)
   if (!dhcpSection) {
     findings.push({
       level: 'error',
@@ -152,7 +163,11 @@ function planKernel(
   const flowOffload = defaults
     ? uciOption(probe.firewall, 'firewall', defaults, 'flow_offloading')
     : ''
-  if (flowOffload !== '1') {
+  // `option flow_offloading` is a UCI boolean like any other, and fw4 honours
+  // all four spellings of true. Compared against `'1'` alone, a router that
+  // enables it as `on` was told on every check that a feature it is already
+  // running is switched off.
+  if (!uciBoolean(flowOffload)) {
     findings.push({
       level: 'info',
       label: 'Software flow offload is disabled',

@@ -92,6 +92,7 @@ export function createBindingRuntime(
     checkSession: createCheckSession<BindingCreatePlan>(),
     latestModel: null,
     lastUptime: null,
+    lanRoutes: new Map(),
     memory: new Map(),
     cache: new Map(),
     latestPayload: emptyBindingSnapshot(),

@@ -12,11 +12,12 @@ import type { OkResult } from '@shared/types'
 import type { JobSpec } from '../jobs'
 import { recordLayout } from '../records'
 import type { BindingInstanceRecord } from '../store'
-import { carrierScopesOverlap, parseCidr, subnetsOverlap } from '../util'
+import { carrierScopesOverlap, ifaceDevices, parseCidr, subnetsOverlap } from '../util'
+import { catchAllCidrs, lanLocalRoute } from './catch-all'
 import { recordEvents } from './events'
 import { lanCidr } from './pool'
-import { applyChange, catchAllCidrs } from './reconcile'
-import { MANAGED_PREF_CEILING, catchAllLocalRoute, catchAllRoute } from './rules'
+import { applyChange } from './reconcile'
+import { MANAGED_PREF_CEILING, catchAllRoute } from './rules'
 import {
   ENGINE_STOPPED,
   NO_SAMPLE,
@@ -316,7 +317,15 @@ async function revalidatePreparation(
     throw new Error('the LAN subnet now overlaps another binding instance')
   }
   const probe = await preparationProbe(runtime)
-  const currentLanZone = firewallZoneForNetwork(probe.firewall, plan.instance.lan)
+  // Resolved with the LAN's netdevs, exactly as the check resolved it: a zone
+  // that names its members by device is found by both or by neither, and half
+  // of that pair would turn every such router into "the zone changed".
+  const planLanIface = model.ifaces.find((iface) => iface.name === plan.instance.lan)
+  const currentLanZone = firewallZoneForNetwork(
+    probe.firewall,
+    plan.instance.lan,
+    planLanIface ? ifaceDevices(planLanIface) : []
+  )
   if (currentLanZone !== plan.lanZone) {
     throw new Error('the LAN firewall zone changed; check the form again')
   }
@@ -423,26 +432,6 @@ export async function removeFirewallForwardings(
 }
 
 /**
- * The connected route that goes into the catch-all table beside the blackhole,
- * or nothing when the LAN's device cannot be read.
- *
- * Nothing rather than a guess: a wrong device name here is a route pointing at
- * the wrong interface, which is worse than the blackhole this is softening. The
- * sweep reads the model every tick and `reconcileCatchAll` writes the pair
- * again, so a device that is briefly unreadable is corrected on the next pass
- * rather than being wrong until somebody notices.
- */
-function localRouteFor(
-  runtime: BindingRuntime,
-  instance: BindingInstanceRecord,
-  cidr: string,
-  table: number
-): string[] {
-  const device = runtime.latestModel?.ifaces.find((iface) => iface.name === instance.lan)?.l3Device
-  return device ? [catchAllLocalRoute(table, cidr, device)] : []
-}
-
-/**
  * `lanCidr` is the whole LAN and `cidrs` is what the rule set selects on, and
  * they are two different things for a range instance.
  *
@@ -462,7 +451,7 @@ export async function installCatchAll(
   const pref = layout.catchAllPrefBase + instance.slot
   if (pref < layout.catchAllPrefBase || pref >= MANAGED_PREF_CEILING) {
     throw new Error(
-      `catch-all preference ${pref} (safety-rule base ${layout.catchAllPrefBase} plus slot ${instance.slot}) is outside the managed range ${layout.catchAllPrefBase}-${MANAGED_PREF_CEILING - 1}; lower "Safety-rule priority base" under Module settings, Rules`
+      `catch-all preference ${pref} (safety-rule base ${layout.catchAllPrefBase} plus slot ${instance.slot}) is outside the managed range ${layout.catchAllPrefBase}-${MANAGED_PREF_CEILING - 1}; lower "Safety-rule priority base" under Module settings, Advanced rules`
     )
   }
   const { lanCidr: cidr, cidrs, replace } = options
@@ -472,6 +461,11 @@ export async function installCatchAll(
   if (cidrs.length === 0) {
     throw new Error('the catch-all resolved to no source range at all; check again')
   }
+  const localRoute = lanLocalRoute(
+    runtime.latestModel?.ifaces.find((iface) => iface.name === instance.lan),
+    cidr,
+    layout.catchAllTable
+  )
   const lines = [
     // `replace` rather than flush-then-add: the flush left the table with no
     // default for as long as the add took, and a client whose rule already
@@ -481,7 +475,7 @@ export async function installCatchAll(
     catchAllRoute(layout.catchAllTable),
     // Before the rule, not after: between the two the router would be selecting
     // this table for its own LAN traffic with nothing in it but `unreachable`.
-    ...localRouteFor(runtime, instance, cidr, layout.catchAllTable),
+    ...(localRoute ? [localRoute] : []),
     ...(replace
       ? [`while ip -4 rule del pref ${pref} 2>/dev/null; do :; done`]
       : []),
@@ -493,4 +487,11 @@ export async function installCatchAll(
     )
   ]
   await execScript(runtime, lines, 'install binding catch-all')
+  // Recorded only once the router took the command. The per-tick repair writes
+  // this line again whenever what it last saw land differs from what the LAN
+  // needs now, so an entry made before the write would be a route it believes
+  // is standing and is not - and one left unmade is a needless `ip route
+  // replace` on the very next tick.
+  if (localRoute) runtime.lanRoutes.set(instance.id, localRoute)
+  else runtime.lanRoutes.delete(instance.id)
 }

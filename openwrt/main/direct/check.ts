@@ -26,12 +26,19 @@ import {
   type RouterPreparationProbe,
   type TablePreparation
 } from '../binding'
-import { DIRECT_PREF_SPAN, recordLayout } from '../records'
+import { DIRECT_PREF_SPAN, MAX_STORED_BINDINGS, recordLayout } from '../records'
 import type { DirectBindingRecord } from '../store'
-import type { IfaceState } from '../types'
 import { isSafeUciValue } from '../uci'
-import { ipv4ToInt, textField } from '../util'
-import { freeDirectPref, freeDirectSlot, lanCandidates, lanForAddress, makeDirectId } from './allocate'
+import { ifaceDevices, ipv4ToInt, textField } from '../util'
+import { freeDirectPref, freeDirectSlot, makeDirectId } from './allocate'
+import {
+  chooseLan,
+  lanCandidates,
+  lanRefusal,
+  routerLayout,
+  unsettledLanFinding,
+  wanIsLanRefusal
+} from './layout'
 import { wanbindPrefBases } from './probe'
 import { leaseAddresses, normalizeMac, resolveTarget } from './target'
 import type { DirectPlan, DirectRuntime } from './types'
@@ -117,16 +124,28 @@ export async function checkDirect(
 
   const leaseByMac = leaseAddresses(model.leases)
   const resolved = target ? resolveTarget(target, leaseByMac) : ''
-  if (target?.kind === 'mac' && !resolved) {
+
+  // ------------------------------------------------------------ router layout
+  // Read before the WAN and the LAN are judged rather than after, which is
+  // where this await used to sit. Both of those now decide what an interface is
+  // from what the router states about it - the dnsmasq sections, the firewall
+  // zones - instead of from the shape of a device name, and a name is not a
+  // fact about what an interface is.
+  let probe: RouterPreparationProbe | null = null
+  try {
+    probe = await preparationProbe(runtime)
+  } catch (error) {
     findings.push({
-      level: 'warning',
-      label: `${target.mac} has no current DHCP lease`,
-      detail: 'The device is not on the network right now. The binding is created either way and its rule appears the moment the device takes a lease.'
+      level: 'error',
+      label: 'Router preparation state could not be read',
+      detail: error instanceof Error ? error.message : String(error)
     })
   }
+  const layout = routerLayout(model, probe)
 
   // -------------------------------------------------------------------- WAN
   const wanIface = model.ifaces.find((iface) => iface.name === wan)
+  const wanVerdict = wanIface ? layout.byName.get(wan) : undefined
   if (!wan) {
     findings.push({ level: 'error', label: 'Choose the WAN port this address must leave through' })
   } else if (!wanIface) {
@@ -141,13 +160,15 @@ export async function checkDirect(
       label: `Interface "${wan}" uses protocol ${wanIface.proto} and cannot carry a bound address`,
       detail: 'A WAN port is a pppoe, dhcp or static interface.'
     })
+  } else if (wanVerdict?.role === 'lan') {
+    findings.push(wanIsLanRefusal(wanVerdict))
   } else {
     findings.push({ level: 'pass', label: `${wan} is a ${wanIface.proto} WAN port` })
   }
 
   // -------------------------------------------------------------------- LAN
-  const candidates = lanCandidates(model, wan)
-  const lanIface = resolved ? lanForAddress(candidates, resolved) : soleCandidate(candidates)
+  const search = lanCandidates(model, wan, layout)
+  const lanIface = chooseLan(search, resolved)
   const cidr = lanCidr(lanIface)
   // Said only when there is a target to say it about: a form submitted with no
   // address at all already carries that refusal, and a second sentence about
@@ -155,8 +176,11 @@ export async function checkDirect(
   if (!target) {
     // Nothing to add.
   } else if (!lanIface || !cidr) {
-    findings.push(lanRefusal(resolved, candidates.length))
+    findings.push(lanRefusal(resolved, search, layout))
   } else {
+    if (layout.byName.get(lanIface.name)?.role !== 'lan') {
+      findings.push(unsettledLanFinding(lanIface, layout))
+    }
     findings.push({
       level: resolved ? 'pass' : 'info',
       label: resolved
@@ -171,6 +195,34 @@ export async function checkDirect(
         detail: 'Binding the router itself would send its own replies out one WAN and take it off the LAN it answers on.'
       })
     }
+  }
+
+  // ------------------------------------------------- the MAC with no lease yet
+  // Said here rather than up with the rest of the target reading, because what
+  // this warning is allowed to promise is a fact about the router and not about
+  // the device, and the count it turns on is the one `lanCandidates` has just
+  // produced. It used to sit fifty lines higher and promise, flatly, that the
+  // binding is created either way - which is true only where `chooseLan` can
+  // place an unresolved target, and that is the router with exactly one
+  // candidate. Everywhere else the LAN block above has just refused, so the
+  // report told the operator the binding was created and then, further down,
+  // that it was not. The report is read top to bottom and the reassurance was
+  // the sentence they read first.
+  if (target?.kind === 'mac' && !resolved) {
+    // The same sum `chooseLan` makes: a stated LAN and one the classifier
+    // leaves unclear are both interfaces this binding could be written from,
+    // and having two of either kind is what leaves nothing to choose between.
+    const candidates = search.lans.length + search.unclear.length
+    findings.push({
+      level: 'warning',
+      label: `${target.mac} has no current DHCP lease`,
+      detail:
+        candidates === 1
+          ? 'The device is not on the network right now. The binding is created either way and its rule appears the moment the device takes a lease.'
+          : candidates === 0
+            ? 'The device is not on the network right now - though on this router that is not what stops the binding, since there is no LAN interface for it to be installed on at all.'
+            : 'The device is not on the network right now, and this router has more than one interface a binding could be installed on, so there is nothing to say which one it belongs to. Connect the device once, then check again.'
+    })
   }
 
   // ----------------------------------------------------------------- claims
@@ -188,17 +240,7 @@ export async function checkDirect(
     break
   }
 
-  // ------------------------------------------- tables, zones and the probe
-  let probe: RouterPreparationProbe | null = null
-  try {
-    probe = await preparationProbe(runtime)
-  } catch (error) {
-    findings.push({
-      level: 'error',
-      label: 'Router preparation state could not be read',
-      detail: error instanceof Error ? error.message : String(error)
-    })
-  }
+  // ------------------------------------------------------- tables and zones
   const tableIndex = buildWanTableIndex(model, data, rules, runtime.options.wanTables?.())
   for (const conflict of tableIndex.conflicts) {
     if (conflict.first !== wan && conflict.second !== wan) continue
@@ -217,13 +259,43 @@ export async function checkDirect(
   let lanZone = ''
   let destinationZones: string[] = []
   if (probe && lanIface && wanIface) {
+    // No `moduleZone`: this binding names one WAN section by hand and has no
+    // pool that could put further WANs behind it later, so the only zone worth
+    // forwarding to is the one the router already has that WAN in. Asking for
+    // the module's masquerading zone here was what made the first one-to-one
+    // binding on a router with no instance and no pool leave an empty zone
+    // behind that no delete ever took away again.
+    // The netdevs go with the names so a zone written with `list device` rather
+    // than `list network` still resolves; `prepare.ts` re-reads the zone the
+    // same way, and the two have to agree or the apply throws.
     const zones = zoneFindings(
       probe,
-      { lan: lanIface.name, wans: [wan], moduleZone: rules.zoneName },
+      {
+        lan: lanIface.name,
+        wans: [wan],
+        devices: new Map(model.ifaces.map((iface) => [iface.name, ifaceDevices(iface)]))
+      },
       findings
     )
     lanZone = zones.lanZone
     destinationZones = zones.destinationZones
+  }
+
+  // --------------------------------------------------------------- how many
+  // The store's ceiling, which is a smaller number than the band's and is
+  // reached first. The band is a thousand preferences wide and the per-router
+  // document keeps 512 bindings, so a gate that refused only when the band ran
+  // dry let the 513th create succeed - and the next read of the document threw
+  // that record away, leaving its rule, its `bmd<slot>_` sections and its
+  // `ip4table` claim on the router with nothing left to name them. Bindings
+  // still being prepared count, because each of them is a record about to
+  // arrive.
+  if (data.direct.length + pending.length >= MAX_STORED_BINDINGS) {
+    findings.push({
+      level: 'error',
+      label: `This router already has the ${MAX_STORED_BINDINGS} one-to-one bindings the module can keep a record of`,
+      detail: `A binding exists only for as long as its record does - the record is what makes the rule on the router this module's - and the per-router document holds ${MAX_STORED_BINDINGS} of them. Delete a binding you no longer need from the One-to-one bindings list, then check again.`
+    })
   }
 
   // ---------------------------------------------------------- the band itself
@@ -232,7 +304,7 @@ export async function checkDirect(
     findings.push({
       level: 'error',
       label: 'No free priority remains in the one-to-one band',
-      detail: `Every priority from ${rules.directPrefBase} to ${rules.directPrefBase + DIRECT_PREF_SPAN - 1} is claimed by a binding or by a rule already on the router. Delete a binding you no longer need, or move "One-to-one rule priority base" under Module settings, Rules.`
+      detail: `Every priority from ${rules.directPrefBase} to ${rules.directPrefBase + DIRECT_PREF_SPAN - 1} is claimed by a binding or by a rule already on the router. Delete a binding you no longer need, or move "One-to-one rule priority base" under Module settings, Advanced rules.`
     })
   }
   bandFindings(runtime, findings)
@@ -242,7 +314,7 @@ export async function checkDirect(
       findings.push({
         level: 'error',
         label: `The one-to-one band runs into the router daemon's own priority range`,
-        detail: `bm-wanbind is configured with rule_pref_base ${base} and this module writes one-to-one rules from ${rules.directPrefBase} to ${rules.directPrefBase + DIRECT_PREF_SPAN - 1}. Lower "One-to-one rule priority base" under Module settings, Rules, or raise rule_pref_base on the router.`
+        detail: `bm-wanbind is configured with rule_pref_base ${base} and this module writes one-to-one rules from ${rules.directPrefBase} to ${rules.directPrefBase + DIRECT_PREF_SPAN - 1}. Lower "One-to-one rule priority base" under Module settings, Advanced rules, or raise rule_pref_base on the router.`
       })
       break
     }
@@ -292,37 +364,6 @@ export async function checkDirect(
 }
 
 /**
- * The LAN a device that is not on the network right now must be on: only when
- * the router has exactly one, because anything else would be a guess written
- * into a firewall forwarding.
- */
-function soleCandidate(candidates: readonly IfaceState[]): IfaceState | undefined {
-  return candidates.length === 1 ? candidates[0] : undefined
-}
-
-function lanRefusal(resolved: string, candidateCount: number): ModuleCheckFinding {
-  if (resolved) {
-    return {
-      level: 'error',
-      label: `${resolved} is not inside any LAN subnet on this router`,
-      detail: "A bound address needs a LAN interface behind it, because that interface's firewall zone is what the forwarding is written from."
-    }
-  }
-  if (candidateCount === 0) {
-    return {
-      level: 'error',
-      label: 'This router has no LAN interface with an IPv4 subnet',
-      detail: 'A one-to-one binding forwards from the LAN the address sits on, and there is none to forward from. Give the LAN an address, run Refresh, then check again.'
-    }
-  }
-  return {
-    level: 'error',
-    label: 'The device has to be seen on the network once before it can be bound',
-    detail: `Its MAC has no DHCP lease, and this router has ${candidateCount} LAN interfaces, so there is no way to tell which firewall zone the forwarding belongs in. Connect the device once, then check again.`
-  }
-}
-
-/**
  * The band has to end below every priority range the instance half writes in -
  * and that is the range each instance was *stamped* with, not the one settings
  * name today. The two drift on purpose: a stamped layout is what keeps a
@@ -337,7 +378,7 @@ function bandFindings(runtime: DirectRuntime, findings: ModuleCheckFinding[]): v
     findings.push({
       level: 'error',
       label: `The one-to-one band runs into binding instance "${instance.name}"`,
-      detail: `That instance writes client rules from priority ${base} upwards and this module writes one-to-one rules up to ${top - 1}. Overlapping, the instance planner would adopt a hand-placed binding as one of its own assignments and delete it on the next tick. Lower "One-to-one rule priority base" under Module settings, Rules.`
+      detail: `That instance writes client rules from priority ${base} upwards and this module writes one-to-one rules up to ${top - 1}. Overlapping, the instance planner would adopt a hand-placed binding as one of its own assignments and delete it on the next tick. Lower "One-to-one rule priority base" under Module settings, Advanced rules.`
     })
     break
   }

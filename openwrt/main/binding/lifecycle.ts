@@ -12,7 +12,8 @@ import { recordLayout } from '../records'
 import { recordEvents } from './events'
 import { lanCidr } from './pool'
 import { installCatchAll, removeFirewallForwardings } from './prepare'
-import { applyChange, catchAllCidrs, routerOwnsBinding } from './reconcile'
+import { catchAllCidrs } from './catch-all'
+import { applyChange, routerOwnsBinding } from './reconcile'
 import {
   ENGINE_STOPPED,
   NO_SAMPLE,
@@ -233,6 +234,7 @@ async function deleteNow(runtime: BindingRuntime, id: string): Promise<OkResult>
     })
     runtime.memory.delete(id)
     runtime.cache.delete(id)
+    runtime.lanRoutes.delete(id)
     emitSnapshot(runtime, model.t)
     runtime.options.requestDump?.()
     runtime.ctx.log(`openwrt: binding instance ${instance.name} deleted`)
@@ -245,6 +247,10 @@ export function reset(runtime: BindingRuntime): void {
   runtime.checkSession.clear()
   runtime.latestModel = null
   runtime.lastUptime = null
+  // Forgotten rather than kept: a reset is a router this module has stopped
+  // watching, and the connected routes it wrote may have been taken off by
+  // anything at all in the meantime. The first pass after it puts them back.
+  runtime.lanRoutes.clear()
   runtime.memory.clear()
   runtime.cache.clear()
   runtime.latestPayload = emptyBindingSnapshot()

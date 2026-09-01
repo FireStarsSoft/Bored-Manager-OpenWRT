@@ -715,6 +715,45 @@ describe('the sentence each row carries', () => {
     expect(row.reason).not.toContain('is not where the traffic actually goes')
   })
 
+  it('keeps quiet about a rule keyed on the wire a packet arrived on', () => {
+    // A WireGuard road-warrior rule. It has no source selector at all, so it
+    // used to take the unconditional answer and get the red badge - about a
+    // rule that can only ever match packets ingressing on wg0, never a bound
+    // LAN client's. The page's advice for a foreign rule that outranks the
+    // module is to go and change it, so the module was talking an operator into
+    // removing a working policy rule.
+    const { rows } = scan(
+      reply({
+        rules: [...BASELINE, '100:	from all iif wg0 lookup 51820'],
+        main: MAIN_DEFAULT,
+        routes: ['51820 default via 10.8.0.1 dev wg0']
+      }),
+      { direct: [direct()] }
+    )
+
+    const row = rowAt(rows, 100)
+    expect(row.outranksModule).toBe(false)
+    expect(row.reason).not.toContain('is not where the traffic actually goes')
+    // The low preference is still reported - nothing is hidden, only the
+    // consequence sentence and the badge are withheld.
+    expect(row.reason).toContain('numbered below every preference this module writes at')
+  })
+
+  it('still accuses a marked rule, which a bound client can match', () => {
+    // fwmark is deliberately outside the narrowing set: a marked packet from a
+    // LAN client is exactly the case the accusation is right about.
+    const { rows } = scan(
+      reply({
+        rules: [...BASELINE, '100:	from all fwmark 0x100/0x100 lookup 51820'],
+        main: MAIN_DEFAULT,
+        routes: ['51820 default via 10.8.0.1 dev wg0']
+      }),
+      { direct: [direct()] }
+    )
+
+    expect(rowAt(rows, 100).outranksModule).toBe(true)
+  })
+
   it('does not deny the main table a default route the router plainly has', () => {
     // `ip route show table main` prints a load-balanced default across several
     // lines, and the router's own `grep '^default'` keeps the first of them, so

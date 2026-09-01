@@ -10,6 +10,7 @@ import { finite, ipv4ToInt, isRecord } from '../util'
 import {
   MAX_FINISHED_JOBS,
   MAX_FINISHED_JOB_ITEMS,
+  MAX_STORED_BINDINGS,
   type FinishedJob,
   type ManagedLayout,
   type StoredJobItem,
@@ -352,7 +353,12 @@ export function normalize(raw: unknown): OwrtHostData {
       ...(stamped ? { layout: stamped } : {}),
       ...(source ? { source } : {})
     })
-    if (data.instances.length >= 512) break
+    // Both topology arrays stop at the same ceiling, and both create gates -
+    // `binding/check` for instances, `direct/check` for one-to-one bindings -
+    // refuse there rather than leaving it to this loop: a record silently
+    // dropped on read is a rule left standing on the router with nothing left
+    // that could remove it. See `MAX_STORED_BINDINGS`.
+    if (data.instances.length >= MAX_STORED_BINDINGS) break
   }
 
   const directIds = new Set<string>()
@@ -386,7 +392,7 @@ export function normalize(raw: unknown): OwrtHostData {
       slot: Math.max(0, integer(value.slot)),
       createdAt: finite(value.createdAt)
     })
-    if (data.direct.length >= 512) break
+    if (data.direct.length >= MAX_STORED_BINDINGS) break
   }
 
   const tableNames = new Set<string>()

@@ -1154,7 +1154,7 @@
                                   "type": "note",
                                   "title": "A waiting device has no internet route",
                                   "lines": [
-                                    "Reason says why each one is still waiting, across every binding instance on this router. Waiting for a free WAN clears itself when one comes back; unassigned by hand needs Reassign; preferences exhausted means the instance ran out of ip rule priorities and no WAN coming free will help - raise the client-rule priority base in Module settings, Rules."
+                                    "Reason says why each one is still waiting, across every binding instance on this router. Waiting for a free WAN clears itself when one comes back; unassigned by hand needs Reassign; preferences exhausted means the instance ran out of ip rule priorities and no WAN coming free will help - raise Client-rule priority base in Module settings, Advanced rules."
                                   ]
                                 }
                               ]

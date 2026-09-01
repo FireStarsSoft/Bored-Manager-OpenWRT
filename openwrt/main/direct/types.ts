@@ -20,7 +20,7 @@ import type {
 import type { OwrtRules } from '../config'
 import type { AgentCapability } from '../probe'
 import type { DirectBindingRecord, HostStore } from '../store'
-import type { IpRule, Lease, RouterModel } from '../types'
+import type { IfaceState, IpRule, Lease, RouterModel } from '../types'
 
 /**
  * What one binding is doing right now, in the seven words a row may say.
@@ -139,7 +139,14 @@ export interface DirectRow {
   wan: string
   table: number
   pref: number
+  /**
+   * The stored choice, `hold` or `fallback`. It stays the stored word because
+   * the row's own `When that WAN is down` select opens on it, and a select
+   * whose initial value is one of its labels matches no option at all.
+   */
   whenDown: string
+  /** That choice as the two selects word it; this is what the column renders. */
+  whenDownLabel: string
   enabled: boolean
   state: DirectState
   stateBadges: ValueBadge[]
@@ -153,7 +160,14 @@ export interface DirectRow {
 export interface DirectTotals {
   /** Bindings whose rule points at the WAN they name. */
   ok: number
-  /** Bindings parked on the blackhole because that WAN is unusable. */
+  /**
+   * Bindings whose rule points at the blackhole and which therefore have no way
+   * out at all: `held`, because the WAN they name is unusable, and `stranded`
+   * with `whenDown: hold`, because the device left the LAN its forwarding was
+   * written from and its owner chose to park it. Both are the same detention
+   * and the tile counts both; counting only the first hid the roaming device,
+   * which is the case nothing else on the page reports either.
+   */
   held: number
 }
 
@@ -204,6 +218,65 @@ export interface DirectSnapshot {
   lastError: string
   rows: DirectRow[]
   totals: DirectTotals & { total: number }
+}
+
+/**
+ * Which side of the router one interface faces, as its configuration states it.
+ *
+ * `unclear` is an answer rather than a failure. A router can be wired so that
+ * nothing in /etc/config settles which side an interface is on, and the gate
+ * reading this has to be able to say so - guessing is precisely what produced
+ * the fault this vocabulary exists to end.
+ */
+export type IfaceRole = 'lan' | 'uplink' | 'unclear'
+
+/**
+ * One interface weighed up, carrying the sentences that say why.
+ *
+ * The evidence is text because every reader of it is a check finding: a verdict
+ * whose reasoning a person cannot see is exactly as unactionable as the bare
+ * refusal that started this.
+ */
+export interface IfaceVerdict {
+  name: string
+  role: IfaceRole
+  /** The IPv4 subnet it carries on this sample, or '' when it carries none. */
+  cidr: string
+  /** The firewall zone it belongs to, or '' when it is in none. */
+  zone: string
+  zoneMasquerades: boolean
+  /** Clauses, each of which reads after "because"; empty when nothing was said. */
+  lanEvidence: string[]
+  uplinkEvidence: string[]
+}
+
+/**
+ * Every interface in one sample, weighed against one reading of /etc/config.
+ *
+ * `stated` is false when the configuration could not be read at all, which is
+ * the difference between "the router says nothing about this interface" and
+ * "nobody asked the router" - two situations a finding has to word differently,
+ * because only one of them is something the operator can go and fix.
+ */
+export interface RouterLayout {
+  byName: ReadonlyMap<string, IfaceVerdict>
+  stated: boolean
+}
+
+/**
+ * The interfaces an address could be behind, split by how firmly the router's
+ * configuration places them.
+ *
+ * `unclear` is kept apart from `lans` rather than folded into it so the search
+ * can prefer a stated LAN and then admit, in a finding, when it had to fall
+ * back to one that is merely not denied. `uplinks` is kept at all so a refusal
+ * can name the subnets it deliberately did not search - the previous refusal
+ * named nothing, which is why nobody could tell it was wrong.
+ */
+export interface LanSearch {
+  lans: IfaceState[]
+  unclear: IfaceState[]
+  uplinks: IfaceState[]
 }
 
 /** What the check resolved and the apply job must not resolve again. */

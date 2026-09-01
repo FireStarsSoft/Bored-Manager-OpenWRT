@@ -10,6 +10,517 @@ needs OpenWrt **25.12** on the router. The 1.0.x line needs **0.3.3**, for the
 also need the router packages at **2.x** - the rest of the module does not.
 Which release a module build installs is pinned in `main/agent/manifest.ts`.
 
+## 3.3.1
+
+Needs the same Bored Manager **0.7.0** and OpenWrt **25.12 or newer** that
+3.3.0 does - nothing here asks anything new of the app. Router packages stay
+pinned at **2.2.0**: nothing on the router side changed, nothing is written to
+the router by the update, and no stored record is migrated. Nothing is *removed*
+from the router either, which matters in one place - see *A one-to-one create no
+longer leaves a firewall zone behind* for the empty zone a 3.3.0 router may
+still be carrying and the one command that takes it off.
+
+Every line below is a fix to what 3.3.0 shipped, and most of them are one fault
+wearing different clothes: **a confident refusal, aimed at a router that is
+configured perfectly correctly, reached by reading one narrow spelling of a fact
+OpenWrt states in several legal ways.** The first of them was reported from a
+real router; the sweep that followed found the others by looking for the same
+shape.
+
+### Binding 1-1 refused an address on a LAN that is not a bridge
+
+The report was a create on an ordinary address answered with *"192.168.20.50 is
+not inside any LAN subnet on this router"*, about a router where it plainly was.
+Behind it was a guess: an interface running `pppoe`, `dhcp` or `static` whose
+device did not begin with `br-` was read as an uplink. That is true of a stock
+build and of nothing else. **A LAN on a VLAN (`eth0.1`), on a plain port
+(`eth0`) or on a radio (`wlan0`) was classified as a WAN**, the LAN search came
+back empty, and every address behind it was refused - with a sentence about a
+router the operator does not have, naming nothing they could go and change.
+
+The same guess ran the other way in the **WAN port** dropdown, which excluded
+anything on a `br-` device: it hid the uplink of every router whose modem port
+sits on a bridge, and offered a LAN that does not as a WAN port.
+
+Nothing reads a device name any more. Each interface is weighed from statements
+the router itself makes - the protocol netifd reports, whether `/etc/config/dhcp`
+holds a section actually serving it or the stub a stock build ships to switch
+itself off with `option ignore`, whether the firewall zone it sits in
+masquerades, whether it carries an address the public internet routes to,
+whether it delegates an IPv6 prefix, and whether its network section carries
+`option gateway`. Only `pppoe` and `dhcp` settle an interface on their own,
+because a router that dials or takes a lease on an interface is a *client* of
+the network beyond it, and a router is not a client of its own LAN. Where the
+statements settle nothing the answer is **unclear**, which is an answer rather
+than a failure: an interface merely not denied is still searched for the
+address, after every LAN the router does state, and the create says so out loud
+rather than choosing on the operator's behalf.
+
+A refusal now prints what argued the other way, and stops offering a remedy the
+router has already applied. These are sums of small readings and the close ones
+are the ones worth doubting, but a refusal used to quote only the evidence that
+won - so a two-against-one verdict reached the operator looking unanimous, with
+the one fact on their side never mentioned. The address reading is narrower too.
+Both ends of a routed public block carry an address the internet routes to, so
+on its own it could not tell an ISP-facing WAN from the DMZ the block is routed
+*to* - and it outweighed the quiet zone that was the DMZ's only defence, so
+pinning a public server to a chosen WAN, which is the one thing Binding 1-1
+exists for, was refused. It counts where the interface says something else
+outward as well, or where nothing else on the router faces outwards at all,
+which is the routed-prefix uplink the reading was written for in the first
+place.
+
+`option gateway` is new in the preparation probe, and it is what places the
+awkward router. A statically addressed uplink on a private address - a modem in
+bridge mode behind another router, a double-NAT lab, an ISP handing out RFC1918
+- has no dnsmasq stub and no masquerading zone to read instead, but its next hop
+is off this router and nothing on the inside has one. The probe's network filter
+grows by low single digits on the router it was already largest on: a dialled
+session is handed its gateway by its peer and never carries the option.
+
+**Both refusals now say what was looked at.** An address in no LAN's subnet
+names the LANs the search looked in *and* the uplinks it skipped, each with its
+subnet. An address that turns out to be on an uplink is refused by that
+interface's name, with the evidence that made it one and with the two statements
+- a section in `/etc/config/dhcp`, a firewall zone that does not masquerade -
+that would change the answer if the classification is the thing that is wrong.
+A LAN the configuration does not actually place is used and warned about rather
+than silently trusted, because the forwarding is written from its zone once and
+never rewritten. And a **WAN port** pick the router describes as a LAN is now
+refused, by name and with the router's own words for it, which is what lets that
+dropdown stop hiding anything.
+
+**And the report stopped contradicting itself half a page later.** Binding a MAC
+that holds no lease right now is a warning on a router with exactly one
+interface the binding could be installed on, and a refusal on a router with more
+than one - the forwarding is written once, from one LAN's firewall zone, and
+with no lease there is nothing to say which. The warning was printed before the
+LAN was searched, so on every router with two candidates it said *"The binding
+is created either way"* at the top of the report and *"cannot be created"*
+below, and the sentence a person reads first is the one at the top. It is
+written from the candidate count now: one candidate keeps the original promise,
+two or more says the device is not on the network and this router has more than
+one interface a binding could go on, so connect it once and check again, and a
+router with no LAN at all promises nothing and points at the refusal that is
+really in the way.
+
+### Three dropdowns that dropped what the operator came for
+
+All three lists are built from the last router sample, and all three were
+quietly deciding things a list may not decide.
+
+- **WAN port**, on Binding 1-1, is capped at 500 rows, and that cap was a plain
+  truncation over a list sorted with PPPoE at the top. A managed pool at its
+  documented maximum of five hundred members therefore filled the list on its
+  own and pushed every `dhcp` and `static` interface off the end - including the
+  separate uplink the operator opened the form to bind out of. Nothing on screen
+  said so, and the field's own hint sent them to Refresh, which cannot help: the
+  port was in the sample and was thrown away after it arrived. The cap is a
+  budget now. Every interface that is not a PPPoE session keeps its place
+  whatever else is on the router, and the sessions fill what is left, taken in
+  turn over the port each one dials over - so a pool on one port cannot bury a
+  single session dialed on another, and only the tail of the largest pool is
+  ever dropped.
+- **WAN carrier**, on Create an instance, had the same cap and the same plain
+  truncation, and it lost more: that list names *devices*, so a five-hundred
+  session pool arrives as `eth1.101` through `eth1.600`, which sort between
+  `eth1` and everything after it alphabetically. A router running a full pool on
+  `eth1` beside a second uplink on `wan` and an LTE stick on `wwan0` was offered
+  the pool's own carrier and the pool's own five hundred VLANs, and neither of
+  the two other ports - so an instance could not be created on the very
+  interfaces that were not busy. It is fitted by the same budget now: every
+  device the pool is not riding on keeps its place, the carrier the pool rides
+  on keeps its place because that is the row an operator picks to claim the
+  whole pool, and only the tail of the pool falls off. Membership is read from
+  the session devices themselves rather than from the port they share: an
+  ISP-style trunk carries the pool's VLANs and other things besides, and a
+  static second uplink on one of those other VLANs was counted as a five-hundred
+  and first pool member, sorted after every `eth1.1xx`, and became the exact row
+  the budget ran out on - the one uplink on that router that was not busy. The
+  pool form's own carrier list on PPPoE Dialer never had this problem and is
+  unchanged - a tagged device cannot enter it, so no pool can fill it.
+- **DHCP LAN interface**, on Create an instance, dropped the interface literally
+  named `wan` and kept only `proto static`. Both halves were the device-name
+  guess wearing different clothes: a second ISP or an LTE failover on `wan2` was
+  offered as one of the router's own networks because the string did not match,
+  while a LAN that takes its own address by DHCP - a dumb AP, a downstream
+  router - was hidden with nothing on screen to say why. It now lists every
+  interface carrying an IPv4 address and running `static` or `dhcp` - a `pppoe-`
+  netdev aside, which has a peer at the far end rather than a subnet behind it -
+  and it names the protocol on each row, because the list mixes the two now.
+
+Being permissive is the right trade for a control that cannot read
+`/etc/config`: opening a form never starts an SSH command, so a dropdown has
+nothing to decide with, and hiding the interface somebody needs costs them the
+feature with nothing on screen to say why. It puts the weight on the check
+instead, which is where the evidence is, and both halves of that bargain are
+paid here. A **WAN port** pick the router describes as a LAN is refused by name
+and in the router's own words, and so is a **DHCP LAN interface** pick the
+router describes as an uplink.
+
+That second gate is worth stating on its own, because opening the list without
+it would have been the worse bug of the two. **Check the scope would have
+accepted the router's uplink as the LAN to serve** - `wan2`, an LTE failover,
+a statically addressed modem - and nothing further down would have caught it,
+since the pool-identity guard below only speaks about an interface
+`/etc/config/dhcp` actually serves and an uplink is not one. The instance would
+have written its firewall forwardings from the WAN zone, laid its fail-closed
+catch-all over the uplink's own subnet, and begun handing pool WANs to whatever
+sits upstream of this router. Check the scope now classifies the chosen LAN from
+what the router states about it, refuses a pick that reads as an uplink, quotes
+the lines it read, and names the two statements - a section in
+`/etc/config/dhcp`, a firewall zone that does not masquerade - that would change
+the answer. Where the configuration settles nothing it says nothing, which is
+the same rule the **WAN port** refusal follows: an interface merely not proven
+is still yours to get right.
+
+### The Enabled checkbox and the Enable button now answer alike
+
+Ticking **Enabled** on a one-to-one binding's edit form and pressing the row's
+**Enable** button are the same action - the flag is written and the next pass
+writes the rule from it - and they disagreed about it twice.
+
+They disagreed first about whether the router can steer traffic by routing table
+at all: on a router that had lost `ip-full`, Enable refused by name with a
+remedy while Save answered *done* and failed later inside a reconcile, where
+nobody was looking. A save that raises the flag is now held to exactly what
+Enable requires, and fetches its sentence from that same entry so the two cannot
+drift apart.
+
+The first cut of that gate refused the whole Save, which is a second way of
+losing the operator's work rather than the end of the first. **Binding name**
+and **When that WAN is down** reach the router through nothing at all, and
+throwing a rename away because an `ip rule` cannot be written is a surprise
+stacked on a surprise - most of all in the first seconds after a machine is
+connected, when the module has not finished probing, every switch-on is refused
+for that reason alone, and the router may well turn out to be perfectly capable.
+Both refusal paths now write the fields that cost nothing, then refuse only the
+switch-on; where the save carried something else, both end in the same words -
+*"... Enabled is still off and no rule was written. Binding name was saved."* -
+and where it carried nothing else, the capability refusal is the **Enable**
+button's sentence word for word, which is what a test holds the two side by side
+to prove. The row detail's hint under **Enabled** promised exactly this and is
+now true on both paths.
+
+They then went on disagreeing about what happens when the write fails on a
+router that meets every one of those requirements - `option ip4table` deleted
+from the WAN section by hand is the reported way in. The save runs the pass now
+and takes the flag back when it fails, exactly as the button does, and returns
+the pass's own sentence instead of filing it in the job list, because a Save is
+something a person is sitting in front of: *"... failed - Enabled is still off and
+no rule was written. Binding name and When that WAN is down were saved."* This
+one states what the binding was left doing whether or not anything else was
+saved, because the router's words are about a single command and say nothing at
+all about the rest of the row.
+
+Switching a binding **off** is deliberately still a plain record write. Off is
+the way out of a broken state, and it corrects itself: every later pass finds a
+rule in the band with no enabled record behind it and removes it again. A failed
+Enable also refreshes the rows now, instead of leaving the page saying a binding
+is on until the next pass arrives.
+
+### A one-to-one create no longer leaves a firewall zone behind
+
+Creating a binding asked for the module's masquerading zone to be written
+alongside its forwarding. That zone belongs to the instance half, which has a
+pool of WANs to put in it; a one-to-one binding names one WAN section by hand
+and can never acquire a second. So on a router with no pool and no instance the
+first binding left an empty zone in `/etc/config/firewall` that matched nothing,
+survived reboots, and that no delete ever took away again. It writes forwardings
+and nothing else now - to the zone the router already has the chosen WAN in,
+including the pool zone itself where that WAN really is a member of it, in which
+case its masquerading is left exactly as the pool wrote it.
+
+**Updating does not remove a zone that is already there.** This release stops
+the zone being written; nothing in it deletes one, and a delete has never
+touched it either. So a router that took a one-to-one binding on 3.3.0 with no
+PPPoE pool and no binding instance still carries a `config zone` named
+`bmwanpool` - or whatever **Module settings → Advanced rules → Binding
+firewall zone** says - with `masq '1'` and no members. It is harmless: a zone
+naming no network and no device matches no traffic.
+
+**The zone is not the only thing 3.3.0 left, which is why there is no one-line
+cleanup here.** Each binding created on 3.3.0 also carries a `config forwarding`
+of its own pointing *at* that zone, beside the one pointing at its real WAN -
+they were written together, from the same list, and a delete removes only the
+ones belonging to the binding being deleted. Deleting the zone while any of them
+still stands leaves a forwarding naming a zone that does not exist, and fw4 then
+warns about it and skips it on every reload. That is worse than the empty zone
+it replaced.
+
+So the residue comes off a binding at a time, and the release does it for you:
+**delete each binding that was created on 3.3.0 and create it again.** The delete
+takes that binding's own `bmd` sections with it - including the one pointing at
+the pool zone - and the new create writes only the WAN's own zone. Once no
+3.3.0-created binding is left, and only then, the now-unreferenced zone can go,
+at a router shell:
+
+```sh
+uci delete firewall.bmwanpool && uci commit firewall && /etc/init.d/firewall reload
+```
+
+**Only on a router that has no PPPoE pool and no binding instance.** That zone
+is the pool half's, and where either of those exists it is the zone the pool's
+WANs are members of and the zone every instance forwards to - deleting it there
+takes a working router's NAT off its uplinks. Check that **PPPoE Dialer →
+Pools** and **WAN Binding → Instances** are both empty first, confirm with
+`uci show firewall | grep bmwanpool` that nothing but the zone section itself
+still names it, and use the name the settings field actually shows if it was
+ever changed.
+
+### The 512-record ceiling is a refusal now, not a silent drop
+
+The per-router document keeps 512 binding instances and 512 one-to-one bindings,
+and the two create gates counted something else entirely - the one-to-one gate
+refused only once every preference in its thousand-wide band was claimed, and
+the instance gate only when the catch-all priority slots ran out. Past the
+ceiling a create therefore succeeded, wrote its rules, its firewall sections and
+its routing-table claim onto the router, **and then vanished from the module on
+the next read of the document** with nothing left that could name them, let
+alone remove them.
+
+Both gates now refuse by that number, name the list to delete from, and count
+the creates still in flight. On a router carrying the shipped *Safety-rule
+priority base* of 29900 the instance gate is not the one anybody meets, because
+a hundred catch-all slots run out first; lowered towards its 2000 minimum, which
+is what running many IP-range instances asks for, the slots stop being the limit
+and the document becomes it.
+
+### A LAN device that bounced took the router off its own LAN
+
+An instance's catch-all table holds two things: the `unreachable default` that
+makes it fail closed, and the LAN's own connected route, which is what keeps the
+router answering SSH, DHCP and ARP on the LAN it is blackholing. The kernel
+drops every route whose device goes down, in every table - and a LAN device goes
+down for reasons that have nothing to do with binding: a `service network
+reload` recreates a VLAN netdev, restarting wifi takes a wireless-only LAN's
+device with it, a bridge with no carrier goes down when the last port is
+unplugged. The blackhole beside it has no device and survives all three.
+
+The per-tick repair compared only the rules, found the catch-all correct, and
+wrote nothing - so the router sat blackholing its own LAN until a reboot or an
+unrelated rule mismatch happened to rebuild the group. A route is not in
+`ip -4 rule show` and cannot be read back, so the module now remembers the line
+each instance's table actually accepted and writes it again the moment what the
+LAN needs differs from it: one `ip route replace` on the next tick. The memory
+is dropped when an instance is deleted, when its LAN leaves the sample, and on
+reset, because a belief that the route is already there is exactly what would
+stop it being put back.
+
+### Instance creates read the router instead of the interface's name
+
+Same fault, other half of the feature. A WAN pool collects interfaces by
+protocol and by the device they terminate on, and neither of those says an
+interface is *not* a LAN - every LAN runs `proto static` too. So a carrier
+naming a device a second LAN happens to sit on put that LAN in the pool, and
+clients bound to it left through one of the router's own LANs while the page
+called them bound.
+
+- The create now reads `/etc/config/dhcp`. A pooled WAN the router hands out
+  addresses on is refused by name; one that both dials an uplink and serves DHCP
+  is left in the pool with a warning naming both halves, because those two facts
+  disagree and settling them here would be another guess.
+- **And it now asks the classifier about the pool, not only about the LAN.**
+  `/etc/config/dhcp` is one fact, and a LAN whose addresses come from a server
+  downstream has no `config dhcp` section at all - so a static-only VLAN pulled
+  in by a carrier scoped one device too wide was skipped in silence, and the
+  create wrote `option ip4table` onto one of the router's own LANs and began
+  handing it out as a WAN. The reading that could see it was being computed in
+  the same function and thrown away: one entry was read out of it, for the LAN
+  the form named, and every verdict about a pool member was discarded. Each
+  member is now weighed, and one the router describes as a LAN is refused in the
+  same words the one-to-one gate uses for a WAN port that reads the same way. An
+  interface the configuration does not settle is still not refused anywhere.
+- A pooled WAN whose own subnet overlaps the LAN being bound is refused. Rules
+  that select on source alone cannot separate the two: the catch-all would cover
+  the uplink's own address, and a client bound to that WAN would route the rest
+  of its LAN out through the modem. A double-NAT uplink handed an address in the
+  same private range as the LAN is the ordinary way to arrive there.
+- The lease-ceiling plan matched the first `config dhcp` section that either
+  named the LAN or was called after it, so a section called `lan` carrying
+  `option interface 'guest'` - what a LAN renamed in `/etc/config/network`
+  leaves behind - won, and the whole plan was made against the wrong LAN's
+  ceiling. A section that says which network it serves now wins over one that
+  merely shares its name.
+- **Pin** on a device whose address is bound one-to-one is refused with that
+  reason. The instance leaves such an address alone on every path, so a pin
+  would have been recorded, dropped at the same gate on the next tick, and
+  reported as success for something that was never going to happen.
+
+### UCI booleans, read the way fw4 and netifd read them
+
+`1`, `on`, `true` and `yes` all mean true to the programs on the router. LuCI
+writes only the first, so a reader comparing against `'1'` is right about every
+configuration LuCI produced and wrong about every hand-edited or migrated one -
+which is the population these readers exist to be correct on. A firewall zone
+spelled `masq 'on'` read as not masquerading: that printed a permanent *"Firewall
+zone does not have masquerading enabled"* warning about a correctly configured
+router, and on a router behind a bridged modem it moved the uplink three points
+towards being classified as a LAN, so choosing the only WAN port was refused with
+*"is a LAN on this router, not a WAN port"*. `option ignore` on a DHCP section
+is read the same way now, and so is `option flow_offloading` on the firewall
+defaults - twice, because two readers of it were wrong. **Router limits** was
+telling a router that already had software flow offload running that it was
+switched off, and offering to turn on what was on with no way to turn it off,
+while Check the scope printed the same claim as advice on every instance create.
+
+There is one reader of a UCI boolean in this module now rather than four
+near-copies of one, which is the actual repair: the four had been written
+separately and three of them were applied to some of their own booleans and not
+to others, so a fourth wrong answer was always going to be found next.
+
+Three more spellings of the same kind were closed alongside it.
+
+- A `config dhcp` section that names its network by being *called* after it,
+  rather than by carrying `option interface`, is now read as serving that
+  network - which is what dnsmasq does with it. Three readers of
+  `/etc/config/dhcp` disagreed about that, so on exactly those routers the guard
+  above could never fire at all.
+- A firewall zone may name its members with `list device` instead of
+  `list network`, which fw4 accepts and which is an ordinary way to put a VLAN
+  or a plain port in a zone. Both the create gate and the apply that re-reads
+  the zone a moment before writing resolve it that way now, and they had to land
+  together: had only one of them learned it, every such router would have got
+  *"the LAN firewall zone changed; check the form again"* instead of the refusal
+  it used to get. A zone that still cannot be resolved is refused with both
+  spellings named and with which of the two was searched, rather than with a
+  flat claim that the interface is in no zone at all.
+- A zone written `option network 'lan guest'` - one quoted token holding two
+  names, which fw4 splits on whitespace - matched nothing, so a router spelled
+  that way was told its LAN was in no firewall zone and its create was refused
+  for something the operator had already done. That value is split now,
+  everywhere `/etc/config/firewall` is read.
+
+### The monitor stopped being certain about things it could not know
+
+- **A router with no `/etc/iproute2/rt_tables` showed nothing at all.** The
+  kernel's three baseline rules were recognised by the words `local`, `main` and
+  `default`, which are names out of that file rather than facts about the
+  kernel. A router that prints them as `lookup 255`, `254` and `253` had all
+  three reported as foreign policy rules, at which point the scan read its own
+  reply as one that had lost its baseline in transit and threw the whole thing
+  away. They are compared by number now, so the same three rules are recognised
+  said either way.
+- **A table token this reader will not accept is now recorded as unread** rather
+  than truncated to its leading acceptable characters. A rule pointing at a
+  table named `x;reboot` - and an `rt_tables` name is whatever the administrator
+  typed - came back as pointing at table `x`, which on that router is a
+  different table with a different way out, stated as fact. Such a row says the
+  table could not be read, which is not the same thing as a rule that names no
+  table at all and is acted on directly.
+- **`wan6` was printed as the WAN an address is bound to.** Resolving a netdev
+  to an interface answered with whichever claimant came first, and on every
+  dual-stacked OpenWrt `wan` and `wan6` sit on the same netdev by both spellings
+  at once. Everything this folder reads is IPv4, so a tie is broken on which
+  claimant carries an IPv4 address at all - and where that still leaves two, the
+  answer is the bare netdev name: less than the reader wanted, and true.
+- **A stranger's rule at a catch-all preference was described as this module's
+  own fail-closed catch-all.** The preference alone was the evidence, on the one
+  rule whose job is to take a LAN off the internet. Three more facts are checked
+  now - a source address at all, one inside that instance's LAN, and that
+  instance's own catch-all table - each only where the router actually states
+  it, and a rule failing any of them is reported as foreign with the coincidence
+  spelled out.
+- **mwan3 was named as the writer of every unattributed rule** on a router where
+  mwan3 is merely installed - which would file the hand-written rule somebody
+  opened this page to find under somebody else's name. It now says mwan3 is the
+  likeliest thing to have written it and that nothing here can be sure, unless
+  the rule steers on a firewall mark the way mwan3's own rules do.
+- **A binding pointed at the WAN the rest of the router already uses** was
+  described as not using the router's default connection. Pinning the NAS to the
+  primary while a pool moves everything else is a legitimate thing to do, and a
+  table whose default leaves through the same interface main's does is not
+  taking that address anywhere.
+- **A binding whose device had just left the network was reported as somebody
+  else's rule, and the page's advice was to go and delete it.** A binding that
+  names a MAC keeps its rule at the last address the device was seen at for the
+  whole of **Lease release grace (s)** - five minutes by default - which is the
+  point of the setting: a laptop that sleeps for thirty seconds does not lose
+  and regain its WAN. The monitor judged ownership on the live lease alone, so
+  for that whole window it filed the module's own rule, at a preference inside
+  the module's own band, under *written outside this module* - and what this
+  page says to do about a foreign rule outranking the module is to remove it. It
+  now asks both addresses, the one the binding resolves to now and the one its
+  rule still stands at, and says which of the two it matched. The `outranks
+  module` reading is kept alive across the grace by the same union, instead of
+  going quiet for exactly the five minutes when a rule is least explicable.
+- The sentinel that discards an unreadable scan now names both halves of what
+  can fail - `ip -4 rule show`, or the temporary file its output is captured to -
+  instead of sending a reader whose `/tmp` had filled up to look at their `ip`
+  command.
+- **A WireGuard rule was told it outranked the module.** "A binding shown as
+  applied is not where the traffic actually goes" was said of any low-numbered
+  rule with no source selector, which is every rule keyed on an ingress or
+  egress interface - so `ip rule add iif wg0 lookup 51820`, which can only match
+  packets arriving on the tunnel, got the red chip and that sentence on any
+  router that also had a binding. A rule naming `iif` or `oif` names the wire a
+  packet came in on or leaves by, and the packets this module steers arrive on a
+  LAN, so there is nothing of ours underneath it. A rule selecting on `fwmark`
+  still gets the warning: a marked packet from a LAN client is exactly the case
+  it is right about. Either way the low preference is still reported - only the
+  consequence and the chip are withheld.
+
+### What the module says about itself
+
+- **The Held tile counted the wrong thing.** It counted the word `held` and not
+  the rule, so a MAC binding whose device had walked onto another LAN overnight
+  and whose owner had chosen *Keep it off the internet* sat parked on the
+  unreachable table with the tile reporting nothing detained. It counts every
+  binding whose rule points at that table now - which is the same condition the
+  row's own Table cell uses, so the two can no longer disagree - and the
+  `directHeld` history series behind the chart is corrected with it. The
+  Overview's own note names both detentions now instead of only the first.
+- **The same roamed binding's State chips said the same thing whichever way it
+  was set.** A binding whose device has walked off the LAN it was bound on read
+  *moved off its LAN / no firewall path* regardless of **When that WAN is
+  down**, and those two answers send it to opposite ends of the router: parked
+  on the unreachable table with the device off the internet, or re-pointed at
+  **main** and out through the router's ordinary WAN. So a device quietly
+  leaking past the metered line it was pinned to looked, at a glance, exactly
+  like one that had been switched off. The second chip is asked now rather than
+  assumed - *no way out* when it is parked, *on the main table* when it is not -
+  in the same words the **held** and **fallback** rows already use, and the
+  row's own **Table** cell is drawn from the same question, so the two cells
+  cannot drift apart again.
+- **The One-to-one bindings table's When down column printed the stored word.**
+  `fallback` is also the State chip's word for a binding whose WAN is down right
+  this minute, so one table carried the same word for a setting and for a
+  condition and a row could read *fallback / fallback*. The column prints the
+  option as the two selects word it - *Keep it off the internet*, *Let it use
+  the default connection* - while the edit form's own select still opens on the
+  stored value, which is what it has to match.
+- **A range-scoped instance did not say so anywhere.** The Binding instances
+  table showed `br-lan` for an instance serving a window of that bridge exactly
+  as for one serving all of it, so a device simply left outside the range looked
+  like an assignment the planner had lost. There is an **Addresses** column now,
+  it is one of the columns the filter box searches, the row detail repeats it as
+  *Addresses served*, and the note about what cannot be edited names the range
+  alongside the LAN and the carrier.
+- **Binding 1-1 had no Refresh now control** while its refusals told the reader
+  to press one and its field hint sent them to another tab for it. It has one.
+- **Binding 1-1 had no install form** either, so the tab that is gated on
+  `ip-full` was the only create on the page that could not offer it - and the
+  banner above, which still spoke of two creates rather than three, sent the
+  reader to Module settings for a package the tab in front of them could have
+  installed. It carries the same form the other two create tabs carry; its
+  hints say which of those packages a create *there* is really gated on, which
+  is `ip-full` and nothing else; and the banner now names all three creates.
+- **Both When-down hints described falling back as removing the rule.** It has
+  never removed it since the feature shipped: the rule stays at its own priority
+  and is re-pointed at the **main** table, which is the whole reason the option
+  is safe on a LAN an instance owns - removing it would drop the address into
+  that instance's fail-closed catch-all and take the device off the network
+  entirely. Both hints now say so, and say that *Rule as it should stand* names
+  the table to compare against `ip -4 rule show` by eye.
+- **Several refusals sent people to a settings group by a name it does not
+  have.** *Module settings, Rules* is called **Advanced rules** on screen, and
+  eight sentences said the first - five create refusals about priority bases and
+  routing tables, the catch-all installer's own error, the Monitor's note about
+  its scan interval and the Dashboard's note about a waiting device. All of them
+  name the group as the rail spells it now; the Monitor's names the field
+  (**Binding scan interval (s)**) as well, and the Dashboard's names
+  **Client-rule priority base** the way the form does.
+
 ## 3.3.0
 
 Needs Bored Manager **0.7.0** and OpenWrt **25.12 or newer**. Router packages
@@ -31,11 +542,14 @@ they were built in the app first and are opted into by the page spec.
   `md` breakpoint the horizontal strip flattens the groups away, because an
   accordion inside a strip is not one.
 - **A row's detail opens nearly full screen.** A pool's detail is six tabs, and
-  a `sm:max-w-xl` drawer was the wrong container for it by a wide margin. The
-  pool table and the binding instance table ask for a modal at roughly 94% of
-  the window over a dimmed page. Every other table in this module still opens
-  the drawer, and so does every table in every other module: it is opted into
-  per table and defaults to what was there before.
+  a `sm:max-w-xl` drawer was the wrong container for it by a wide margin. Four
+  tables on Connection ask for a modal at roughly 94% of the window over a
+  dimmed page: the pool table under PPPoE Dialer → Pools, and under WAN
+  Binding the **One-to-one bindings** table on Binding 1-1, the **Binding
+  instances** table on Instances, and **Rules on the router** on Monitor.
+  Every other table in this module still opens the drawer, and so does every
+  table in every other module: it is opted into per table and defaults to what
+  was there before.
 
 An app below 0.7.0 refuses to install this release rather than rendering the
 page half-built.
@@ -54,8 +568,11 @@ the first line for it: a device that moved between LANs leaves the abandoned
 lease behind, and a rule written for the old address steers nothing while
 looking exactly like a binding that works. A lease that moves moves the rule; a
 device that leaves keeps its rule for the lease-release grace and then loses
-it; a MAC with no lease at all is a warning on the form rather than a refusal,
-and its rule appears when the device does.
+it; a MAC with no lease at all is a warning rather than a refusal **on a router
+with exactly one interface the binding could be put on**, and its rule appears
+when the device does. Where more than one could be, it is a refusal instead: the
+forwarding is written once, from one LAN's firewall zone, and with no lease to
+place the device there is nothing that says which.
 
 It writes three things: `option ip4table` on the WAN section if it has none,
 a firewall forwarding from the address's own LAN zone under this binding's own
@@ -84,10 +601,12 @@ owns; where one does, its fail-closed catch-all would catch the address the
 instant the rule went, and the option somebody chose to keep a device online
 would have taken it off the network altogether. Two further states say so out
 loud rather than lying quietly: a MAC binding whose device turns up on a LAN
-this binding has no firewall path from reads **stranded** and stays fail-closed
-instead of writing a rule fw4 would drop, and two bindings that resolve to one
-address leave the lower-preference one in force with the other reading
-**shadowed** and naming it.
+this binding has no firewall path from reads **stranded**, and is then treated
+exactly as though its WAN had gone down - *Keep it off the internet* parks it
+on the unreachable table, *Let it use the default connection* re-points it at
+main - rather than writing a rule fw4 would drop. And two bindings that
+resolve to one address leave the lower-preference one in force with the other
+reading **shadowed** and naming it.
 
 On a router where `bm-wanbind` owns binding, one-to-one bindings are still
 written by this module into their own band; the two writers never touch the
@@ -164,12 +683,21 @@ Neither automation had a chart - only number tiles, on the page where the
 consequences show. PPPoE Dialer's Pools now carries the session states over
 time and pool throughput; WAN Binding's Overview carries bound against
 waiting, the free WANs against errors, the WAN pool as a pie, a bound-percent
-meter and the one-to-one counts. Four history keys are new - `wanFree`,
-`pppDial`, `directOk`, `directHeld` - while `wanUp` and `wanErr` were already
-the pool's up and error counts and are relabelled rather than duplicated, so
-those two series have history from the day they were first recorded. The
-`binding` stream carries a WAN-pool aggregate and a bound percentage, because a
-spec can render a ratio but cannot compute one.
+meter and the one-to-one counts. Five history keys are new - `wanFree`,
+`wanErrBound`, `pppDial`, `directOk` and `directHeld`. `wanUp` is the one key
+reused as it stood: *Sessions by state* draws it as **Up**, relabelled rather
+than duplicated, so that series has history from the day it was first
+recorded. Error is the one worth reading twice, because this release ends up
+with two of them. `wanErr` - failed sessions in the dialer's own pool - is
+reused the same way on that same chart, but *WANs free and WANs failing* on
+WAN Binding's Overview draws `wanErrBound`, which sums the failed WANs across
+the pools binding instances hand out from. An instance can be bound to a
+carrier the dialer never touches, and a dialer pool can be failing while no
+instance uses it, so charting either number in the other's place read as a
+flat zero on the first router and as somebody else's problem on the second.
+`wanErrBound` is new here and starts with nothing behind it. The `binding`
+stream carries a WAN-pool aggregate and a bound percentage, because a spec can
+render a ratio but cannot compute one.
 
 ### Automation is now Connection
 

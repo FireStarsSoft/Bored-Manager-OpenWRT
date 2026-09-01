@@ -2,8 +2,8 @@
 // Zip the module folder into an archive the in-app installer accepts.
 //
 // Usage:
-//   node scripts/package-module.mjs openwrt [output-dir]
-//   node scripts/package-module.mjs <path/to/module> [output-dir]
+//   node scripts/package-module.mjs openwrt [output-dir] [--overwrite]
+//   node scripts/package-module.mjs <path/to/module> [output-dir] [--overwrite]
 //
 // A copy of the app's scripts/package-module.mjs (see sdk.lock.json) with two
 // changes: a module id is resolved against this repo's root rather than against
@@ -26,9 +26,11 @@ import { fileURLToPath } from 'url'
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(scriptDir, '..')
 
-const [target, outArg] = process.argv.slice(2)
+const argv = process.argv.slice(2)
+const overwrite = argv.includes('--overwrite')
+const [target, outArg] = argv.filter((arg) => !arg.startsWith('--'))
 if (!target) {
-  console.error('usage: node scripts/package-module.mjs <module-id|path> [output-dir]')
+  console.error('usage: node scripts/package-module.mjs <module-id|path> [output-dir] [--overwrite]')
   process.exit(1)
 }
 
@@ -169,6 +171,25 @@ const outputDir = resolve(outArg ?? scriptDir)
 mkdirSync(outputDir, { recursive: true })
 const zipName = `${manifest.id}-${manifest.version}.zip`
 const zipPath = join(outputDir, zipName)
+
+// The archive is named after the version in module.json, so packing before
+// remembering to bump it aims this script straight at the zip of the release
+// that already went out - and quietly rewrites its .sha256 to a hash the app
+// repo's registry/modules.json no longer vouches for. dist/ is gitignored, so
+// nothing downstream would show it either. Rebuilding a version is not itself
+// wrong (the archive is byte-reproducible: the same source packs to the same
+// bytes), so the flag is here for exactly that; what needs saying out loud is
+// replacing an artefact that has already been published.
+if (existsSync(zipPath) && !overwrite) {
+  console.error(`ERROR: ${zipPath} already exists.`)
+  console.error(`  module.json says version ${manifest.version}, and something has packed that`)
+  console.error('  version before - most likely the release published under it, whose sha256')
+  console.error("  the app repo's registry/modules.json vouches for.")
+  console.error('  - Releasing something new? Bump "version" in module.json and pack again.')
+  console.error(`  - Rebuilding ${manifest.version} on purpose? Pass --overwrite:`)
+  console.error('        npm run pack -- --overwrite')
+  process.exit(1)
+}
 
 const local = []
 const central = []

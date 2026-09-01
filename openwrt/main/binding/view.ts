@@ -8,6 +8,7 @@
  */
 import type { ValueBadge } from '@shared/module-ui'
 import { BADGE, badge, countBadges, statusBadges } from '../badges'
+import type { BindingInstanceRecord } from '../store'
 import { wanState } from './pool'
 import type {
   BindingAssignmentRow,
@@ -224,6 +225,22 @@ function instanceSummary(
   )
 }
 
+/**
+ * Which addresses an instance is allowed to serve, in the words a row can say.
+ *
+ * A scoped instance was stamped with its range at creation, quoted once in the
+ * create event, and then invisible: the Instances table showed `br-lan` for a
+ * range instance exactly as for one serving the whole bridge, so a device that
+ * had simply been left outside the window looked like an assignment the planner
+ * had lost. `whole LAN` is spelled out rather than left blank for the same
+ * reason - an empty cell reads as "not known yet" rather than as an answer -
+ * and it is also the sentence behind the row detail's third refusal, which is
+ * that the range cannot be edited any more than the LAN or the carrier can.
+ */
+function scopeLabel(source: BindingInstanceRecord['source']): string {
+  return source?.kind === 'range' ? `${source.from} - ${source.to}` : 'whole LAN'
+}
+
 export function listRows(runtime: BindingRuntime): BindingListRow[] {
   return runtime.store.read().instances.map((instance) => {
     const summary = instanceSummary(runtime, instance)
@@ -234,6 +251,10 @@ export function listRows(runtime: BindingRuntime): BindingListRow[] {
       // form opens on these, and the cache is only refreshed by a reconcile.
       sticky: instance.sticky,
       remap: instance.remap,
+      // From the record for a different reason: the scope is stamped once and
+      // never edited, so a reconcile has nothing to add to what it already
+      // says - and the row must carry it even before the first pass has run.
+      scope: scopeLabel(instance.source),
       stateBadges: instanceStateBadges(instance.running, summary),
       wanTotal: summary.wan.total,
       wanAvailable: summary.wan.available,
