@@ -1,23 +1,35 @@
 # Bored Manager: one DHCP client, one WAN.
 #
-# Shipped with no instance, which is not an oversight: an instance names a LAN
-# and a WAN carrier that only exist on one router, and guessing them would mean
-# a package that starts writing ip rules the moment it is installed. Add one
-# from LuCI (Services -> Bored Manager -> WAN Binding), from the app, or by hand
-# below.
+# Two kinds of section live here. `config instance` is a whole LAN sharing a
+# pool of WANs, handed out as clients arrive. `config direct` is the other
+# thing people want from a multi-WAN router: one address nailed to one port by
+# hand, for good, whatever the pool would have done with it.
 #
-# An instance whose numbers do not make sense is refused and left out of every
+# Shipped with neither, which is not an oversight: both name interfaces that
+# only exist on one router, and guessing them would mean a package that starts
+# writing ip rules the moment it is installed. Add them from LuCI (Services ->
+# Bored Manager -> WAN Binding), from the app, or by hand below.
+#
+# A section whose numbers do not make sense is refused and left out of every
 # list the daemon builds, which is a quiet way to fail. `bmwan check` prints
-# every instance in this file with the reason it was refused, and the LuCI page
+# every section in this file with the reason it was refused, and the LuCI page
 # shows the same sentence on the row - so a hand-edited section that is not
-# working will say why rather than simply not appearing.
+# working will say why rather than simply not appearing. That matters most for
+# a binding: an instance nobody accepted leaves a LAN behaving as it did
+# before, but a binding nobody accepted leaves somebody believing an address is
+# pinned to a port when it is taking whatever the router picked.
 #
 # Everything here is a conffile, so an update leaves your edits alone.
 
 config wanbind 'main'
-	# The service reads this and nothing else before deciding whether to run.
-	# Off means the daemon starts, writes no rules and answers questions, which
-	# is a more useful "off" than a service that is not there to ask.
+	# The instance half's switch. Off means the daemon starts, keeps answering
+	# questions, and stops handing WANs to DHCP clients - which is a more useful
+	# "off" than a service that is not there to ask.
+	#
+	# It does not switch off the one-to-one bindings below. A binding belongs to
+	# no instance: it names one address and one WAN port by hand, and somebody
+	# who switched the pools off has not said anything about it. `bmwan status`
+	# and `bmwan bindings` both say which half is running.
 	option enabled '1'
 
 	# Seconds between full reconciliations. Leases arrive as events and are
@@ -26,6 +38,23 @@ config wanbind 'main'
 	# without dnsmasq saying so. Below 5 it is refused: a full pass on a
 	# thousand clients is not free, and nothing here changes that fast.
 	option interval '30'
+
+	# Where the ip rule priorities for one-to-one bindings start. The band is
+	# 1000 wide, so this one opens 19000-19999.
+	#
+	# It sits below every instance's rule_pref_base on purpose, and that is the
+	# whole of how a binding beats the pool: the kernel takes the lowest-
+	# numbered rule that matches, so a binding at 19000 decides an address
+	# before the WAN an instance would have assigned it at 20000 is ever
+	# reached. The other half of the same fact is that an instance counts its
+	# own client priorities upwards from its rule_pref_base, so a rule down
+	# here is invisible to it rather than something it adopts, finds no lease
+	# behind, and deletes.
+	#
+	# Raise it and the band has to still end before the lowest rule_pref_base
+	# in this file. If it does not, `bmwan check` says so and names the
+	# instance it would collide with.
+	option direct_pref_base '19000'
 
 # One instance is one LAN and one WAN carrier. A router with two independent
 # pools has two of these; most have one.
@@ -74,3 +103,66 @@ config wanbind 'main'
 #	# How long a client keeps its WAN after its lease disappears. Covers a
 #	# reboot, a cable pulled for a minute, and dnsmasq restarting.
 #	option release_grace '120'
+
+# One binding is one address and one WAN port, chosen by hand. A router with
+# three machines that must each leave by a particular line has three of these;
+# most have none.
+#
+# The daemon owns these outright. It reconciles them on boot and whenever
+# netifd says an interface changed, with nothing attached to the router - so a
+# binding keeps working after the app is uninstalled and after the laptop it
+# was created from is switched off.
+#
+#config direct 'desk'
+#	option enabled '1'
+#
+#	# What the row is called, in the log and on every page. The section name is
+#	# used when this is left out.
+#	option name 'Workshop desktop'
+#
+#	# What this binding follows: an address, or a device wherever its lease
+#	# puts it. Set one of the two, never both.
+#	#
+#	# `ip` is the address itself and never moves. `mac` is re-resolved from
+#	# /tmp/dhcp.leases on every pass, so a laptop that comes back on a
+#	# different address is followed onto it - which is what you want for
+#	# anything that gets its address from this router, and not what you want
+#	# for a machine with a static address it configured itself.
+#	option ip '192.168.1.40'
+#	#option mac 'a4:83:e7:11:22:33'
+#
+#	# The UCI interface name of the WAN this address leaves through - the
+#	# section in /etc/config/network, so `wan2`, and not the device underneath
+#	# it, which is what `eth1.101` and `pppoe-wan2` are.
+#	option wan 'wan2'
+#
+#	# The UCI interface name of the LAN the address sits on. Optional, and
+#	# worth setting: it is the firewall source zone the binding's forwarding is
+#	# written from, and it is how the daemon can tell that the device has moved
+#	# onto a guest SSID or a second VLAN, where that forwarding does not reach
+#	# and its traffic would be dropped with nothing saying why.
+#	option lan 'lan'
+#
+#	# What happens while that WAN is unusable. There are two answers and no
+#	# third one, because removing the rule is not "unbound" - it is fallback
+#	# with nothing to say so.
+#	#
+#	#   hold      park the address on the unreachable table. It has no way out
+#	#             at all until its WAN comes back. Fail closed, and the default.
+#	#   fallback  re-point the rule at the main table, so the address leaves
+#	#             over whatever connection the router would have used anyway.
+#	option when_down 'hold'
+#
+#	# The ip rule priority this binding's rule is written at. Take a free one
+#	# from the band direct_pref_base opens above - 19000-19999 by default - and
+#	# leave it alone afterwards: it is what the rule already on the router was
+#	# written against, so changing it makes the next pass fail to recognise its
+#	# own work. Two bindings may not share one.
+#	option pref '19000'
+#
+#	# The routing table the rule looks up, which is the bound WAN's own -
+#	# `option ip4table` on that interface in /etc/config/network. Not 254: a
+#	# rule pointing at the main table sends the address out over whichever
+#	# connection the router would have picked anyway, while every row still
+#	# reads bound.
+#	option table '10002'

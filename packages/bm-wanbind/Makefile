@@ -16,7 +16,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=bm-wanbind
-PKG_VERSION:=2.2.0
+PKG_VERSION:=2.3.0
 PKG_RELEASE:=1
 
 PKG_MAINTAINER:=FireStarsSoft
@@ -40,12 +40,23 @@ endef
 define Package/bm-wanbind/description
   Gives every DHCP client on a LAN its own WAN, one to one, and keeps it there.
 
+  It also holds the one-to-one bindings written by hand: a `config direct`
+  section names one address, or one device wherever its lease puts it, and one
+  WAN, and the daemon keeps an ip rule matching it. Those live in
+  /etc/config/bm_wanbind rather than anywhere else, so a binding goes on working
+  through a reboot, through the desktop app being uninstalled, and through
+  everything that made it being switched off - which is the whole reason the
+  decision was moved onto the router.
+
   A lease arriving is an event, not something noticed at the next poll: dnsmasq
   calls into /etc/hotplug.d/dhcp/ and the rule is written before the client has
-  finished its DHCP exchange. Clients with no free WAN wait in a queue in the
-  order they arrived; a WAN that fails hands its client to a free one; and a
-  client the pool cannot seat is blocked by a fail-closed catch-all rather than
-  quietly sent out of whichever WAN the router would have used.
+  finished its DHCP exchange. A WAN failing or coming back is an event too:
+  netifd calls into /etc/hotplug.d/iface/, and a binding whose interface is
+  named in the configuration is re-pointed then rather than up to thirty seconds
+  later. Clients with no free WAN wait in a queue in the order they arrived; a
+  WAN that fails hands its client to a free one; and a client the pool cannot
+  seat is blocked by a fail-closed catch-all rather than quietly sent out of
+  whichever WAN the router would have used.
 
   Everything it decides survives a restart and a reboot, and it reconciles
   itself against the router every thirty seconds, so a rule somebody removed by
@@ -80,6 +91,15 @@ define Package/bm-wanbind/install
 	# it - the same reason the ucode entry points below are not executable.
 	$(INSTALL_DIR) $(1)/etc/hotplug.d/dhcp
 	$(INSTALL_DATA) ./files/etc/hotplug.d/dhcp/30-bm-wanbind $(1)/etc/hotplug.d/dhcp/30-bm-wanbind
+	# The netifd hook, which is what makes "reconciled on netifd events" true
+	# rather than aspirational: without it a binding only ever learns that its
+	# WAN went down or came back at the next thirty-second pass. Nothing has to
+	# be reloaded for it - procd reads this directory when the event happens -
+	# so unlike the DHCP hook above it needs no help from postinst.
+	#
+	# 0644 for the same reason: hotplug-call sources it rather than running it.
+	$(INSTALL_DIR) $(1)/etc/hotplug.d/iface
+	$(INSTALL_DATA) ./files/etc/hotplug.d/iface/20-bm-wanbind $(1)/etc/hotplug.d/iface/20-bm-wanbind
 	$(INSTALL_DIR) $(1)/usr/sbin
 	$(INSTALL_BIN) ./files/usr/sbin/bmwan $(1)/usr/sbin/bmwan
 	# Entry points: read by ucode, never executed directly, so 0644 is right.

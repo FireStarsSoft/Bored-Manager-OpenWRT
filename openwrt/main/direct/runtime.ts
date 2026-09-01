@@ -28,6 +28,12 @@ export function createDirectRuntime(options: DirectEngineOptions): DirectRuntime
     latestPayload: emptyDirectSnapshot(),
     memory: new Map(),
     preparations: new Map(),
+    // Null, not empty: nothing has asked the router yet, so the records are
+    // still the only account of what this router is doing.
+    routerRows: null,
+    routerOwned: false,
+    routerBand: null,
+    handoverNotice: '',
     serial: Promise.resolve(),
     workGeneration: 0,
     disposed: false
@@ -41,7 +47,9 @@ export function emptyDirectSnapshot(): DirectSnapshot {
     hookOk: true,
     lastError: '',
     rows: [],
-    totals: { ok: 0, held: 0, total: 0 }
+    totals: { ok: 0, held: 0, total: 0 },
+    routerOwned: false,
+    notice: ''
   }
 }
 

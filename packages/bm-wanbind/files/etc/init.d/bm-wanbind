@@ -49,14 +49,26 @@ start_service() {
 	# in this project.
 	procd_set_param stderr 1
 	# procd restarts the instance when this file's contents change, which is how
-	# an edit to an instance takes effect. It is also why nothing in the daemon
-	# re-reads the configuration: there is no half-reloaded state to get wrong.
+	# an edit to an *instance* takes effect: an instance's pool and queue are
+	# this process's own memory, so it is built once at start and there is no
+	# half-reloaded state to get wrong.
+	#
+	# A one-to-one binding is not that. It is a `config direct` section, it is
+	# re-read from this file on every pass, and it is written into this file by
+	# `bmwan bind` and by the ubus `bind` method - so it takes effect at the
+	# next pass whether or not anything restarts anything. That matters here for
+	# one reason: this line means a `uci commit` somebody follows with
+	# /sbin/reload_config, or a Save & Apply in LuCI, restarts the daemon and
+	# therefore runs the flush below. Bindings survive it the same way instances
+	# do - the first thing start does is a full pass that writes them all back -
+	# but for the second or two in between, every bound address falls back to
+	# the router's ordinary routing rather than being held.
 	procd_set_param file /etc/config/bm_wanbind
 	procd_close_instance
 }
 
 # Everything comes off when the service stops. All of it, including the
-# catch-all.
+# catch-all and every one-to-one binding.
 #
 # `service_stopped` rather than `stop_service`, because rc.common runs the first
 # after `procd_kill` and the second before it - and flushing while the daemon is
@@ -70,6 +82,14 @@ start_service() {
 # outage that nothing on the router can explain. Falling back to the router's
 # ordinary routing for the second or two a restart takes is the softer failure,
 # and the first thing `start` does is a full pass that puts it all back.
+#
+# A binding comes off for the same reason, and it is the reason that makes the
+# choice worth stating twice. `when_down hold` parks an address on a table with
+# nothing in it, which is correct while there is a daemon watching for its WAN
+# to come back and wrong the moment there is not: leaving that rule behind after
+# a stop is one address with no connection at all and nothing left on the router
+# that would ever give it one. Falling back to ordinary routing is the softer
+# failure here too.
 #
 # `bmwan flush` is a separate process that reads the configuration and the
 # router rather than asking the daemon, so this works whether or not the daemon

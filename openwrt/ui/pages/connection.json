@@ -2718,6 +2718,40 @@
                                   ]
                                 },
                                 {
+                                  "type": "conditional",
+                                  "when": {
+                                    "source": {
+                                      "kind": "stream",
+                                      "event": "direct",
+                                      "path": "notice"
+                                    },
+                                    "op": "exists"
+                                  },
+                                  "blocks": [
+                                    {
+                                      "type": "note",
+                                      "title": "Something about these bindings needs saying",
+                                      "tone": "warning",
+                                      "lines": [
+                                        "The sentence below is about where the bindings live and whether this app can currently reach them - not about a pass that failed. A binding the router holds keeps working while it is showing."
+                                      ]
+                                    },
+                                    {
+                                      "type": "keyValue",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "direct"
+                                      },
+                                      "rows": [
+                                        {
+                                          "key": "notice",
+                                          "label": "Reason"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
                                   "type": "table",
                                   "source": {
                                     "kind": "invoke",
@@ -2773,6 +2807,10 @@
                                       "label": "In this state for",
                                       "format": "duration",
                                       "align": "right"
+                                    },
+                                    {
+                                      "key": "reason",
+                                      "label": "Why"
                                     }
                                   ],
                                   "sortDefault": {

@@ -289,7 +289,12 @@ function poolTold(told, id) {
 
 let told = pppoe.info();
 let fptTold = poolTold(told, 'fpt1');
-check('info release', told.release, '2.2.0');
+// Against the module's own constant rather than a literal. The literal was a
+// second place the release number lived, and `npm run packages:check` - which
+// holds packages/version.json as the one source of truth - does not read probe
+// files, so a version bump left this the only red thing in the tree and said
+// nothing about why.
+check('info release', told.release, pppoe.RELEASE);
 check('info api version', told.apiVersion, 3);
 check('info lists every pool', length(told.pools), 3);
 check('info never carries a password', exists(fptTold, 'password'), false);

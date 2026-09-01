@@ -70,7 +70,7 @@ export interface AgentDomainDeps {
   jobs: { readonly busy: boolean; start(spec: JobSpec): OpenWrtJob }
   event: (kind: string, text: string) => void
   /** Named things that would have to be stopped before packages can go. */
-  blockers: () => { instances: string[]; batches: string[] }
+  blockers: () => { instances: string[]; batches: string[]; bindings: string[] }
 }
 
 export interface AgentRuntime {

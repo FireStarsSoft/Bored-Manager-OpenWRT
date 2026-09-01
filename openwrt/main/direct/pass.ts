@@ -19,8 +19,56 @@ import type { OwrtRules } from '../config'
 import type { DirectBindingRecord } from '../store'
 import type { RouterModel } from '../types'
 import { directWans, planDirectReconciliation } from './reconcile'
+import { forgetRouterState, routerKeepsDirect, routerOwnsDirect, routerSample } from './router'
 import { emitSnapshot } from './view'
 import type { DirectPolicy, DirectRuntime } from './types'
+
+/**
+ * Which half does this pass, asked once per tick.
+ *
+ * The verdict is read here and never captured, so the changeover is a tick
+ * rather than a reconnect - the same arrangement, for the same reason, as
+ * `binding/reconcile.ts`'s own `pass`.
+ *
+ * The two are exclusive and must stay that way. `bm-wanbind` reads back every
+ * ip rule in the one-to-one band on every pass of its own and removes the ones
+ * no `config direct` section asks for, so this module planning in that band as
+ * well would not merely be two writers - it would be two writers deleting each
+ * other's rules on two timers, with an address off the network for whichever
+ * fraction of a second the loser is behind. So a router-owned pass that fails
+ * publishes the reason and stops; it does not fall back.
+ *
+ * Coming the other way, a router that has lost the package - or a module that
+ * has just connected to one that never had it - has to forget what it read
+ * before it plans anything, or the rows would still be the router's while the
+ * rules being written are this module's.
+ */
+export async function directTick(
+  runtime: DirectRuntime,
+  model: RouterModel
+): Promise<string | null> {
+  if (routerOwnsDirect(runtime)) {
+    runtime.routerOwned = true
+    const failed = await routerSample(runtime, model)
+    if (failed && !runtime.disposed) emitSnapshot(runtime, model.t, failed)
+    return failed
+  }
+  // The package is there but we cannot drive it: bm-wanbind is its own procd
+  // service and goes on reconciling whatever `bm-agent` is doing. Falling
+  // through here would put this module's pass over a band the daemon owns and a
+  // store the handover has already emptied - which reads every one of the
+  // daemon's rules as an orphan and deletes it. Stop, say why, and leave the
+  // rules alone; the daemon is still keeping them right.
+  if (routerKeepsDirect(runtime)) {
+    runtime.routerOwned = true
+    const reason =
+      'This router keeps its own one-to-one bindings and its Bored Manager agent is not answering, so the rows below may be out of date. The bindings themselves are unaffected: bm-wanbind holds them and keeps them in force without this app. Module settings, Router packages says what the agent needs.'
+    if (!runtime.disposed) emitSnapshot(runtime, model.t, reason)
+    return reason
+  }
+  forgetRouterState(runtime)
+  return runDirectPass(runtime, model)
+}
 
 /**
  * Exactly the five settings the pure pass reads. Naming them one by one is

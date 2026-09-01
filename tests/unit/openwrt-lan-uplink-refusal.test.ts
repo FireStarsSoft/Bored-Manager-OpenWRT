@@ -272,8 +272,13 @@ describe('a second ISP offered as the DHCP LAN interface', () => {
 
     const detail = uplinkRefusal(report)?.detail ?? ''
     expect(detail).toContain('/etc/config/network gives it a default gateway')
-    expect(detail).toContain('it carries an address the public internet routes to')
     expect(detail).toContain('which masquerades')
+    // Not "it carries an address the public internet routes to". That reading is
+    // gone: a LAN may legitimately hold public space - a routed block, or an
+    // allocation somebody is squatting on - and treating the address as evidence
+    // of direction called a router's own LAN an uplink on the one router this
+    // whole classifier was rewritten for.
+    expect(detail).not.toContain('the public internet routes to')
   })
 
   it('says what the instance would do with it, and what would change the answer', async () => {

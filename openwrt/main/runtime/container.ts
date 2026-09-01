@@ -266,6 +266,15 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
     // module" for the length of every grace, and tells the reader to go and
     // remove a rule this module owns and is about to withdraw itself.
     installed: () => direct.rows().map((row) => ({ id: row.id, ip: row.address })),
+    // And the bindings this module holds no record of at all, because the
+    // router holds them. `store.read().direct` is empty on such a router by
+    // design, so without this the monitor called every rule the daemon wrote
+    // foreign - in this module's own voice, about its own daemon's work.
+    routerHeld: () =>
+      direct
+        .rows()
+        .filter((row) => row.pref > 0)
+        .map((row) => ({ name: row.name, wan: row.wan, ip: row.address, pref: row.pref })),
     capabilities: () => latch.capabilities
   })
 
@@ -294,7 +303,15 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
         instances: data.instances
           .filter((instance) => instance.running)
           .map((instance) => instance.name),
-        batches: pppoe.poolNames()
+        batches: pppoe.poolNames(),
+        // On a router that keeps its own bindings these live in the router's
+        // configuration and nowhere else: the handover deletes this module's
+        // record once the router confirms, deliberately, because two records of
+        // one binding is the state nothing can reason about. The cost of that
+        // choice is exactly here - `apk del bm-wanbind` takes the sections with
+        // it and this module cannot put them back - so the names have to reach
+        // the uninstall check that is the mitigation for it.
+        bindings: direct.rows().map((row) => row.name)
       }
     }
   })

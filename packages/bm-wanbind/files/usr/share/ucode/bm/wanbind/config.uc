@@ -10,10 +10,21 @@
 // already on the router were written against, so quietly choosing different
 // ones would make the next pass fail to recognise its own work and write a
 // second copy of every rule.
+//
+// Two section types live here. `config instance` is a whole LAN sharing a pool
+// of WANs, and `config direct` is one address nailed to one port by hand. The
+// second half of this file is the second of those.
 
 import { cursor } from 'uci';
 
 import { debug, err } from 'bm.log';
+
+// A MAC and an address have exactly one spelling in this package, and it is the
+// one /tmp/dhcp.leases carries: a MAC target is resolved by matching it against
+// a lease as a string, so the reader that accepts it and the reader that
+// resolves it have to agree letter for letter. Two spellings would mean a
+// binding that is accepted here, never resolves, and never says why.
+import { normalizeMac, validIp } from 'bm.wanbind.leases';
 
 const PACKAGE = 'bm_wanbind';
 
@@ -56,7 +67,14 @@ function text(value) {
 	return type(value) == 'string' ? trim(value) : '';
 }
 
-/** The one global section. Absent means the shipped defaults. */
+/**
+ * The one global section. Absent means the shipped defaults.
+ *
+ * `option direct_pref_base` sits on this same section and is deliberately not
+ * read here. Answering what it is worth is not a question about the global
+ * section at all - it is a question about where the instances have put their
+ * own priority ranges - so `directBand()` at the foot of this file owns it.
+ */
 export function main() {
 	let out = { enabled: true, interval: 30 };
 
@@ -192,6 +210,377 @@ export function instances() {
  */
 export function instance(id) {
 	for (let one in instances()) {
+		if (one.id == id)
+			return one;
+	}
+
+	return null;
+};
+
+// ---------------------------------------------------------------------------
+// One-to-one bindings: `config direct '<id>'`.
+//
+// An instance hands every client on a LAN whichever WAN is free at the time. A
+// direct binding is the other thing people want out of a multi-WAN router: this
+// address, that port, always, chosen by a person rather than by a pool.
+//
+// It lives in this file rather than in the app because the router is the source
+// of truth for it. The daemon reconciles these on boot and on netifd events
+// with nothing attached to it, so a binding has to keep working when the app is
+// uninstalled, when the laptop it ran on is shut, and when the router comes
+// back up at three in the morning on its own.
+
+/**
+ * Where the priorities a binding may take start, and how many there are.
+ *
+ * The band sits *below* every instance's `rule_pref_base`, and that placement
+ * is the whole of how a hand-placed binding beats the pool. The kernel walks ip
+ * rules from the lowest preference upwards and the first match decides, so a
+ * binding at 19000 answers for an address before the assignment an instance
+ * would have given it at 20000 is ever reached.
+ *
+ * The same fact read from the other end is what keeps the two bands from
+ * colliding at all: the instance planner counts its free client preferences
+ * from its own `rule_pref_base` upwards and reads the router's rule table back
+ * from the same number, so a rule down here is invisible to it. Let the bands
+ * overlap and it is not merely a tie - the instance adopts a binding's rule as
+ * one of its own assignments, finds no lease that justifies it, and deletes it
+ * on the next pass, once per pass, with nothing anywhere saying why the address
+ * keeps losing its WAN. That is why an overlap is refused in two places below:
+ * on the band, by `directBand()`, and on each binding's own stamped `pref`.
+ *
+ * 1000 is DIRECT_PREF_SPAN in the module's records.ts, and 19000 is its
+ * `directPrefBase` default. Both halves have to agree about the width, or the
+ * app allocates a number the router then refuses.
+ */
+const DIRECT_PREF_BASE = 19000;
+const DIRECT_PREF_SPAN = 1000;
+
+// The kernel's own ceiling for an ip rule priority.
+const MAX_PREF = 0x7fffffff;
+
+// A UCI interface name, not a device name. `wan`, `wan2` and `lan_guest` are
+// sections in /etc/config/network; `eth1.101`, `br-lan` and `pppoe-wan` are
+// what the kernel calls the things underneath them. netifd is asked about the
+// first kind and knows nothing of the second, so a binding naming a device
+// would resolve to no interface, write no rule, and report nothing wrong.
+const UCI_NAME = /^[A-Za-z0-9_]+$/;
+
+function uciName(value) {
+	return match(value, UCI_NAME) ? true : false;
+}
+
+/**
+ * What this binding follows, or null when it cannot be read.
+ *
+ * Dashes are read as colons and letters are lower-cased on the way in, because
+ * that is the spelling the lease file carries and somebody copying a MAC out of
+ * a Windows dialog has still named the right device. Null covers every way of
+ * getting this wrong; the sentence that explains which way is `refuseDirect`'s
+ * job, because only that has both raw values in front of it.
+ */
+function readTarget(ipText, macText) {
+	if (length(ipText) && length(macText))
+		return null;
+
+	if (length(ipText))
+		return validIp(ipText) ? { kind: 'ip', ip: trim(ipText) } : null;
+
+	if (length(macText)) {
+		let mac = normalizeMac(replace(macText, /-/g, ':'));
+		return length(mac) ? { kind: 'mac', mac: mac } : null;
+	}
+
+	return null;
+}
+
+/**
+ * The band new bindings are numbered in, and whether it is safe to number in.
+ *
+ * `reason` is null when the band is usable and a sentence when it is not, for
+ * the same reason every refusal in this file is a sentence: this one has to
+ * reach somebody before a binding exists to be refused, because by then the
+ * failure is an address that is not going where its owner was told it goes.
+ *
+ * A band that cannot hold its own width falls back to the shipped default and
+ * says so; a band that reaches into an instance's client range does not, and is
+ * returned as it was written. Moving that one would be the app's stamped
+ * numbers and the router's disagreeing about where a binding lives, which is
+ * the one thing every number in this file is arranged to prevent.
+ *
+ * Declared above its callers because ucode resolves a name when it compiles the
+ * function that mentions it, so a callee further down the file is a global load
+ * that raises the first time the line runs.
+ */
+export function directBand() {
+	let base = DIRECT_PREF_BASE;
+
+	try {
+		base = number(cursor().get(PACKAGE, 'main', 'direct_pref_base'), DIRECT_PREF_BASE);
+	}
+	catch (e) {
+		debug('cannot read ' + PACKAGE + ': ' + e);
+	}
+
+	if (base < 1 || base + DIRECT_PREF_SPAN - 1 > MAX_PREF) {
+		err(sprintf('direct_pref_base %d cannot hold %d ip rule priorities; using %d',
+			base, DIRECT_PREF_SPAN, DIRECT_PREF_BASE));
+		base = DIRECT_PREF_BASE;
+	}
+
+	let reason = null;
+
+	for (let one in instances()) {
+		if (base + DIRECT_PREF_SPAN > one.rulePrefBase) {
+			reason = sprintf('direct_pref_base %d opens a band of %d that reaches %d, which is not below instance %s\'s rule_pref_base %d. A binding numbered up there is adopted by that instance as one of its own client assignments and deleted on the next pass. Lower direct_pref_base, or raise that instance\'s rule_pref_base',
+				base, DIRECT_PREF_SPAN, base + DIRECT_PREF_SPAN - 1, one.id, one.rulePrefBase);
+			break;
+		}
+	}
+
+	return {
+		base: base,
+		span: DIRECT_PREF_SPAN,
+		top: base + DIRECT_PREF_SPAN - 1,
+		reason: reason,
+		usable: (reason == null)
+	};
+};
+
+/**
+ * Why this binding cannot be used, or null.
+ *
+ * One function returning one sentence, for the reason the instance half gives:
+ * that sentence is what reaches syslog, `bmwan check` and the app, and "pref
+ * 20000 is not below instance home's rule_pref_base 20000" is something a
+ * person can act on where "invalid configuration" is not.
+ *
+ * The stakes are higher here than they are next door. An instance that is
+ * quietly dropped leaves a LAN behaving as it did before anybody configured
+ * anything. A binding that is quietly dropped leaves its owner believing one
+ * address is pinned to one port when it is taking whatever the router picked -
+ * which is the failure the whole feature exists to deny. So nothing here is
+ * corrected on the way past, and nothing is silently ignored.
+ *
+ * `live` carries the usable instances and the band, because half of what makes
+ * a binding wrong is what the rest of the file says.
+ */
+function refuseDirect(one, live) {
+	if (length(one.ip) && length(one.mac)) {
+		return 'both ip and mac are set, and a binding follows one thing: an address, or a device wherever its lease puts it. Delete whichever of the two was not meant';
+	}
+
+	if (!length(one.ip) && !length(one.mac))
+		return 'neither ip nor mac is set, so there is nothing for this binding to follow';
+
+	if (!one.target && length(one.ip))
+		return sprintf('ip %s is not an IPv4 address', one.ip);
+
+	if (!one.target)
+		return sprintf('mac %s is not a MAC address; six hex pairs, separated by colons', one.mac);
+
+	// Both of these parse and neither is a host. A rule written from 0.0.0.0
+	// matches every source on the router, which is not a binding but a default
+	// route with one address's name on it.
+	if (one.targetKind == 'ip' && (one.target.ip == '0.0.0.0' || one.target.ip == '255.255.255.255'))
+		return sprintf('ip %s is not one host\'s address, so there is nothing here to bind', one.target.ip);
+
+	if (one.targetKind == 'mac' && (one.target.mac == '00:00:00:00:00:00' || one.target.mac == 'ff:ff:ff:ff:ff:ff'))
+		return sprintf('mac %s is not one device\'s address, so no lease will ever answer to it', one.target.mac);
+
+	if (!length(one.wan))
+		return 'no wan is set, so there is no port for this binding to leave through';
+
+	if (!uciName(one.wan)) {
+		return sprintf('wan %s is not a UCI interface name. This wants the name of the section in /etc/config/network - wan, wan2 - and not the device underneath it, which is what eth1.101 and br-lan are',
+			one.wan);
+	}
+
+	if (length(one.lan) && !uciName(one.lan)) {
+		return sprintf('lan %s is not a UCI interface name. This wants the section in /etc/config/network the address sits behind - lan, lan_guest - and not the bridge device, which is what br-lan is',
+			one.lan);
+	}
+
+	if (!(one.whenDown in [ 'hold', 'fallback' ])) {
+		return sprintf('when_down %s is neither hold nor fallback. hold parks the address on the unreachable table, so while its WAN is down it has no way out at all; fallback re-points it at the main table, so it leaves over whatever connection the router would have used anyway. There is no third answer - taking the rule away is fallback with nothing to say so',
+			one.whenDown);
+	}
+
+	if (one.pref < 1) {
+		return sprintf('no pref is set, or it is not a number. This is the ip rule priority this binding\'s rule is written at, and the daemon will not pick one: a number the app and the router had each chosen separately would be two rules for one address. Take a free one from %d-%d',
+			live.base, live.top);
+	}
+
+	if (one.pref > MAX_PREF)
+		return sprintf('pref %d is above %d, which is the highest ip rule priority the kernel takes', one.pref, MAX_PREF);
+
+	// The first instance that would swallow it, rather than the lowest base on
+	// the router: naming one of them is enough to act on, and every one of them
+	// has the same fix.
+	for (let ins in live.instances) {
+		if (one.pref >= ins.rulePrefBase) {
+			return sprintf('pref %d is not below instance %s\'s rule_pref_base %d. The lowest matching ip rule decides, so at or above that number this binding no longer outranks the WAN that instance would assign - and worse, that instance counts its own client priorities from there upwards, adopts this rule as one of its assignments, finds no lease behind it and removes it. Move this binding into %d-%d',
+				one.pref, ins.id, ins.rulePrefBase, live.base, live.top);
+		}
+	}
+
+	if (one.table < 1) {
+		return 'no table is set, or it is not a number. This is the routing table the bound WAN puts its default route in - `option ip4table` on that interface in /etc/config/network';
+	}
+
+	if (one.table > MAX_TABLE)
+		return sprintf('table %d is not a routing table number; the highest is %d', one.table, MAX_TABLE);
+
+	if (one.table == 254) {
+		return 'table 254 is the router\'s own main table. A rule pointing there sends this address out over whichever connection the router would have picked anyway, while every row on every surface reads bound - which is when_down fallback wearing the name of a binding. Use the WAN\'s own ip4table';
+	}
+
+	if (one.table == 255)
+		return 'table 255 is the local table, which holds the router\'s own addresses and no way off the router';
+
+	// A WAN's table is never one of these, so this only ever fires on a typo -
+	// and the typo is expensive, because the table it lands in holds nothing
+	// but `unreachable default`.
+	for (let ins in live.instances) {
+		if (one.table == ins.catchAllTable) {
+			return sprintf('table %d is instance %s\'s catch_all_table, which holds nothing but `unreachable default`. The rule would be written, the row would read bound, and every packet from %s would be dropped. Use the WAN\'s own ip4table',
+				one.table, ins.id, one.label);
+		}
+	}
+
+	return null;
+}
+
+/**
+ * Every binding in the file, refused ones included, in file order.
+ *
+ * Same contract as `configured()` next door, and for the same reason: a section
+ * that has simply disappeared from every list is the hardest kind of mistake to
+ * find. `id` is the UCI section name, so `config direct 'desk'` is `desk`
+ * everywhere; `reason` is null when the binding is usable and the refusal
+ * sentence when it is not, and it is the sentence syslog gets.
+ *
+ * `pref` and `table` are read as written and never re-derived. They are what
+ * the rule already on the router was written against, so a binding whose
+ * numbers were quietly recomputed from today's settings would send the next
+ * pass hunting in the wrong band and leave the real rule behind, unowned and
+ * still steering traffic.
+ */
+export function directConfigured() {
+	let band = directBand();
+	let live = { base: band.base, top: band.top, instances: instances() };
+
+	let out = [];
+
+	try {
+		cursor().foreach(PACKAGE, 'direct', (section) => {
+			let one = {
+				id: text(section['.name']),
+				name: text(section.name),
+				enabled: flag(section.enabled, true),
+				ip: text(section.ip),
+				mac: text(section.mac),
+				wan: text(section.wan),
+				lan: text(section.lan),
+				// Absent means hold, here and in the app's reader both. A
+				// binding whose choice was lost has to fail closed rather than
+				// quietly start letting the address out over the default
+				// connection - but a word that is neither is refused below,
+				// because somebody typing `drop` asked for something and would
+				// otherwise silently get the opposite of it.
+				whenDown: lc(text(section.when_down)),
+				pref: number(section.pref, 0),
+				table: number(section.table, 0)
+			};
+
+			if (!length(one.name))
+				one.name = one.id;
+
+			if (!length(one.whenDown))
+				one.whenDown = 'hold';
+
+			one.target = readTarget(one.ip, one.mac);
+			one.targetKind = one.target ? one.target.kind : '';
+			one.label = one.target
+				? (one.target.kind == 'ip' ? one.target.ip : one.target.mac)
+				: (length(one.ip) ? one.ip : one.mac);
+
+			one.reason = refuseDirect(one, live);
+			one.usable = (one.reason == null);
+
+			push(out, one);
+		});
+	}
+	catch (e) {
+		debug('cannot list bindings in ' + PACKAGE + ': ' + e);
+	}
+
+	// What no section can see on its own: the other sections.
+	//
+	// Two rules at one priority is not a tie the kernel breaks in any order
+	// worth relying on, and two bindings following one address means the
+	// lower-numbered rule decides while the other is never reached - one row
+	// reading bound for something it is not doing. First in file order keeps
+	// what it claimed, which is the only rule here that does not change when
+	// somebody adds a section at the end.
+	//
+	// A disabled binding neither claims nor is checked: it writes no rule, so
+	// it collides with nothing, and refusing it would mean the way to free a
+	// priority was to delete a section rather than switch it off.
+	let claimedPref = {};
+	let claimedTarget = {};
+
+	for (let one in out) {
+		if (one.reason || !one.enabled)
+			continue;
+
+		let prefKey = sprintf('%d', one.pref);
+		if (prefKey in claimedPref) {
+			one.reason = sprintf('pref %d is already taken by binding %s, and two ip rules at one priority is not an order anything can rely on',
+				one.pref, claimedPref[prefKey]);
+			one.usable = false;
+			continue;
+		}
+		claimedPref[prefKey] = one.id;
+
+		let targetKey = one.targetKind + ' ' + one.label;
+		if (targetKey in claimedTarget) {
+			one.reason = sprintf('binding %s already follows %s. The lower-numbered rule decides and the other is never reached, so one of these two would do nothing while its row said otherwise',
+				claimedTarget[targetKey], one.label);
+			one.usable = false;
+			continue;
+		}
+		claimedTarget[targetKey] = one.id;
+	}
+
+	return out;
+};
+
+/** Every usable binding, in file order. What the reconcile writes rules for. */
+export function directBindings() {
+	let out = [];
+
+	for (let one in directConfigured()) {
+		if (one.reason) {
+			err('binding ' + one.id + ': ' + one.reason);
+			continue;
+		}
+
+		push(out, one);
+	}
+
+	return out;
+};
+
+/**
+ * One binding by name, or null.
+ *
+ * Read from the file rather than from a cache, exactly as `instance()` is: a
+ * section added from LuCI, from the app over ubus or by hand is in effect on
+ * the next call, with nothing having to be told to reload.
+ */
+export function directBinding(id) {
+	for (let one in directBindings()) {
 		if (one.id == id)
 			return one;
 	}

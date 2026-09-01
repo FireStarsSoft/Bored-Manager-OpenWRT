@@ -21,6 +21,14 @@
 // the single most consequential thing here, so it is worth being a line
 // somebody can read, type at a shell and compare against what the router says.
 // It is read back after writing for the same reason.
+//
+// The second half of this file is the same two questions asked for one-to-one
+// bindings: which rules on the router are theirs, and where an address that is
+// being held has to be parked so that holding it means anything. A binding has
+// no catch-all - it is about one address rather than about a LAN - but `hold`
+// needs exactly the same `unreachable default`, and for exactly the same reason
+// as the instance's: a rule pointing at an empty table does not fail, it falls
+// through to main.
 
 import { popen } from 'fs';
 
@@ -211,6 +219,188 @@ export function flush(instance, rules, lanCidr) {
 
 	notice(sprintf('instance %s: removed %d rule(s) and the unreachable default in table %d',
 		instance.id, removed, instance.catchAllTable));
+
+	return removed;
+};
+
+// ---------------------------------------------------------------------------
+// One-to-one bindings.
+
+/**
+ * Where a held address is parked when no instance already offers a table.
+ *
+ * 253 is `default` in the kernel's own numbering and OpenWrt leaves it empty,
+ * which makes it the natural home for `unreachable default` - the instance half
+ * says the same thing about its own catch-all and ships 253 as that default.
+ * The rest count downwards, and only because a router where 253 is already in
+ * use is a router where refusing to hold anything would be the worse answer.
+ */
+const HOLD_CANDIDATES = [ 253, 252, 251, 250, 249, 248, 247, 246, 245, 244 ];
+
+function claimTable(taken, value) {
+	if (type(value) == 'int' && value > 0)
+		taken[sprintf('%d', value)] = true;
+}
+
+function tableClaimed(taken, value) {
+	return taken[sprintf('%d', value)] === true;
+}
+
+/**
+ * The routing table a held one-to-one binding is parked in.
+ *
+ * An instance's `catch_all_table` first, when the router has one. It already
+ * holds an `unreachable default` maintained by the instance half, the
+ * configuration reader already refuses any binding whose own table collides
+ * with it, and one blackhole table on a router is one thing to explain rather
+ * than two.
+ *
+ * Otherwise a table nothing else on this router is using. Everything netifd is
+ * putting routes into is off limits, and so is every table a usable binding is
+ * stamped with - writing `unreachable default` into a WAN's own table would not
+ * park one address, it would take every binding on that WAN off the network in
+ * the name of holding one of them.
+ *
+ * `reason` is a sentence when there is nowhere left. The caller does not treat
+ * that as "hold means fallback": it leaves every held rule exactly where it is,
+ * because quietly letting an address out over the default connection is the one
+ * thing `hold` was chosen to prevent.
+ */
+export function holdTable(instances, bindings, ifaces) {
+	let taken = {};
+
+	// The router's own two, which nothing may blackhole.
+	claimTable(taken, 254);
+	claimTable(taken, 255);
+
+	for (let one in (type(ifaces) == 'array' ? ifaces : []))
+		claimTable(taken, one.table);
+
+	for (let one in (type(bindings) == 'array' ? bindings : [])) {
+		if (one.usable && one.enabled)
+			claimTable(taken, one.table);
+	}
+
+	for (let ins in (type(instances) == 'array' ? instances : [])) {
+		if (!tableClaimed(taken, ins.catchAllTable))
+			return { table: ins.catchAllTable, shared: true, reason: null };
+	}
+
+	for (let candidate in HOLD_CANDIDATES) {
+		if (!tableClaimed(taken, candidate))
+			return { table: candidate, shared: false, reason: null };
+	}
+
+	return {
+		table: null,
+		shared: false,
+		reason: sprintf('every routing table between %d and %d is already carrying routes, so there is nowhere on this router to park a held address. A held binding keeps whatever rule it already had rather than being let out onto the default connection',
+			HOLD_CANDIDATES[length(HOLD_CANDIDATES) - 1], HOLD_CANDIDATES[0])
+	};
+};
+
+/**
+ * Put `unreachable default` in the hold table, and check it is there.
+ *
+ * `replace` rather than `add`, so this is safe on every pass: a table that
+ * already holds it is left alone, and one holding something else as its default
+ * route is corrected rather than gaining a second entry. Read back afterwards
+ * for the reason the instance half reads its own back - `ip` returning zero
+ * having done something subtly different is not a risk worth taking on the one
+ * line that makes holding mean anything.
+ *
+ * `connected` is the LANs held addresses sit on, and it is a softer thing than
+ * the instance's connected route. That one is required, because the instance's
+ * catch-all matches a whole subnet including the router's own address and
+ * without it the router goes silent on the LAN. A binding's rule matches a
+ * single /32, so the router itself is never affected; what these routes buy is
+ * a held device still being able to reach the printer beside it, which is not
+ * what "this address has no way out" was meant to take away. So a failure here
+ * is logged and the hold still goes in.
+ */
+export function installHold(table, connected) {
+	let written = shell(sprintf('ip -4 route replace unreachable default table %d', table));
+	if (!written.ok) {
+		err(sprintf('cannot write the unreachable default in table %d: %s', table, written.output));
+		return false;
+	}
+
+	for (let one in (type(connected) == 'array' ? connected : [])) {
+		let local = shell(sprintf('ip -4 route replace %s dev %s scope link table %d',
+			one.cidr, one.device, table));
+
+		if (!local.ok) {
+			err(sprintf('cannot write the connected route for %s in table %d: %s - a held address on that LAN will not reach its neighbours either',
+				one.cidr, table, local.output));
+		}
+	}
+
+	let found = shell(sprintf('ip -4 route show table %d', table));
+	if (!found.ok || !match(found.output, /unreachable[ \t]+default/)) {
+		err(sprintf('table %d does not hold an unreachable default after writing it - a held address parked there would leave over the router\'s default connection',
+			table));
+		return false;
+	}
+
+	return true;
+};
+
+/**
+ * And take it away again, on the way out.
+ *
+ * Only ever called for a table this package chose for itself. A hold table that
+ * is really an instance's catch-all belongs to that instance, and flushing it
+ * would take every unassigned client on its LAN out onto the router's own WAN -
+ * which is precisely what the instance half exists to prevent.
+ */
+export function removeHold(table) {
+	shell(sprintf('ip -4 route flush table %d', table));
+};
+
+/**
+ * Every rule on the router that belongs to the one-to-one bindings.
+ *
+ * Two claims, not one. The band is where new bindings are numbered, so a rule
+ * in it that no section wants is a stray to be removed - a binding somebody
+ * deleted, or one this daemon wrote before it was restarted with a shorter
+ * config. `stamped` is every priority a section actually names, and it is what
+ * makes moving `direct_pref_base` survivable: a binding written under the old
+ * band keeps its number for ever, so reading the router back from today's band
+ * alone would leave its rule unowned, unmaintained and still steering traffic.
+ *
+ * Nothing outside both is touched. The instance half's rules sit above this
+ * band by construction - `directBand()` refuses a band that reaches an
+ * instance's `rule_pref_base` - and a rule at a priority nothing here names
+ * belongs to another tool or to the person administering the router.
+ */
+export function directOwned(rules, base, top, stamped) {
+	let out = [];
+	let claimed = type(stamped) == 'object' ? stamped : {};
+
+	for (let one in rules) {
+		if ((one.pref >= base && one.pref <= top) || claimed[sprintf('%d', one.pref)] === true)
+			push(out, one);
+	}
+
+	return out;
+};
+
+/**
+ * Take every one of them off the router.
+ *
+ * What `bmwan flush` reaches and what `prerm` reaches through it. There is no
+ * ordering to be careful about here, unlike the instance flush next door: a
+ * binding's rule is the whole of what it installs on the wire, so removing them
+ * in any order leaves each address exactly where it would have been without the
+ * binding at all.
+ */
+export function directFlush(rules, base, top, stamped) {
+	let removed = 0;
+
+	for (let one in directOwned(rules, base, top, stamped)) {
+		if (netlink.remove(one.pref, one.cidr, one.table))
+			removed++;
+	}
 
 	return removed;
 };

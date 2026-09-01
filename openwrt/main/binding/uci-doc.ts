@@ -69,6 +69,8 @@ echo '===NETWORK==='
 uci -q show network 2>/dev/null | grep -E '^network\.[^.=]+=|\.(ip4table|ip6assign|gateway)=' || true
 echo '===FIREWALL==='
 uci -q show firewall 2>/dev/null | grep -E '=zone$|=defaults$|\.(name|network|device|masq|flow_offloading)=' || true
+echo '===DEFAULTROUTE==='
+ip -o -4 route list table main 2>/dev/null | grep '^default' || true
 echo '===SYSCTL==='
 for key in \
   net.netfilter.nf_conntrack_max \
@@ -81,6 +83,38 @@ do
 done
 exit 0
 `
+
+/**
+ * The netdevs the router's main table currently sends everything else out of.
+ *
+ * This is the only statement about direction that is not an inference. An
+ * uplink is the interface the default route leaves by - that is what the word
+ * means - and the kernel answers it directly. Everything else the classifier
+ * weighs is a guess at this fact from the shape of /etc/config, and each of
+ * those guesses has now been wrong on somebody's router.
+ *
+ * A device rather than a logical interface, because `ip route` speaks netdevs;
+ * the caller matches it against `device` and `l3Device`. Several are possible
+ * and all of them count: a load-balanced default prints one line per nexthop,
+ * and a router with two live uplinks has two.
+ */
+function defaultRouteDevices(raw: string): ReadonlySet<string> {
+  const devices = new Set<string>()
+  for (const line of raw.split(/\r?\n/)) {
+    // `default via 192.168.1.1 dev eth2 proto static src 192.168.1.100`, and
+    // every `nexthop ... dev ethN` of a load-balanced default.
+    //
+    // The `-o` on the command above is what makes that second half true. An
+    // ECMP route is printed as a bare `default proto static` line followed by
+    // indented `nexthop` continuations, so `grep '^default'` kept the one line
+    // that carries no `dev` at all and the module found no uplink on exactly
+    // the routers that have two. `-o` folds each route onto one line.
+    for (const match of line.matchAll(/\bdev\s+([A-Za-z0-9._-]+)/g)) {
+      if (match[1]) devices.add(match[1])
+    }
+  }
+  return devices
+}
 
 function probeTruncated(): Error {
   return new Error(
@@ -341,6 +375,7 @@ export async function preparationProbe(
     dhcp: parseUciDocument(sections.get('DHCP') ?? ''),
     network: parseUciDocument(sections.get('NETWORK') ?? ''),
     firewall: parseUciDocument(sections.get('FIREWALL') ?? ''),
+    defaultRouteDevices: defaultRouteDevices(sections.get('DEFAULTROUTE') ?? ''),
     sysctl
   }
 }

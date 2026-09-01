@@ -15,7 +15,7 @@ import {
   type ModuleCheckFinding,
   type ModuleCheckReport
 } from '@shared/check'
-import { hasFeature } from '../agent'
+import { hasFeature, wanbindLayout } from '../agent'
 import {
   allocateWanTables,
   buildWanTableIndex,
@@ -40,8 +40,9 @@ import {
   wanIsLanRefusal
 } from './layout'
 import { wanbindPrefBases } from './probe'
+import { routerDeps, routerOwnsDirect } from './router'
 import { leaseAddresses, normalizeMac, resolveTarget } from './target'
-import type { DirectPlan, DirectRuntime } from './types'
+import type { DirectPlan, DirectRow, DirectRuntime } from './types'
 
 /** The protocols a WAN port can be running; anything else cannot carry a bind. */
 const WAN_PROTOS = ['pppoe', 'dhcp', 'static']
@@ -76,6 +77,22 @@ export async function checkDirect(
   const rules = runtime.options.rules()
   const data = runtime.store.read()
   const pending = [...runtime.preparations.values()].map((plan) => plan.record)
+  /**
+   * Which half will hold this binding once it exists, asked once for the whole
+   * report.
+   *
+   * Half the gate below is about numbers this module allocates - a free
+   * preference in its own band, a routing table it would write to the WAN
+   * section, a ceiling on how many records the per-router document keeps - and
+   * on a router that keeps its own bindings this module allocates none of them.
+   * Every one of those tests is therefore skipped rather than answered
+   * pessimistically, because each would be a refusal about a rule this module
+   * is not going to write. What replaces them is one question with the same
+   * shape, asked of the half that does allocate: whether the daemon's own band
+   * is usable.
+   */
+  const routerOwned = routerOwnsDirect(runtime)
+  const held: readonly DirectRow[] = routerOwned ? (runtime.routerRows ?? []) : []
   const name = textField(values, 'name')
   const targetKind = textField(values, 'targetKind').toLowerCase()
   const address = textField(values, 'address')
@@ -87,7 +104,8 @@ export async function checkDirect(
     // `ctx.log`, and a newline inside it forges a whole log line.
     findings.push({ level: 'error', label: 'Binding name must contain 1-80 characters on one line' })
   } else if (
-    [...data.direct, ...pending].some((entry) => entry.name.toLowerCase() === name.toLowerCase())
+    [...data.direct, ...pending].some((entry) => entry.name.toLowerCase() === name.toLowerCase()) ||
+    held.some((row) => row.name.toLowerCase() === name.toLowerCase())
   ) {
     findings.push({ level: 'error', label: `A one-to-one binding named "${name}" already exists` })
   }
@@ -166,6 +184,37 @@ export async function checkDirect(
     findings.push({ level: 'pass', label: `${wan} is a ${wanIface.proto} WAN port` })
   }
 
+  // On a router that keeps its own bindings, ask it what it makes of the same
+  // interface and say so when the two disagree.
+  //
+  // Both halves weigh the same statements now and were checked against a real
+  // router giving identical answers, but they read them by different roads -
+  // this one out of one filtered `uci show` over SSH, the daemon out of the
+  // files and netifd and rtnl directly - and the daemon is the half that will
+  // act. A disagreement is therefore not a tie to be broken here: it means one
+  // of the two is reading the router wrongly, and the operator is about to be
+  // told something by a page that the thing doing the work does not believe.
+  // Surfaced rather than resolved, because silently preferring either one is
+  // how the two would go on drifting without anybody finding out.
+  if (routerOwned && wanIface) {
+    const deps = routerDeps(runtime)
+    const said = deps ? await wanbindLayout(deps) : null
+    // Every step guarded, because this is a reply off a router: an older
+    // daemon, a half-upgraded one, or one answering a shape this build does
+    // not know about must cost the operator a missing cross-check and never
+    // the create itself.
+    const list = said?.ok && Array.isArray(said.data?.interfaces) ? said.data.interfaces : []
+    const theirs = list.find((entry) => entry?.name === wan)
+    const mine = wanVerdict?.role
+    if (theirs?.role && mine && theirs.role !== mine) {
+      findings.push({
+        level: 'warning',
+        label: `This app and the router disagree about what ${wan} is`,
+        detail: `The app reads it as ${mine} and the router reads it as ${theirs.role}. The router is the half that writes the rule, so its answer is the one that will decide - it says so because ${[...(theirs.uplinkEvidence ?? []), ...(theirs.lanEvidence ?? [])].join(', ') || 'its configuration does not settle it'}. One of the two is reading this router wrongly; nothing here can tell which, and it is worth knowing before a binding is created on the strength of either.`
+      })
+    }
+  }
+
   // -------------------------------------------------------------------- LAN
   const search = lanCandidates(model, wan, layout)
   const lanIface = chooseLan(search, resolved)
@@ -226,6 +275,28 @@ export async function checkDirect(
   }
 
   // ----------------------------------------------------------------- claims
+  // The router's own bindings first, because on that half they are the whole
+  // population and the records below are only whatever the handover has not
+  // moved yet. The comparison is the same one: the same target, or a MAC whose
+  // current lease is an address something else already steers.
+  for (const row of held) {
+    // Against the parsed target rather than the typed text: the router spells a
+    // MAC back in lower-case colon form, and a form filled in with dashes or
+    // capitals would otherwise pass a comparison it should have failed.
+    const clash =
+      (target?.kind === 'ip' && row.targetKind === 'ip' && row.target === target.ip) ||
+      (target?.kind === 'mac' &&
+        row.targetKind === 'mac' &&
+        row.target.toLowerCase() === target.mac) ||
+      (resolved !== '' && row.address === resolved)
+    if (!clash) continue
+    findings.push({
+      level: 'error',
+      label: `That address is already bound by "${row.name}" on the router`,
+      detail: 'One address can only be steered one way; edit or delete that binding instead.'
+    })
+    break
+  }
   for (const other of [...data.direct, ...pending]) {
     const clash =
       (target?.kind === 'mac' && other.target.kind === 'mac' && other.target.mac === target.mac) ||
@@ -251,10 +322,27 @@ export async function checkDirect(
     })
   }
   const uciTables = probe ? networkTables(probe.network) : new Map<string, number>()
-  const tableAdds: TablePreparation[] = wanIface
-    ? allocateWanTables({ wans: [wan], uciTables, tableIndex, rules }, findings)
-    : []
-  const table = uciTables.get(wan) ?? tableAdds[0]?.table ?? 0
+  // Allocated on both halves, and only *written* by one of them.
+  //
+  // The daemon reads netifd's live table for the WAN and refuses when there is
+  // none, which on a stock OpenWrt is every WAN: `option ip4table` is not part
+  // of a default install. So leaving the number to the router meant a create
+  // that passed every check and then failed inside the job with a sentence
+  // telling the operator to go and hand-edit /etc/config/network - which is the
+  // one thing this whole gate exists to prevent. The number is stamped here on
+  // both halves; `tableAdds` stays empty on the router-owned one because the
+  // daemon is what writes the section, in the right order, beside the rule.
+  const tableAdds: TablePreparation[] =
+    wanIface && !routerOwned
+      ? allocateWanTables({ wans: [wan], uciTables, tableIndex, rules }, findings)
+      : []
+  const routerTable =
+    wanIface && routerOwned
+      ? (uciTables.get(wan) ??
+        allocateWanTables({ wans: [wan], uciTables, tableIndex, rules }, findings)[0]?.table ??
+        0)
+      : 0
+  const table = routerOwned ? routerTable : (uciTables.get(wan) ?? tableAdds[0]?.table ?? 0)
 
   let lanZone = ''
   let destinationZones: string[] = []
@@ -290,7 +378,7 @@ export async function checkDirect(
   // `ip4table` claim on the router with nothing left to name them. Bindings
   // still being prepared count, because each of them is a record about to
   // arrive.
-  if (data.direct.length + pending.length >= MAX_STORED_BINDINGS) {
+  if (!routerOwned && data.direct.length + pending.length >= MAX_STORED_BINDINGS) {
     findings.push({
       level: 'error',
       label: `This router already has the ${MAX_STORED_BINDINGS} one-to-one bindings the module can keep a record of`,
@@ -299,17 +387,46 @@ export async function checkDirect(
   }
 
   // ---------------------------------------------------------- the band itself
-  const pref = freeDirectPref(rules.directPrefBase, data.direct, pending, model)
-  if (pref === 0) {
+  // On a router that keeps its own bindings the band is the daemon's, and so is
+  // the number: `bind` allocates it, from a range this module cannot see and
+  // must not guess at. All this side can do is refuse while the daemon says
+  // that range is unsafe to allocate from - which it does say, in a sentence,
+  // and which is repeated here rather than reworded.
+  if (routerOwned) {
+    const band = runtime.routerBand
+    if (!band) {
+      findings.push({
+        level: 'warning',
+        label: 'The router has not yet said which rule priorities it uses for one-to-one bindings',
+        detail: REFRESH_HINT
+      })
+    } else if (!band.usable) {
+      findings.push({
+        level: 'error',
+        label: 'The router will not allocate a rule priority for a new one-to-one binding',
+        detail: `${band.reason ?? 'It did not say why.'} That is a setting on the router - \`option direct_pref_base\` in /etc/config/bm_wanbind - and nothing on this side can move it.`
+      })
+    }
+    findings.push({
+      level: 'info',
+      label: 'This router keeps its own one-to-one bindings',
+      detail: 'bm-wanbind writes the rule and reconciles it on boot and on every interface change, with or without this module connected - so the binding is created in the router\'s configuration rather than recorded here, and closing the app does not stop it working.'
+    })
+  }
+  const pref = routerOwned ? 0 : freeDirectPref(rules.directPrefBase, data.direct, pending, model)
+  if (!routerOwned && pref === 0) {
     findings.push({
       level: 'error',
       label: 'No free priority remains in the one-to-one band',
       detail: `Every priority from ${rules.directPrefBase} to ${rules.directPrefBase + DIRECT_PREF_SPAN - 1} is claimed by a binding or by a rule already on the router. Delete a binding you no longer need, or move "One-to-one rule priority base" under Module settings, Advanced rules.`
     })
   }
-  bandFindings(runtime, findings)
+  // Both of these compare this module's band against somebody else's, and both
+  // are about rules this module writes. A router that writes them itself has
+  // one allocator for both bands and needs neither.
+  if (!routerOwned) bandFindings(runtime, findings)
   try {
-    for (const base of await wanbindPrefBases(runtime)) {
+    for (const base of routerOwned ? [] : await wanbindPrefBases(runtime)) {
       if (rules.directPrefBase + DIRECT_PREF_SPAN <= base) continue
       findings.push({
         level: 'error',
@@ -329,7 +446,12 @@ export async function checkDirect(
   if (lanIface) instanceOverlapFinding(runtime, lanIface.name, findings)
 
   const ok = !hasBlockingFinding(findings)
-  if (!ok || !target || !lanIface || !cidr || table <= 0 || pref === 0) {
+  // The table is required of both halves now: the daemon has no way to invent
+  // one for a WAN whose section carries none, and a create that reaches the job
+  // without a table is a create that fails there instead of here. The
+  // preference is still the stamping half's alone - the daemon numbers its own
+  // bindings out of its own band, and zero is the honest value for that.
+  if (!ok || !target || !lanIface || !cidr || table <= 0 || (!routerOwned && pref === 0)) {
     return { ok: false, findings }
   }
   const record: DirectBindingRecord = {
@@ -348,17 +470,24 @@ export async function checkDirect(
     slot: freeDirectSlot(data.direct, pending),
     createdAt: Date.now()
   }
+  const downClause =
+    whenDown === 'hold'
+      ? 'is parked on a table with nothing in it and has no way out'
+      : "is re-pointed at the main routing table, which is the router's default connection"
   findings.push({
     level: 'pass',
     label: `Will bind ${resolved || (target.kind === 'mac' ? target.mac : target.ip)} to ${wan}`,
-    detail: `Priority ${pref}, routing table ${table}; when ${wan} is unusable this address ${whenDown === 'hold' ? `is parked on table ${rules.catchAllTable} and has no way out` : "is re-pointed at the main routing table, which is the router's default connection"}.`
+    detail: routerOwned
+      ? `The router allocates the rule priority and reads ${wan}'s own routing table; when ${wan} is unusable this address ${downClause}.`
+      : `Priority ${pref}, routing table ${table}; when ${wan} is unusable this address ${whenDown === 'hold' ? `is parked on table ${rules.catchAllTable} and has no way out` : "is re-pointed at the main routing table, which is the router's default connection"}.`
   })
   const plan: DirectPlan = {
     record,
     lanCidr: cidr,
     lanZone,
     destinationZones: [...destinationZones].sort(),
-    ...(tableAdds[0] ? { tableAdd: tableAdds[0] } : {})
+    ...(tableAdds[0] ? { tableAdd: tableAdds[0] } : {}),
+    ...(routerOwned ? { routerOwned: true } : {})
   }
   return { ok: true, token: runtime.checkSession.issue(values, plan), findings }
 }

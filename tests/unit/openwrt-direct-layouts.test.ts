@@ -45,6 +45,14 @@ interface Layout {
   dhcp: string[]
   network: string[]
   firewall: string[]
+  /**
+   * What `ip -4 route list table main` prints for the default, which is the one
+   * statement about direction that is not read off /etc/config. Optional because
+   * most routers here are settled by their protocol long before it is asked, and
+   * a fixture that omits it is a router whose default route the probe could not
+   * read - which has to keep working too.
+   */
+  routes?: string[]
 }
 
 /** An interface with an IPv4 address, however it is wired underneath. */
@@ -163,6 +171,8 @@ function probeText(layout: Layout): string {
     ...layout.network,
     '===FIREWALL===',
     ...layout.firewall,
+    '===DEFAULTROUTE===',
+    ...(layout.routes ?? []),
     '===SYSCTL===',
     'net.netfilter.nf_conntrack_max=65536'
   ].join('\n')
@@ -537,7 +547,10 @@ describe('the WAN the form named', () => {
       ...zone(0, 'lan', ['lan']),
       ...zone(1, 'guest', ['guest'], true),
       ...zone(2, 'wan', ['wan'])
-    ]
+    ],
+    // The fact that settles it, and the reason the address it carries no longer
+    // has to: this interface is where everything else leaves by.
+    routes: ['default via 198.51.100.33 dev eth1 proto static']
   }
 
   it('takes a routed WAN whose zone does no NAT, even beside one that does', async () => {

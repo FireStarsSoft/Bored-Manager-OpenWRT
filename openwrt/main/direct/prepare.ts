@@ -23,8 +23,10 @@ import {
 } from '../binding'
 import type { JobSpec } from '../jobs'
 import { ifaceDevices } from '../util'
+import { wanbindBind, wanbindSection } from '../agent'
 import { lanForAddress } from './allocate'
 import { runDirectPass } from './pass'
+import { NOT_ROUTER_OWNED, refreshRouterRows, routerDeps, routerOwnsDirect } from './router'
 import { exclusive } from './runtime'
 import { leaseAddresses, resolveTarget, targetLabel } from './target'
 import { emitSnapshot } from './view'
@@ -57,7 +59,9 @@ export async function applyDirect(runtime: DirectRuntime, raw: unknown): Promise
   const problem = reservePreparation(runtime, plan)
   if (problem) return { ok: false, error: problem }
   const progress: PreparationProgress = { forwardingInstalled: false }
-  const spec = preparationJob(runtime, plan, progress)
+  const spec = plan.routerOwned
+    ? routerCreateJob(runtime, plan)
+    : preparationJob(runtime, plan, progress)
   if (runtime.options.jobs) {
     try {
       const job = runtime.options.jobs.start(spec)
@@ -145,10 +149,15 @@ async function dropOrphanedForwardings(
 function reservePreparation(runtime: DirectRuntime, plan: DirectPlan): string | null {
   const record = plan.record
   for (const other of runtime.preparations.values()) {
+    // The two numbers are compared only when there are two numbers. A binding
+    // the router will allocate for carries zero in both, so comparing them
+    // would have every router-owned create in flight collide with every other
+    // one and refuse a second Save that has nothing to do with the first.
+    const numbered = record.pref > 0 && other.record.pref > 0
     const clash =
       other.record.id === record.id ||
-      other.record.pref === record.pref ||
-      other.record.slot === record.slot ||
+      (numbered && other.record.pref === record.pref) ||
+      (numbered && other.record.slot === record.slot) ||
       other.record.name.toLowerCase() === record.name.toLowerCase() ||
       targetLabel(other.record.target) === targetLabel(record.target)
     if (clash) {
@@ -161,6 +170,75 @@ function reservePreparation(runtime: DirectRuntime, plan: DirectPlan): string | 
 
 export function releasePreparation(runtime: DirectRuntime, id: string): void {
   runtime.preparations.delete(id)
+}
+
+/**
+ * Creating a binding on a router that keeps its own.
+ *
+ * One step, because there is one thing to do: the daemon writes the rule, the
+ * `option ip4table` and the firewall forwarding itself, in the right order,
+ * from the section it has just been given. Doing any of that from here would be
+ * writing the same three things twice - and the ip rule half of it into a band
+ * the daemon sweeps, which is the failure the whole boundary exists to prevent.
+ *
+ * `pref` and `table` are not sent. This is a create, so there is no rule
+ * standing anywhere that a number would have to match, and the daemon allocates
+ * from a band this module cannot see: sending a guess would be the one way to
+ * collide with a binding somebody made at a router shell an hour ago.
+ *
+ * The verdict is asked again before the call and not merely trusted from the
+ * check, for the reason every step of the other job revalidates: minutes can
+ * pass between the two, and a package removed in that window would turn this
+ * into a call to a daemon that is no longer there.
+ */
+function routerCreateJob(runtime: DirectRuntime, plan: DirectPlan): JobSpec {
+  const record = plan.record
+  return {
+    kind: 'direct-prepare',
+    label: `Prepare one-to-one binding ${record.name}`,
+    items: [
+      {
+        name: `Ask the router to bind ${targetLabel(record.target)} to ${record.wan}`,
+        run: async (cancelled) => {
+          if (cancelled()) throw new Error('cancelled')
+          if (!routerOwnsDirect(runtime)) throw new Error(NOT_ROUTER_OWNED)
+          const deps = routerDeps(runtime)
+          if (!deps) throw new Error(NOT_ROUTER_OWNED)
+          const section = wanbindSection(record.id)
+          const written = await wanbindBind(deps, {
+            id: section,
+            name: record.name,
+            ...(record.target.kind === 'ip'
+              ? { ip: record.target.ip }
+              : { mac: record.target.mac }),
+            wan: record.wan,
+            ...(record.lan ? { lan: record.lan } : {}),
+            whenDown: record.whenDown,
+            enabled: true
+          })
+          if (!written.ok) {
+            throw new Error(written.error ?? 'the router would not create that binding')
+          }
+          // No record is written here, and that is the whole architecture in one
+          // absent line: the section on the router IS the binding, and a copy on
+          // this side would be a second description of it that nothing keeps in
+          // step - and that would come back to life if the package were ever
+          // removed, writing a rule for a binding somebody had since deleted.
+          runtime.options.event?.(
+            'created',
+            `one-to-one binding ${record.name} sends ${targetLabel(record.target)} through ${record.wan}, and the router keeps it`
+          )
+          await refreshRouterRows(runtime)
+          runtime.options.requestDump?.()
+          return section
+        }
+      }
+    ],
+    onError: 'abort',
+    onFinished: async () => {
+      releasePreparation(runtime, record.id)
+    }
+  }
 }
 
 function preparationJob(
@@ -294,6 +372,16 @@ async function installBinding(runtime: DirectRuntime, plan: DirectPlan): Promise
 async function revalidate(runtime: DirectRuntime, plan: DirectPlan): Promise<void> {
   const record = plan.record
   if (runtime.disposed || !runtime.ctx.connected) throw new Error('router disconnected')
+  // The other half of the question `routerCreateJob` asks. `plan.routerOwned`
+  // was stamped when the form was checked, and `apk add bm-wanbind` lands
+  // between two readiness cycles - so a job that has sat in the queue while
+  // that happened would take the SSH path and write an `ip rule` into a band
+  // the daemon now owns and reconciles. Two writers of one rule is the state
+  // this module has no way to reason about, and it is the reason the boundary
+  // is re-asked at every step rather than trusted from the plan.
+  if (routerOwnsDirect(runtime)) {
+    throw new Error('this router now keeps its own one-to-one bindings; check again')
+  }
   const model = runtime.options.latestModel()
   if (!model) throw new Error(NO_SAMPLE)
   const data = runtime.store.read()

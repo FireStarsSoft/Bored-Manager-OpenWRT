@@ -10,6 +10,98 @@ needs OpenWrt **25.12** on the router. The 1.0.x line needs **0.3.3**, for the
 also need the router packages at **2.x** - the rest of the module does not.
 Which release a module build installs is pinned in `main/agent/manifest.ts`.
 
+## 3.3.2
+
+Needs Bored Manager **0.7.0** and the router packages at **2.3.0**, both
+unchanged from 3.3.1 in what they ask of you.
+
+This release was written against a real router. Everything in it was reproduced
+on an OpenWrt 25.12.5 box carrying two LANs and thirty-two PPPoE sessions,
+which is where most of it was found.
+
+### Binding 1-1 refused an address on a LAN carrying public address space
+
+The report: `12.10.10.10` typed into Binding 1-1, answered with *"is on
+LAN_WIRED, which this router uses as an uplink rather than as a LAN"* - about
+an interface handing out 250 DHCP leases in the firewall zone named `lan`.
+
+Three readings had to line up, and all three were wrong:
+
+- **`option gateway` was weighted as heavily as anything else.** That LAN
+  carries one, because there is a second router on it. Any interface may; it is
+  not a statement about which side of this router the interface is on. It is a
+  tie-breaker now and cannot outweigh a decisive reading either way.
+- **An address the public internet routes to counted as evidence of an uplink.**
+  That site runs its LANs on 12.10.x. Squatted ranges, real allocations and
+  CGNAT are all ordinary, and a LAN holding one is still a LAN. **The reading is
+  gone**, not softened.
+- **Nothing asked the kernel.** An uplink is the interface the default route
+  leaves by - that is what the word means, and the router will say it outright.
+  The preparation probe reads `ip -o -4 route list table main` now, and that
+  answer is decisive.
+
+So is a `config dhcp` section actually serving an interface: a router does not
+run a DHCP server on the interface its own address came from. Two decisive
+statements pointing opposite ways gives **unclear**, said out loud, rather than
+being settled by arithmetic.
+
+A refusal also prints what argued the other way. These are sums of small
+readings and the close ones are the ones worth doubting, but a refusal quoted
+only the evidence that won - so a two-against-one verdict reached you looking
+unanimous. It no longer offers a remedy the router has already applied, either.
+
+### A rule this module wrote was reported as a rule it could not write
+
+`ip -o -4 route list table main` is one half of the fix above. The other half
+turned up on the router: **every `ip rule` the daemon writes was recorded as a
+failure.** ucode's rtnl module answers a *dump* with an array and a *write* with
+`null` - on success as well as on failure - so `if (!ok)` read every successful
+write as a failed one. On a router with a binding that is an error line per
+pass saying the address "is not going where its binding says", while the rule
+sits in the kernel exactly where it belongs, and the counters stay at zero for
+ever. The socket's own error is the only thing that tells the two apart, and it
+is what is asked now. This was in 2.2.0 as well.
+
+### The router packages know what a one-to-one binding is
+
+`bm-wanbind` 2.3.0 gains the whole router-side half: `config direct` sections in
+/etc/config/bm_wanbind, an interface classifier that weighs the same statements
+this module does, a reconcile pass, ubus verbs, `bmwan bind`/`unbind`/`layout`,
+and a netifd hotplug hook so a WAN coming back is not waited out on a timer.
+
+**It is deliberately not advertised, and this module does not use it yet.** The
+feature descriptor lists `binding` and not `direct`, so Binding 1-1 is still
+written over SSH the way 3.3.1 wrote it - which is the half these tests cover.
+The reason is honest: on a real router the daemon reports a rule added, with no
+error from the socket, and `ip -4 rule show` has nothing at that priority. The
+same call with the same arguments from a shell on the same router writes the
+rule and reads back - before a dump, after a dump, after three dumps. What is
+different inside the daemon has not been found, and a capability the daemon
+cannot honour would be worse than none: this module would stop writing the
+rules and nothing would start.
+
+Putting `direct` back into `provides` is the whole of what turns it on, once a
+rule written from inside the daemon can be shown to reach the kernel.
+
+### Smaller things, each found by running the code rather than reading it
+
+- The interface classifier on the router read a route's device under `dev`;
+  rtnl answers with `oif`, so the one decisive reading it has was dead. The CI
+  stub answered `null` to every request, which is why no probe could tell "this
+  router has no default route" from "this code cannot read one".
+- A WAN with no `option ip4table` - which is every WAN on a stock OpenWrt - was
+  refused with an instruction to go and hand-edit /etc/config/network. The
+  daemon numbers one itself now, from the base this module's own half uses.
+- `bmwan bind` on an existing binding wiped its name, its LAN and its when-down
+  setting, and switched a deliberately disabled binding back on. A field you do
+  not give keeps what the section has; `--on` is the counterpart to `--off`.
+- `option enabled '0'` on the main section is the *instance* half's switch. It
+  never meant the bindings, and now says so.
+- The monitor called every rule a router-owned daemon wrote "written outside
+  this module" and advised removing it.
+- Removing the packages takes any router-held binding with them, and the
+  uninstall check now names them - this module keeps no copy it could restore.
+
 ## 3.3.1
 
 Needs the same Bored Manager **0.7.0** and OpenWrt **25.12 or newer** that

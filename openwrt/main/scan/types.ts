@@ -257,10 +257,30 @@ export interface ScanEngineOptions {
    * never makes the classifier claim a rule it did not write.
    */
   installed?: () => ReadonlyArray<ScanInstalledAddress>
+  /** The bindings a router-owned daemon holds; see `ScanRouterHeld`. */
+  routerHeld?: () => ReadonlyArray<ScanRouterHeld>
   capabilities: () => OpenWrtCapabilities
 }
 
 /** Everything the classifier needs, gathered once so it stays a pure function. */
+/**
+ * One binding a router keeps for itself.
+ *
+ * The module holds no record of these - the handover deletes its copy once the
+ * daemon confirms, because two records of one binding is the state nothing can
+ * reason about - so they reach the monitor as rows read back off the router
+ * rather than as stored records. Without them every rule bm-wanbind wrote read
+ * as somebody else's, and the page's advice about a foreign rule in this
+ * module's own band is to go and remove it.
+ */
+export interface ScanRouterHeld {
+  name: string
+  wan: string
+  /** The address the daemon has a rule standing for, already resolved. */
+  ip: string
+  pref: number
+}
+
 export interface ScanClassifyInput {
   readout: ScanReadout
   rules: OwrtRules
@@ -270,6 +290,8 @@ export interface ScanClassifyInput {
   assignments: readonly ScanAssignment[]
   /** The rule each one-to-one binding actually has standing; see `ScanInstalledAddress`. */
   installed?: readonly ScanInstalledAddress[]
+  /** The bindings the router holds itself, which this module keeps no record of. */
+  routerHeld?: readonly ScanRouterHeld[]
   capabilities: OpenWrtCapabilities
 }
 

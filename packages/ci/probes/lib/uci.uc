@@ -8,8 +8,18 @@
 //
 // Same shapes as ucode-mod-uci, which is the only reason a probe can drive the
 // real daemon code through it: `set` with three arguments creates a section of
-// that type, with four sets an option, and `foreach` walks sections of one type
-// in file order.
+// that type, with four sets an option, `get` with two answers the section's
+// type and with three the option, `get_all` hands back the whole section, and
+// `foreach` walks sections of one type in file order.
+//
+// One store, shared by every cursor, for the life of the process. That is the
+// arrangement the write paths need rather than a convenience: `service.bind`
+// opens a cursor, writes a section, commits, and then asks `bm.wanbind.config`
+// - which opens a cursor of its own - to read it back and say whether it is a
+// binding this router can act on. A cursor that kept its writes to itself would
+// make every one of those read-backs answer "there is no such section", which
+// is a refusal the daemon then undoes, so the probe would watch a working
+// `bind` fail and leave nothing behind.
 
 let store = {};
 
@@ -37,10 +47,45 @@ const handle = {
 		if (!one)
 			return null;
 
+		// Two arguments is a question about the section itself, and the real
+		// module answers it with the section's *type* - `direct`, `instance`,
+		// `forwarding`. Handing back the section object instead read the same as
+		// "yes, it is there" at all four call sites in the daemon, every one of
+		// which only tests it against null - and told a probe nothing about what
+		// had been written. That is the difference between asserting a `bind`
+		// wrote a binding and asserting it wrote *something*: a call that turned
+		// `config instance 'home'` into `config direct 'home'` - a whole LAN's
+		// pool deleted by a call that was adding one address - would have passed
+		// either way. `get_all` below is the object.
 		if (option == null)
-			return one;
+			return one['.type'];
 
 		return (option in one) ? one[option] : null;
+	},
+
+	/**
+	 * The whole section, or null.
+	 *
+	 * A copy, and that is the point rather than tidiness. A probe asserting that
+	 * an edit left a field alone has to hold the section as it was before the
+	 * write and compare it with the section after, and one that was handed the
+	 * stored object twice would be comparing one object with itself - so the
+	 * fields the write had quietly cleared would agree, and the assertion would
+	 * pass on exactly the fault it was written to catch.
+	 *
+	 * Shallow, like the real module's: an option whose value is a list is the
+	 * same array in both, which no probe here writes through.
+	 */
+	get_all: function(config, section) {
+		let one = pkg(config).sections[section];
+		if (!one)
+			return null;
+
+		let out = {};
+		for (let key in one)
+			out[key] = one[key];
+
+		return out;
 	},
 
 	set: function(config, section, a, b) {

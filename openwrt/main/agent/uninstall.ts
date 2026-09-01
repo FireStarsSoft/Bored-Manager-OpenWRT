@@ -117,6 +117,13 @@ export function checkUninstall(runtime: AgentRuntime, raw: unknown): ModuleCheck
       detail: `Stop ${blocking.instances.join(', ')} on the Connection page first. Removing the packages underneath a running instance would leave its ip rules and its fail-closed catch-all on the router with nothing maintaining them.`
     })
   }
+  if (blocking.bindings.length) {
+    findings.push({
+      level: 'warning',
+      label: `${blocking.bindings.length} one-to-one binding(s) live in this router's own configuration`,
+      detail: `${blocking.bindings.join(', ')} are held by bm-wanbind, not by this module, which is what lets them keep working with the app closed. Removing the packages removes them with it, and nothing here can put them back - this module keeps no copy of a binding the router owns. Write down what they are, or delete them from the Connection page first if you meant to.`
+    })
+  }
   if (blocking.batches.length) {
     findings.push({
       level: 'error',

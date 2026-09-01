@@ -19,6 +19,14 @@ import { isSafeUciValue } from '../uci'
 import { isRecord, textField } from '../util'
 import { runDirectPass } from './pass'
 import { sectionPrefix } from './prepare'
+import {
+  forgetRouterState,
+  routerOwnsDirect,
+  routerRemove,
+  routerRow,
+  routerSetEnabled,
+  routerUpdate
+} from './router'
 import { current, emptyDirectSnapshot, exclusive, runMutationJob } from './runtime'
 import { targetLabel } from './target'
 import { emitSnapshot, republishSnapshot } from './view'
@@ -55,7 +63,30 @@ function removalLines(record: DirectBindingRecord): string[] {
   return [`while ip -4 rule del pref ${record.pref} 2>/dev/null; do :; done`]
 }
 
+/**
+ * Whether this id names a binding the ROUTER keeps rather than one of this
+ * module's own records.
+ *
+ * The test is the id and not the capability, and the difference matters for
+ * exactly one router: one that keeps its own bindings and still has a record
+ * here it has not taken over. The rows for those two sit side by side in one
+ * table - see `direct/router.ts` - and each has to be acted on by whichever
+ * half is actually holding it, or a Delete pressed on the second would be sent
+ * to a router that has never heard of it.
+ */
+function routerHolds(runtime: DirectRuntime, id: string): boolean {
+  if (!routerOwnsDirect(runtime)) return false
+  return !runtime.store.read().direct.some((entry) => entry.id === id)
+}
+
 export async function enableDirect(runtime: DirectRuntime, idRaw: unknown): Promise<OkResult> {
+  const id = String(idRaw ?? '')
+  if (routerHolds(runtime, id)) {
+    const name = routerRow(runtime, id)?.name ?? id
+    return runMutationJob(runtime, 'direct-enable', `Enable binding ${name}`, () =>
+      exclusive(runtime, () => routerSetEnabled(runtime, id, true))
+    )
+  }
   const record = find(runtime, idRaw)
   if (!record) return { ok: false, error: NO_SUCH }
   return runMutationJob(runtime, 'direct-enable', `Enable binding ${record.name}`, () =>
@@ -64,6 +95,13 @@ export async function enableDirect(runtime: DirectRuntime, idRaw: unknown): Prom
 }
 
 export async function disableDirect(runtime: DirectRuntime, idRaw: unknown): Promise<OkResult> {
+  const id = String(idRaw ?? '')
+  if (routerHolds(runtime, id)) {
+    const name = routerRow(runtime, id)?.name ?? id
+    return runMutationJob(runtime, 'direct-disable', `Disable binding ${name}`, () =>
+      exclusive(runtime, () => routerSetEnabled(runtime, id, false))
+    )
+  }
   const record = find(runtime, idRaw)
   if (!record) return { ok: false, error: NO_SUCH }
   return runMutationJob(runtime, 'direct-disable', `Disable binding ${record.name}`, () =>
@@ -72,6 +110,13 @@ export async function disableDirect(runtime: DirectRuntime, idRaw: unknown): Pro
 }
 
 export async function deleteDirect(runtime: DirectRuntime, idRaw: unknown): Promise<OkResult> {
+  const id = String(idRaw ?? '')
+  if (routerHolds(runtime, id)) {
+    const name = routerRow(runtime, id)?.name ?? id
+    return runMutationJob(runtime, 'direct-delete', `Delete binding ${name}`, () =>
+      exclusive(runtime, () => routerRemove(runtime, id))
+    )
+  }
   const record = find(runtime, idRaw)
   if (!record) return { ok: false, error: NO_SUCH }
   return runMutationJob(runtime, 'direct-delete', `Delete binding ${record.name}`, () =>
@@ -110,6 +155,23 @@ async function setEnabled(
     if (!model) return { ok: false, error: NO_SAMPLE }
     const old = record.enabled
     persistEnabled(runtime, id, enabled)
+    if (routerOwnsDirect(runtime)) {
+      // A record left on a router that keeps its own bindings is one the
+      // handover has not managed to move yet. The flag is still worth writing -
+      // it is what the next handover will send - but running a pass here would
+      // put this module back into a priority band the daemon sweeps, which is
+      // the one thing the whole boundary exists to prevent. So the switch is
+      // recorded, and the notice above the table is what says that nothing
+      // carries it out until the router accepts the binding.
+      republishSnapshot(runtime)
+      runtime.options.event?.(
+        enabled ? 'enabled' : 'disabled',
+        `one-to-one binding ${record.name} was switched ${
+          enabled ? 'on' : 'off'
+        }; the router has not taken this binding over yet, so no rule changed`
+      )
+      return { ok: true }
+    }
     const failed = await runDirectPass(runtime, model)
     // Fatal in both directions. A binding shown as switched off while its rule
     // is still on the router is the one inconsistency this file exists to
@@ -140,7 +202,13 @@ async function deleteNow(runtime: DirectRuntime, id: string): Promise<OkResult> 
     if (!record) return { ok: false, error: NO_SUCH }
     const generation = runtime.workGeneration
     try {
-      await execScript(runtime, removalLines(record), 'remove one-to-one binding rule')
+      // Not on a router that keeps its own bindings: its daemon owns every
+      // priority in this band and takes off whatever no section of its own asks
+      // for, so the rule is already going or gone and an `ip rule del` from here
+      // would be this module writing into a range it has handed over.
+      if (!routerOwnsDirect(runtime)) {
+        await execScript(runtime, removalLines(record), 'remove one-to-one binding rule')
+      }
     } catch (error) {
       // The rule is the thing that steers traffic, so this one is fatal: drop
       // the record now and nothing is left that knows the rule exists.
@@ -239,6 +307,10 @@ export async function updateDirect(
 ): Promise<OkResult> {
   const id = String(idRaw ?? '')
   const values = isRecord(valuesRaw) ? valuesRaw : {}
+  // The router's own edit path, when the router is the one holding this
+  // binding. It refuses the same four fields in the same words and changes the
+  // same three; what it cannot do is read a record, because there is not one.
+  if (routerHolds(runtime, id)) return routerUpdate(runtime, id, values)
   const data = runtime.store.read()
   const record = data.direct.find((entry) => entry.id === id)
   if (!record) return { ok: false, error: NO_SUCH }
@@ -438,6 +510,10 @@ export function reset(runtime: DirectRuntime): void {
   runtime.checkSession.clear()
   runtime.memory.clear()
   runtime.preparations.clear()
+  // What was read off the router goes with the rest of it. A reset is a machine
+  // that may not be the same router when it comes back, and rows kept from the
+  // last one would be answered against the next one's ids.
+  forgetRouterState(runtime)
   runtime.latestPayload = emptyDirectSnapshot()
 }
 
@@ -447,4 +523,5 @@ export function dispose(runtime: DirectRuntime): void {
   runtime.checkSession.clear()
   runtime.memory.clear()
   runtime.preparations.clear()
+  forgetRouterState(runtime)
 }

@@ -247,6 +247,7 @@ export class ScanEngine {
       // cannot say that. Read per pass like everything else, so a scan never
       // classifies against a memory the reconcile has already moved on from.
       installed: this.options.installed?.() ?? [],
+      routerHeld: this.options.routerHeld?.() ?? [],
       capabilities: this.options.capabilities()
     })
     if (!this.current(generation)) return ENGINE_STOPPED

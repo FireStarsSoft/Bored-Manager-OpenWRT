@@ -136,8 +136,17 @@ const REQUIREMENTS: Record<RequirementKey, RequirementSpec> = {
     // so refusing on the module's own `ip` binary would block work the router
     // is demonstrably doing. The readback the fast sweep does works on the
     // BusyBox applet either way.
+    //
+    // `direct` is named beside `binding` rather than folded into it because
+    // they are two statements about two halves and a router can make one
+    // without the other: bm-wanbind 2.2.0 owns instances and not one-to-one
+    // bindings, and a router that gained only the newer half would otherwise
+    // have every one-to-one create refused for the sake of an `ip` this module
+    // no longer uses on it.
     met: (caps) =>
-      caps.hasIpRule || (caps.agent.usable && caps.agent.provides.includes('binding')),
+      caps.hasIpRule ||
+      (caps.agent.usable &&
+        (caps.agent.provides.includes('binding') || caps.agent.provides.includes('direct'))),
     detail: (caps) =>
       caps.ip.fullPresent
         ? `Router readiness, in Module settings, has the reason - iproute2 is on this router and \`ip\` is not resolving to it, or this kernel has no policy routing. Neither is fixed by installing a package.`
@@ -273,6 +282,22 @@ const DIRECT_CREATE: readonly RequirementKey[] = [
   'ipRule',
   'netifdRunning'
 ]
+
+/**
+ * All four still apply on a router that keeps its own one-to-one bindings, and
+ * that is worth saying because it is not obvious.
+ *
+ * The work moved; what the work needs did not. The daemon writes the ip rule
+ * over netlink rather than through this module's `ip`, which is why `ipRule`
+ * counts the capability as well as the binary - but it still writes a firewall
+ * forwarding, which needs fw4 loaded, and it still asks netifd which table a
+ * WAN puts its routes in. A router missing any of those refuses the create for
+ * exactly the same reason it always did, in exactly the same sentence, whether
+ * the refusal comes from here or from the daemon a moment later. The one entry
+ * that would have been wrong to keep - a ceiling on the records this module
+ * stores - is not a requirement at all and lives in the create gate, which
+ * skips it on that half.
+ */
 
 /**
  * Every method name in `openwrt/module.json`, and what it needs.

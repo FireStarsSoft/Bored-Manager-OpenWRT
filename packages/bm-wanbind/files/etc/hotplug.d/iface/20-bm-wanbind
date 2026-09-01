@@ -1,0 +1,68 @@
+#!/bin/sh
+# An interface came up or went down. Tell the daemon, and get out of the way.
+#
+# The other half of "reconciled on netifd events". The DHCP hook next door
+# covers a lease changing, and its own comment is honest about what it cannot
+# do: a lease event says nothing about a WAN coming back, so without this a
+# binding's reaction to its port failing or returning is entirely the
+# thirty-second timer in service.uc. That is up to half a minute of an address
+# parked on the unreachable table after its WAN is back, or still pointed at a
+# table netifd has emptied - which is the failure this package exists to deny,
+# arriving through the one door nothing was watching.
+#
+# Sourced, not executed: hotplug-call runs `. $script` inside a subshell. So
+# there is no argv here, only the environment, and `exit` ends the subshell
+# rather than anything that matters.
+#
+# Nothing has to be reloaded for this file to take effect, unlike the DHCP hook:
+# procd reads this directory when the event happens.
+#
+# The filter is the whole design of this script. A router carrying thirty-two
+# PPPoE sessions emits ifup and ifdown for every one of them - at boot, all
+# within a few seconds of each other - and a hook that asked for a full pass on
+# each would spend that boot reconciling, thirty-two times, over a router that
+# is still settling. So two things have to be true before anything is called:
+#
+#   the action is ifup or ifdown, because ifupdate is netifd's running
+#   commentary - a new address, a route replaced, a renewal - and it arrives
+#   constantly on a router that dials, while up and down are the two events a
+#   binding's state actually turns on;
+#
+#   and the interface is one /etc/config/bm_wanbind names out loud. A binding
+#   says which wan it leaves through and which lan it sits behind, and those are
+#   the interfaces whose state cannot be learned thirty seconds late. An
+#   instance's WANs are found by carrier at pass time and are named nowhere in
+#   the file, so those thirty-two sessions cost one grep each and nothing more -
+#   exactly as they do today, with the timer still covering them.
+
+case "$ACTION" in
+	ifup|ifdown) ;;
+	*) exit 0 ;;
+esac
+
+[ -n "$INTERFACE" ] || exit 0
+
+# Every wan and lan named by any section in this package's own config, one per
+# line. One `uci show` rather than a walk over section names, because the walk
+# is a fork per section and this runs on every interface event on the router.
+# The quotes are stripped rather than matched: uci quotes values and older
+# builds do not, and which of the two this router has is not worth finding out
+# the hard way.
+uci -q show bm_wanbind 2>/dev/null |
+	sed -n -e "s/^bm_wanbind\.[^.]*\.wan=//p" -e "s/^bm_wanbind\.[^.]*\.lan=//p" |
+	tr -d "'" |
+	grep -qxF "$INTERFACE" || exit 0
+
+# Two seconds, and failure is not reported. The daemon may be stopped, mid
+# restart, or not yet have published its object - none of which is this script's
+# business, and all of which the thirty-second pass picks up anyway. What must
+# not happen is netifd's event handling blocking on us.
+#
+# No instance is named, and deliberately: `reconcile` with none does the
+# one-to-one bindings as well as the instances, and the bindings are what this
+# hook exists for. The payload is a literal, so unlike the DHCP hook there is
+# nothing here for jshn to protect - no value a client on the LAN chose goes
+# anywhere near it.
+ubus -t 2 call bm.wanbind reconcile '{}' >/dev/null 2>&1
+
+exit 0

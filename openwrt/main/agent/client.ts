@@ -46,7 +46,7 @@ export const PPPOE_OBJECT = 'bm.pppoe'
  * name: a capability can move between packages later without this side having
  * to learn the new arrangement.
  */
-export type AgentFeature = 'binding' | 'pppoe'
+export type AgentFeature = 'binding' | 'pppoe' | 'direct'
 
 /** ubus is local to the router; anything slower than this is a fault. */
 const CALL_TIMEOUT_MS = 30_000
@@ -87,9 +87,34 @@ export function hasFeature(capability: AgentCapability, feature: AgentFeature): 
 
 /** The one sentence for a router whose agent is there but the package is not. */
 export function missingFeature(feature: AgentFeature): string {
-  return feature === 'binding'
-    ? 'This router has the Bored Manager agent but not bm-wanbind, so binding is being done over SSH. Install it from Module settings, Router packages.'
-    : 'This router has the Bored Manager agent but not bm-pppoe-pool, so PPPoE Dialer pools are being created over SSH. Install it from Module settings, Router packages.'
+  if (feature === 'binding') {
+    return 'This router has the Bored Manager agent but not bm-wanbind, so binding is being done over SSH. Install it from Module settings, Router packages.'
+  }
+  if (feature === 'direct') {
+    // Worded about the *version* rather than about the package, because the
+    // router this fires on almost always has bm-wanbind: it has the one that
+    // owns instances and not the one that owns one-to-one bindings. Telling
+    // somebody to install a package they can see installed is how a sentence
+    // stops being read.
+    return 'This router has bm-wanbind, but not a version new enough to own one-to-one bindings, so they are being written over SSH. Update it from Module settings, Router packages.'
+  }
+  return 'This router has the Bored Manager agent but not bm-pppoe-pool, so PPPoE Dialer pools are being created over SSH. Install it from Module settings, Router packages.'
+}
+
+/**
+ * A refusal in the transport's own shape, for a call that never left because
+ * the router does not have the feature it needs.
+ *
+ * Published so that `wanbind.ts` can gate a *method* the way `objectCall` gates
+ * an *object*: `bm.wanbind` exists as soon as the package does, and the four
+ * one-to-one methods arrived a release later than the rest of it. A router with
+ * the older package answers them with a shell error about an unknown method,
+ * and one sentence about the version is worth more than that.
+ */
+export function featureRefusal<T = Record<string, unknown>>(
+  feature: AgentFeature
+): AgentCallResult<T> {
+  return refusal(missingFeature(feature)) as AgentCallResult<T>
 }
 
 /**
@@ -116,7 +141,15 @@ export async function objectCall<T = Record<string, unknown>>(
     ) as AgentCallResult<T>
   }
 
-  if (object === WANBIND_OBJECT && !hasFeature(capability, 'binding')) {
+  // The object, not the method. `bm.wanbind` is there as soon as the package
+  // is, and the package has claimed `binding` since 2.0.0 and `direct` since
+  // 2.3.0 - so either capability is evidence the object exists. Which methods
+  // it answers is a finer question, and `wanbind.ts` asks it per call.
+  if (
+    object === WANBIND_OBJECT &&
+    !hasFeature(capability, 'binding') &&
+    !hasFeature(capability, 'direct')
+  ) {
     return refusal(missingFeature('binding')) as AgentCallResult<T>
   }
 

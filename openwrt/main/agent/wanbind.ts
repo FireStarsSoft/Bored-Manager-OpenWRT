@@ -20,7 +20,15 @@
 import { uciQuote } from '../parse'
 import type { ManagedLayout } from '../records'
 import type { BindingInstanceRecord } from '../store'
-import { objectCall, unwrap, WANBIND_OBJECT, type AgentCallResult, type AgentDeps } from './client'
+import {
+  featureRefusal,
+  hasFeature,
+  objectCall,
+  unwrap,
+  WANBIND_OBJECT,
+  type AgentCallResult,
+  type AgentDeps
+} from './client'
 
 /** A pass over four thousand clients is seconds, not milliseconds. */
 const PASS_TIMEOUT_MS = 60_000
@@ -272,3 +280,235 @@ export function wanbindRemoveLines(id: string): string[] {
   return [`delete bm_wanbind.${wanbindSection(id)}`]
 }
 
+
+// --------------------------------------------------------------------------
+// One-to-one bindings, which the router owns outright from bm-wanbind 2.3.0.
+//
+// The split at the top of this file does not hold here, and the difference is
+// the whole of the architecture change: an *instance* is configuration this
+// module writes and state the daemon reports, but a one-to-one binding is
+// configuration the ROUTER owns. `/etc/config/bm_wanbind` is where it lives,
+// the daemon reconciles it on boot and on netifd events with nothing attached,
+// and this module adds, removes and reads. So there is no `uci batch` writer
+// beside `wanbindInstanceLines` for these, on purpose: writing the section from
+// here would leave two allocators of one priority band with no way to see each
+// other's in-flight work, and the daemon is the one that can also see the rules.
+//
+// Every one of the four is gated on `direct` rather than on `binding`, because
+// a 2.2.0 router provides the second and not the first and would answer with a
+// shell error about an unknown method.
+
+/** One binding as the router reports it - `direct.uc`'s own row, verbatim. */
+export interface WanbindBinding {
+  id: string
+  name: string
+  enabled: boolean
+  /** False when the router's own configuration reader refused the section. */
+  usable: boolean
+  targetKind: 'ip' | 'mac' | ''
+  /** The normalised address or MAC, for a sentence about it. */
+  label: string
+  wan: string
+  lan: string
+  lanCidr: string
+  lanZone: string
+  wanZone: string
+  whenDown: 'hold' | 'fallback'
+  pref: number
+  /** What its rule points at right now; 0 when no rule is written. */
+  table: number
+  /** `option table` as written in the section. */
+  stampedTable: number
+  /** netifd's live `ip4table` for the WAN; 0 when it has none. */
+  wanTable: number
+  /**
+   * Empty only when no pass has reached this binding yet, which is a real
+   * state on a section written a moment ago rather than a failure.
+   */
+  state:
+    | ''
+    | 'bound'
+    | 'held'
+    | 'fallback'
+    | 'stranded'
+    | 'shadowed'
+    | 'waiting'
+    | 'disabled'
+    | 'refused'
+  ip: string
+  /** Seconds, on the router's clock. This side counts in milliseconds. */
+  since: number
+  /** Prose for a person. Never branched on - `state` and `usable` are that. */
+  reason: string
+  shadowedBy: string
+  forwarding: 'ok' | 'missing' | 'wrong' | 'no-lan' | 'no-zone' | ''
+  needsForwarding: boolean
+  needsTable: boolean
+  /** Why the router read this binding's WAN as one of its own LANs, if it did. */
+  evidence: string
+}
+
+/**
+ * The priority band the daemon allocates new bindings from.
+ *
+ * `usable` false is the one condition that has to stop a create outright: the
+ * daemon will not allocate a preference while the band reaches into an
+ * instance's client range, and a module that offered the form anyway would be
+ * collecting an address in order to refuse it after the operator had typed it.
+ */
+export interface WanbindBand {
+  base: number
+  span: number
+  top: number
+  reason: string | null
+  usable: boolean
+}
+
+/** One interface, as the router's own classifier weighs it up. */
+export interface WanbindVerdict {
+  name: string
+  role: 'lan' | 'uplink' | 'unclear'
+  cidr: string
+  device: string
+  zone: string
+  zoneMasquerades: boolean
+  /** Both lists, always. The losing side is the half a refusal has to quote. */
+  lanEvidence: string[]
+  uplinkEvidence: string[]
+}
+
+/**
+ * What `bind` is given. One method for create and for update, because the
+ * router is the source of truth: a module that lost track of what it wrote has
+ * to converge on it rather than make a second binding for one address.
+ *
+ * `pref` and `table` are optional and are omitted on a create, so the daemon
+ * allocates from its own band and reads netifd's live `ip4table` once. They are
+ * sent only when this module is handing over a binding it wrote itself, where
+ * the numbers are what the rule already standing on the router was written
+ * against - see `direct/handover.ts`.
+ */
+export interface WanbindBindSpec {
+  id: string
+  name?: string
+  ip?: string
+  mac?: string
+  wan: string
+  lan?: string
+  whenDown?: 'hold' | 'fallback'
+  pref?: number
+  table?: number
+  enabled?: boolean
+}
+
+export interface WanbindBindReply {
+  ok: boolean
+  binding?: WanbindBinding
+  reason?: string
+}
+
+export interface WanbindUnbindReply {
+  ok: boolean
+  id: string
+  removed: number
+  swept: number
+  /** Non-null on a success too: the section is gone, and something needs a hand. */
+  reason: string | null
+}
+
+export interface WanbindLayoutReply {
+  ok: boolean
+  interfaces: WanbindVerdict[]
+  /** False when the router could not read /etc/config at all. */
+  stated: boolean
+}
+
+/**
+ * `bm.wanbind` answers these four only from 2.3.0, so the version is checked
+ * before the call rather than after the shell error it would otherwise be.
+ */
+function directCall<T>(
+  deps: AgentDeps,
+  method: string,
+  args: Record<string, unknown> = {},
+  timeoutMs?: number
+): Promise<AgentCallResult<T>> {
+  if (!hasFeature(deps.capability(), 'direct')) {
+    return Promise.resolve(featureRefusal<T>('direct'))
+  }
+  return call<T>(deps, method, args, timeoutMs)
+}
+
+/**
+ * Every binding the router has, refused and disabled ones included.
+ *
+ * The refused ones are why `id` defaults to everything: a section the daemon
+ * will not accept installs no rule and appears nowhere else at all, and a list
+ * that quietly dropped it would be a binding the operator created, cannot see
+ * and cannot delete.
+ */
+export function wanbindBindings(
+  deps: AgentDeps,
+  id = ''
+): Promise<AgentCallResult<{ bindings: WanbindBinding[]; band: WanbindBand }>> {
+  return directCall<{ bindings: WanbindBinding[]; band: WanbindBand }>(deps, 'bindings', { id })
+}
+
+/**
+ * Create or update one binding.
+ *
+ * The JSON types matter and are not decorative: the router's ubus policy
+ * declares `pref` and `table` as int32 and `enabled` as bool, and ubus refuses
+ * the whole call on a mismatch - a number sent as a string does not make a
+ * weaker binding, it makes no call at all. Each optional field is omitted
+ * rather than sent empty, because on an update an absent field means "keep what
+ * the section has" - and so, now, does an empty one. The daemon has no spelling
+ * for "clear it": an edit that says only which WAN an address leaves by must not
+ * also wipe the name somebody gave it, and inventing a sentinel for clearing
+ * would be a second spelling of nothing for the two halves to disagree about.
+ * A field is emptied at a router shell, with `uci delete`.
+ */
+export async function wanbindBind(
+  deps: AgentDeps,
+  spec: WanbindBindSpec
+): Promise<AgentCallResult<WanbindBindReply>> {
+  const args: Record<string, unknown> = { id: spec.id, wan: spec.wan }
+  if (spec.name != null) args.name = spec.name
+  if (spec.ip) args.ip = spec.ip
+  if (spec.mac) args.mac = spec.mac
+  if (spec.lan) args.lan = spec.lan
+  if (spec.whenDown) args.when_down = spec.whenDown
+  if (spec.pref != null) args.pref = Math.trunc(spec.pref)
+  if (spec.table != null) args.table = Math.trunc(spec.table)
+  if (spec.enabled != null) args.enabled = spec.enabled
+  return unwrap(await directCall<WanbindBindReply>(deps, 'bind', args, PASS_TIMEOUT_MS))
+}
+
+/**
+ * Remove one binding, section and rule together.
+ *
+ * A success can still carry a `reason`, and it is passed on rather than
+ * swallowed: the section is gone either way, and the sentence is about
+ * something left behind that needs a hand - a preference written outside the
+ * band the daemon sweeps. Nothing else will ever mention it again.
+ */
+export async function wanbindUnbind(
+  deps: AgentDeps,
+  id: string
+): Promise<AgentCallResult<WanbindUnbindReply>> {
+  return unwrap(await directCall<WanbindUnbindReply>(deps, 'unbind', { id }, PASS_TIMEOUT_MS))
+}
+
+/**
+ * The router's own reading of its interfaces.
+ *
+ * The same three decisive statements this module's `direct/layout.ts` makes,
+ * made where the kernel's default route can be asked for outright rather than
+ * inferred from the shape of /etc/config. A refusal is never an empty interface
+ * list: an empty list would say this router has no interfaces at all.
+ */
+export async function wanbindLayout(
+  deps: AgentDeps
+): Promise<AgentCallResult<WanbindLayoutReply>> {
+  return unwrap(await directCall<WanbindLayoutReply>(deps, 'layout'))
+}

@@ -24,7 +24,7 @@ import { debug, err } from 'bm.log';
 
 // `const` is a keyword, so this cannot be destructured in an import - which is
 // why the in-tree ucode that uses nl80211 spells it `nl80211.const.X` too.
-const C = rtnl.const;
+const C = rtnl.const ?? {};
 
 /** The last netlink complaint, worded for a log line. */
 function reason() {
@@ -92,18 +92,34 @@ function payload(pref, cidr, table) {
  * kernel allows and nothing here wants, and being told one already existed is
  * more useful than ending up with two.
  */
-export function add(pref, cidr, table) {
-	let ok;
+/**
+ * Whether the write that just went out actually failed.
+ *
+ * `rtnl.request` answers a *dump* with an array and a write with **null**, on
+ * success as well as on failure - so the natural `if (!ok)` reads every rule
+ * this module has ever written as a rule it could not write. On a real router
+ * that meant an `err()` line per binding per pass saying the address "is not
+ * going where its binding says", while the rule sat in the kernel exactly where
+ * it belonged, and the pass counters stayed at zero for ever.
+ *
+ * The socket's own error is the only thing that distinguishes the two. Nothing
+ * here can be inferred from the return value.
+ */
+function failed() {
+	let text = rtnl.error();
+	return type(text) == 'string' && length(text) > 0;
+}
 
+export function add(pref, cidr, table) {
 	try {
-		ok = rtnl.request(C.RTM_NEWRULE, C.NLM_F_CREATE | C.NLM_F_EXCL, payload(pref, cidr, table));
+		rtnl.request(C.RTM_NEWRULE, C.NLM_F_CREATE | C.NLM_F_EXCL, payload(pref, cidr, table));
 	}
 	catch (e) {
 		debug(sprintf('cannot add rule pref %d from %s table %d: %s', pref, cidr, table, e));
 		return false;
 	}
 
-	if (!ok) {
+	if (failed()) {
 		debug(sprintf('cannot add rule pref %d from %s table %d: %s', pref, cidr, table, reason()));
 		return false;
 	}
@@ -119,17 +135,15 @@ export function add(pref, cidr, table) {
  * somebody else happened to put at that number.
  */
 export function remove(pref, cidr, table) {
-	let ok;
-
 	try {
-		ok = rtnl.request(C.RTM_DELRULE, 0, payload(pref, cidr, table));
+		rtnl.request(C.RTM_DELRULE, 0, payload(pref, cidr, table));
 	}
 	catch (e) {
 		debug(sprintf('cannot remove rule pref %d from %s table %d: %s', pref, cidr, table, e));
 		return false;
 	}
 
-	if (!ok) {
+	if (failed()) {
 		debug(sprintf('cannot remove rule pref %d from %s table %d: %s', pref, cidr, table, reason()));
 		return false;
 	}

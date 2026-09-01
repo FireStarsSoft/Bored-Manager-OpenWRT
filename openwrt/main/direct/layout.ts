@@ -30,7 +30,7 @@ import {
   type UciDocument
 } from '../binding'
 import type { IfaceState, RouterModel } from '../types'
-import { ifaceDevices, sameSubnet, uciBoolean } from '../util'
+import { ifaceDevices, uciBoolean } from '../util'
 import { lanForAddress } from './allocate'
 import type { IfaceRole, IfaceVerdict, LanSearch, RouterLayout } from './types'
 
@@ -64,8 +64,6 @@ const SERVING_OPTIONS = ['limit', 'ra', 'dhcpv6']
  * strong-looking fact this used to rest on turned out not to be a fact at all.
  */
 const WEIGHT = {
-  /** A dnsmasq section that is configured to hand out leases on it. */
-  servesDhcp: 3,
   /** A dnsmasq section that names it without switching itself off. */
   namedByDhcp: 1,
   /** The only dnsmasq section naming it sets `option ignore`, as a WAN's does. */
@@ -74,40 +72,10 @@ const WEIGHT = {
   delegatesPrefix: 1,
   /** A firewall zone that does not masquerade on a router where another does. */
   quietZone: 1,
-  /** `option gateway`, which names a next hop that is off this router. */
-  gateway: 3,
+  /** `option gateway` on an interface the router still lets install a default. */
+  gateway: 2,
   /** A firewall zone that masquerades, which is what a WAN zone is for. */
-  masquerades: 2,
-  /**
-   * An address the public internet routes to, which no LAN behind NAT has.
-   * Counted only where some other statement already reads uplink: both ends of
-   * a routed prefix carry one, so alone it cannot tell them apart.
-   */
-  routableAddress: 2
-}
-
-/**
- * The IPv4 blocks a device is *given* rather than reached at.
- *
- * An address outside all of them is one the public internet routes to, and that
- * is uplink evidence worth having for one narrow reason: a router with a routed
- * prefix from its ISP may run its WAN zone without masquerading, and on a
- * router that also has a masquerading guest zone the "quiet zone" reading below
- * would otherwise call that WAN a LAN and refuse a perfectly good create.
- */
-const PRIVATE_BLOCKS: ReadonlyArray<readonly [string, number]> = [
-  ['0.0.0.0', 8],
-  ['10.0.0.0', 8],
-  ['100.64.0.0', 10],
-  ['127.0.0.0', 8],
-  ['169.254.0.0', 16],
-  ['172.16.0.0', 12],
-  ['192.168.0.0', 16],
-  ['240.0.0.0', 4]
-]
-
-function isRoutableIpv4(addr: string): boolean {
-  return !PRIVATE_BLOCKS.some(([network, prefix]) => sameSubnet(addr, network, prefix))
+  masquerades: 2
 }
 
 /** Past every weight added together, for the protocols that admit no argument. */
@@ -197,20 +165,8 @@ interface Statements {
   masquerading: ReadonlyMap<string, boolean>
   dhcpSections: ReadonlyMap<string, DhcpStatement>
   anyMasquerade: boolean
-  /**
-   * Whether some interface on this router states, in a way that is about
-   * direction rather than about addressing, that it faces outwards: it dials or
-   * takes a lease, it names a next hop, or its zone masquerades.
-   *
-   * It exists for one reading. Both ends of a routed prefix carry a public
-   * address, so `routableAddress` cannot tell an ISP-facing WAN from the DMZ the
-   * block is routed to. Where the router has already named an uplink some other
-   * way, a second public-addressed interface with nothing else to say for itself
-   * is the downstream end and the reading is withheld; where it has not, the
-   * public address is the only thing pointing outwards on the whole router and
-   * is exactly the evidence `PRIVATE_BLOCKS` was written for.
-   */
-  outwardElsewhere: boolean
+  /** The netdevs the main table's default route leaves by, straight from the kernel. */
+  defaultRouteDevices: ReadonlySet<string>
 }
 
 function weigh(
@@ -239,6 +195,15 @@ function weigh(
       `it runs ${iface.proto}, so this router is a client of the network on the other side of it`
     )
   }
+  // Decisive, and the only statement here that is not an inference. An uplink is
+  // the interface everything else leaves by - that is what the word means - and
+  // the kernel answers it outright. Every other reading below is this fact
+  // guessed at from the shape of /etc/config, and each of those guesses has by
+  // now been wrong on somebody's router.
+  if (ifaceDevices(iface).some((device) => stated.defaultRouteDevices.has(device))) {
+    uplinkScore += DECISIVE
+    uplinkEvidence.push("the router's default route leaves by it")
+  }
   // The statement that settles the one router nothing else here can read: an
   // uplink running the static protocol, on a private address, with no dnsmasq
   // stub to switch itself off and no masquerading zone. A modem in bridge mode
@@ -253,6 +218,12 @@ function weigh(
   // like it touched this file, so the two are held together from the outside,
   // by tests/unit/openwrt-gateway-signal.test.ts running the real filter over a
   // written-down router rather than handing this function a probe by hand.
+  // `option gateway` says less than it looks like it says, and it used to be
+  // weighted as heavily as anything here. Any interface may carry one - a LAN
+  // with an upstream box on it is written exactly that way - so on a real
+  // router `LAN_WIRED`, handing out 250 leases in the zone named `lan`, was
+  // called an uplink on the strength of this line alone. It is a tie-breaker
+  // now, and cannot outweigh a single decisive statement either way.
   if (probe?.network.values.get(`network.${iface.name}.gateway`)) {
     uplinkScore += WEIGHT.gateway
     uplinkEvidence.push('/etc/config/network gives it a default gateway')
@@ -261,22 +232,15 @@ function weigh(
     uplinkScore += WEIGHT.masquerades
     uplinkEvidence.push(`it is in ${zonePhrase(zone)}, which masquerades`)
   }
-  // Withheld from an interface that says nothing else outward on a router where
-  // something else does. Both ends of a routed prefix carry a public address -
-  // the ISP-facing one and the DMZ the block is routed to - so on its own this
-  // reading called the DMZ an uplink, 2 against the 1 its quiet zone was worth,
-  // and Binding 1-1 refused a public server on it, which is the one thing that
-  // feature is for. Where nothing else on the router faces outwards the reading
-  // stands, because then it is the only fact anywhere pointing that way.
-  const outward = uplinkScore > 0 || !stated.outwardElsewhere
-  if (outward && iface.ipv4?.addr && isRoutableIpv4(iface.ipv4.addr)) {
-    uplinkScore += WEIGHT.routableAddress
-    uplinkEvidence.push('it carries an address the public internet routes to')
-  }
 
   const dhcp = stated.dhcpSections.get(iface.name)
   if (dhcp === 'serving') {
-    lanScore += WEIGHT.servesDhcp
+    // Decisive, and the only LAN statement that is. A router does not run a
+    // DHCP server on the interface its own address came from - the stock
+    // `config dhcp 'wan'` exists precisely to switch itself off - so a section
+    // actually configured to hand out leases is the router saying "clients live
+    // here" as plainly as it ever says anything.
+    lanScore += DECISIVE
     lanEvidence.push('/etc/config/dhcp has it handing out DHCP leases')
   } else if (dhcp === 'named') {
     lanScore += WEIGHT.namedByDhcp
@@ -296,8 +260,19 @@ function weigh(
     )
   }
 
-  const role: IfaceRole =
-    uplinkScore > lanScore ? 'uplink' : lanScore > uplinkScore ? 'lan' : 'unclear'
+  // Two decisive statements pointing opposite ways is a real router state - an
+  // interface that both takes a lease and serves them is a downstream router
+  // wired as a LAN - and the honest answer to it is `unclear`, which is
+  // searched rather than refused. Comparing the sums would have let one
+  // decisive fact plus a tie-breaker quietly outvote the other.
+  const bothDecisive = uplinkScore >= DECISIVE && lanScore >= DECISIVE
+  const role: IfaceRole = bothDecisive
+    ? 'unclear'
+    : uplinkScore > lanScore
+      ? 'uplink'
+      : lanScore > uplinkScore
+        ? 'lan'
+        : 'unclear'
   return {
     name: iface.name,
     role,
@@ -326,16 +301,7 @@ export function routerLayout(
     masquerading,
     dhcpSections,
     anyMasquerade: [...masquerading.values()].some(Boolean),
-    // Deliberately only the two statements that are about DIRECTION. A
-    // masquerading zone is not one of them at this level: an isolated guest
-    // network routinely masquerades onto the LAN, so counting it here would say
-    // "this router already has an uplink" about a router whose only real uplink
-    // is the public-addressed interface being weighed.
-    outwardElsewhere: model.ifaces.some((iface) => {
-      if (iface.name === 'loopback') return false
-      if (CLIENT_PROTOS.includes(iface.proto)) return true
-      return Boolean(probe?.network.values.get(`network.${iface.name}.gateway`))
-    })
+    defaultRouteDevices: probe?.defaultRouteDevices ?? new Set<string>()
   }
   const byName = new Map<string, IfaceVerdict>()
   for (const iface of model.ifaces) {

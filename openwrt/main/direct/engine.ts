@@ -19,7 +19,7 @@ import {
   reset,
   updateDirect
 } from './lifecycle'
-import { runDirectPass } from './pass'
+import { directTick } from './pass'
 import { applyDirect } from './prepare'
 import { createDirectRuntime, exclusive } from './runtime'
 import { countTotals, directRows, reservedIps } from './view'
@@ -47,12 +47,16 @@ export class DirectEngine {
    * first, so this one plans against a snapshot that already reflects it. The
    * two bands are disjoint, so the order is about freshness rather than about
    * either half writing over the other.
+   *
+   * Which pass runs is `directTick`'s to decide, not this method's: on a router
+   * whose `bm-wanbind` keeps its own one-to-one bindings, nothing here plans or
+   * writes a rule at all and the rows come from the router.
    */
   async onSample(model: RouterModel): Promise<void> {
     if (this.runtime.disposed) return
     await exclusive(this.runtime, async () => {
       if (this.runtime.disposed) return
-      const failed = await runDirectPass(this.runtime, model)
+      const failed = await directTick(this.runtime, model)
       if (failed && !this.runtime.disposed) {
         this.runtime.ctx.log(`openwrt: one-to-one binding pass failed: ${failed}`)
       }

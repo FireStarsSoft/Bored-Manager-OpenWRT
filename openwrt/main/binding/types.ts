@@ -420,6 +420,12 @@ export interface RouterPreparationProbe {
   dhcp: UciDocument
   network: UciDocument
   firewall: UciDocument
+  /**
+   * The netdevs carrying a default route in the main table, straight from the
+   * kernel. The one fact about which side of the router an interface faces that
+   * is not read off /etc/config and guessed at.
+   */
+  defaultRouteDevices: ReadonlySet<string>
   sysctl: Map<string, number>
 }
 

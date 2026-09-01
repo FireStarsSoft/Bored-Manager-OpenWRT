@@ -10,6 +10,7 @@
 import type { CheckSession } from '@shared/check'
 import type { ValueBadge } from '@shared/module-ui'
 import type { ModuleContext } from '@shared/modules'
+import type { WanbindBand } from '../agent'
 import type {
   BindingJobRunner,
   BindingPlannerWan,
@@ -50,6 +51,14 @@ import type { IfaceState, IpRule, Lease, RouterModel } from '../types'
  * wins outright. The higher-preference record is marked `shadowed`, writes no
  * rule of its own, and says which binding holds the address instead - two rows
  * both reporting "bound" for one address being the whole of that fault.
+ *
+ * `refused` is the only one of the eight this module cannot reach on its own.
+ * It belongs to a binding the ROUTER holds, in a `config direct` section the
+ * daemon's own configuration reader will not accept - a priority that collides
+ * with an instance's range, a WAN that is not an interface name. Such a section
+ * installs no rule and is invisible everywhere else, so a table that quietly
+ * dropped it would be a binding the operator created, cannot see and cannot
+ * delete. The row carries the daemon's own sentence in `reason`.
  */
 export type DirectState =
   | 'bound'
@@ -59,6 +68,7 @@ export type DirectState =
   | 'shadowed'
   | 'waiting'
   | 'disabled'
+  | 'refused'
 
 /**
  * The settings the pure pass reads, copied rather than passed as `OwrtRules`.
@@ -155,6 +165,30 @@ export interface DirectRow {
   sinceLabel: string
   /** The rule this binding should hold on the router, or empty when it holds none. */
   rule: string
+  /**
+   * Why this binding is in the state it is in, in one sentence, when something
+   * said one.
+   *
+   * Only the router-owned half fills it, and only because that half has an
+   * author for it: the daemon decided the state and wrote the sentence, and
+   * re-deriving a second one on this side is how two surfaces come to describe
+   * one binding differently. On the SSH half the chips are the whole account
+   * and this stays empty, which is not a gap - the reason there is the state
+   * name and this module is the thing that chose it.
+   *
+   * Prose, for a person. Nothing branches on it; `state` and `enabled` are what
+   * a surface reads.
+   */
+  reason: string
+  /**
+   * Whether the router keeps this binding rather than this module. Set on every
+   * row of a router-owned answer, absent on the SSH half.
+   *
+   * The page needs it for one reason: on a router that owns bindings, the
+   * fields this module used to be free to change are the router's, and a form
+   * that offered them anyway would be collecting an edit nothing carries out.
+   */
+  routerOwned?: boolean
 }
 
 export interface DirectTotals {
@@ -218,6 +252,26 @@ export interface DirectSnapshot {
   lastError: string
   rows: DirectRow[]
   totals: DirectTotals & { total: number }
+  /**
+   * Whether these rows came from the router's own binding list rather than from
+   * this module's records.
+   *
+   * Published rather than inferred from the rows, because an empty table means
+   * two different things on the two halves and only this can tell them apart:
+   * no bindings created here, or no bindings on a router that is the one
+   * keeping them.
+   */
+  routerOwned: boolean
+  /**
+   * Something the operator has to be told that is not a failed pass.
+   *
+   * The whole reason it is separate from `lastError`: a handover still in
+   * progress, or a binding the router refused, is not a pass that did not work
+   * - the pass worked and reported exactly this. Folding it into `lastError`
+   * would make the page's own error panel claim the router is unreachable when
+   * it is answering perfectly and disagreeing.
+   */
+  notice?: string
 }
 
 /**
@@ -288,6 +342,18 @@ export interface DirectPlan {
   destinationZones: string[]
   /** Present only when the WAN section still needs `option ip4table`. */
   tableAdd?: TablePreparation
+  /**
+   * Whether the router is the one that will hold this binding.
+   *
+   * Set by the check and read by the apply, rather than asked again there, for
+   * the reason every other decision travels in this object: the gate that
+   * approved these values approved them for one of the two halves, and a
+   * package installed in the seconds between must not turn a plan checked
+   * against the module's own band into a call to a daemon - or the other way
+   * round, which would write a rule at a priority the daemon has since claimed.
+   * The job revalidates it and refuses if the verdict has moved.
+   */
+  routerOwned?: boolean
 }
 
 export interface DirectEngineOptions {
@@ -328,6 +394,38 @@ export interface DirectRuntime {
   memory: Map<string, DirectMemoryEntry>
   /** Ids with an apply job in flight, so two creates cannot claim one number. */
   preparations: Map<string, DirectPlan>
+  /**
+   * The rows the router last reported, or null on a router this module binds
+   * itself.
+   *
+   * It stands where `memory` stands on the other half: the cache every read
+   * between passes is answered from. Null rather than an empty array, and the
+   * difference is the whole of the changeover - an empty array is a router that
+   * owns bindings and has none, while null is a router where the records are
+   * still the truth.
+   */
+  routerRows: DirectRow[] | null
+  /**
+   * Whether the last tick found that the router keeps the bindings.
+   *
+   * Kept apart from `routerRows` because the two answer different questions and
+   * the first tick after a changeover is where that shows: the router owns them
+   * and has not answered yet, so the rows are still the records while the
+   * statement the page must make about them is already the router's.
+   */
+  routerOwned: boolean
+  /**
+   * The daemon's own priority band, as of the last router-owned pass. Null
+   * before one. The create gate refuses outright while it is unusable, because
+   * the daemon will not allocate a preference from it.
+   */
+  routerBand: WanbindBand | null
+  /**
+   * What the changeover still has left to do, in the sentence the page shows.
+   * Empty when there is nothing outstanding, which is every router that never
+   * had a module-written binding on it.
+   */
+  handoverNotice: string
   serial: Promise<void>
   workGeneration: number
   disposed: boolean
