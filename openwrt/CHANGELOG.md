@@ -111,6 +111,42 @@ lasts as long as it takes to press Install.
 treats `/etc/config/bm_wanbind` as a projection of records it no longer has and
 removes every instance section the daemon holds. Update both together.
 
+### Two doors onto switching a binding on
+
+The row has an **Enable** button and an **Enabled** checkbox on its edit form.
+They are one action, and only the button was ever refused on what the router can
+do. The checkbox went through - and it went through all the way, because
+`bm-wanbind` has no firewall test anywhere in `bind`: it writes the section, the
+rule goes in over netlink, which needs no fw4 and no `ip` binary, and the row
+comes back `bound`. On a router with no firewall zones the daemon also prepares
+no forwarding, because it prepares one only for a path that is *missing* or
+*wrong* and answers *no zone* by declining to act - nothing attempted, nothing
+logged. So the Save said done, the page went green, and nothing was forwarding,
+next to a button that had just said Firewall4 was required.
+
+Both doors now refuse in one sentence from one place. The gate is on the
+transition and not on the submitted value: this form posts all three of its
+fields on every Save, so refusing whenever `Enabled` arrived true would refuse
+every rename of every working binding. A rename and a change to *When that WAN
+is down* still go through on a router that can do nothing else at all, and
+switching one **off** is still never refused.
+
+The row also carries the daemon's own verdict on the firewall path now -
+**no firewall zone**, **no LAN to forward from**, **firewall path pending** -
+which is the half no gate can reach: a binding switched on before fw4 was
+removed, or switched on at a router shell, says so on the page instead of
+reading as plainly bound.
+
+### A Save no longer resends what the table happened to be showing
+
+Every field a Save sends is read off the router first. It used to fall back to
+the row on screen, which is up to one poll old, for any field the Save was not
+about - so a rename typed in the tick after somebody chose *fallback* at a
+router shell resent the cached *hold* and undid them, on the one field whose
+whole job is to say what happens when a WAN dies. The same mechanism could
+switch a binding back on that had just been switched off. Both answered
+"Save: done".
+
 ### Settings moved
 
 The priority bands, the catch-all table, the WAN table base and the three timers

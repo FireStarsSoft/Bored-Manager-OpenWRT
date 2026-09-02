@@ -31,7 +31,20 @@
  * for a few seconds and then undid itself with nothing anywhere to explain it.
  */
 import type { OkResult } from '@shared/types'
-import { wanbindBindV2, wanbindBindingsV2, wanbindUnbindV2, type WanbindBindSpec } from '../agent'
+import {
+  wanbindBindV2,
+  wanbindBindingsV2,
+  wanbindUnbindV2,
+  type WanbindBindSpec,
+  type WanbindBindingsReply
+} from '../agent'
+
+/**
+ * One binding as the router describes it. Indexed off the reply rather than
+ * restated, so it cannot drift from the contract - the same way `rows.ts` names
+ * it.
+ */
+type RouterBinding = WanbindBindingsReply['bindings'][number]
 import { isSafeUciValue } from '../uci'
 import { isRecord, textField } from '../util'
 import { agentDeps, daemonProblem, daemonReady, recordEvent, runMutationJob } from './runtime'
@@ -79,15 +92,29 @@ function seatRefusal(name: string, source: string, target: string): string {
 async function directEdit(
   runtime: BindingRuntime,
   id: string,
-  changes: { name?: string; whenDown?: 'hold' | 'fallback'; enabled?: boolean }
+  changes: { name?: string; whenDown?: 'hold' | 'fallback'; enabled?: boolean },
+  /**
+   * The binding as the router answered a moment ago, when the caller has
+   * already asked.
+   *
+   * `updateDirect` has to read before it can decide anything - which field
+   * changed, and whether the change is a switch-on - so without this it would
+   * ask twice for one Save and could get two different answers. The buttons
+   * pass nothing and this reads for them.
+   */
+  prefetched?: RouterBinding
 ): Promise<OkResult> {
   const deps = agentDeps(runtime)
-  const listed = await wanbindBindingsV2(deps, id)
-  if (!listed.ok || !listed.data) {
-    return { ok: false, error: listed.error ?? 'the router did not answer about that binding' }
+  let current = prefetched
+
+  if (!current) {
+    const listed = await wanbindBindingsV2(deps, id)
+    if (!listed.ok || !listed.data) {
+      return { ok: false, error: listed.error ?? 'the router did not answer about that binding' }
+    }
+    current = listed.data.bindings.find((binding) => binding.id === id)
   }
 
-  const current = listed.data.bindings.find((binding) => binding.id === id)
   if (!current) return { ok: false, error: 'the router has no one-to-one binding with that name' }
   if (current.source !== 'manual') {
     return { ok: false, error: seatRefusal(current.name || id, current.source, current.label) }
@@ -236,7 +263,20 @@ function boolField(values: Record<string, unknown>, key: string, fallback: boole
 export async function updateDirect(
   runtime: BindingRuntime,
   idRaw: unknown,
-  valuesRaw: unknown
+  valuesRaw: unknown,
+  /**
+   * What this router cannot do, already worded, or empty when it can.
+   *
+   * A rendered sentence rather than a capability verdict, and that distinction
+   * is the whole reason it is a parameter. The domain has no business reading
+   * capabilities - it would be a second place deciding what a router can do -
+   * but it is the only place that knows whether this particular Save turns a
+   * binding on. So `runtime/handlers.ts` renders `directEnable`'s refusal and
+   * hands it down; here it is used or ignored, and never reworded. Two doors
+   * onto one action cannot describe one router in two ways when only one of
+   * them owns the words.
+   */
+  enableRefusal = ''
 ): Promise<OkResult> {
   const id = typeof idRaw === 'string' ? idRaw.trim() : ''
   const values = isRecord(valuesRaw) ? valuesRaw : {}
@@ -252,9 +292,35 @@ export async function updateDirect(
   const immutable = immutableRefusal(row, values)
   if (immutable) return { ok: false, error: immutable }
 
+  // Everything from here decides against the router's own answer rather than
+  // against `row`, and that is the whole shape of this function.
+  //
+  // `row` is a poll cache, up to a tick old. It is right for the three tests
+  // above - does this binding exist, is it a seat, is somebody trying to edit a
+  // field that cannot be edited - because those are about a binding's identity,
+  // which does not change under anybody. It is wrong for every question below,
+  // because those are about what the Save *changes*, and a field is only
+  // changed relative to what the router currently holds.
+  //
+  // Deciding them against the cache meant a Save resent the cache's copy of
+  // every field it was not about: rename a binding inside the tick after
+  // somebody switched it off at a router shell and the rename switched it back
+  // on, then answered "Save: done". The same for `when_down`, in both
+  // directions. One read here closes all of it, and it is not an extra read -
+  // it is `directEdit`'s read, moved up to where the decisions are.
+  const listed = await wanbindBindingsV2(agentDeps(runtime), id)
+  if (!listed.ok || !listed.data) {
+    return { ok: false, error: listed.error ?? 'the router did not answer about that binding' }
+  }
+  const current = listed.data.bindings.find((binding) => binding.id === id)
+  if (!current) return { ok: false, error: 'the router has no one-to-one binding with that name' }
+  if (current.source !== 'manual') {
+    return { ok: false, error: seatRefusal(current.name || id, current.source, current.label) }
+  }
+
   const name = Object.prototype.hasOwnProperty.call(values, 'name')
     ? textField(values, 'name')
-    : row.name
+    : current.name
   // The create gate's three tests and its sentence, because this name reaches
   // job labels, event rows and `ctx.log` on this side before it is ever a UCI
   // value on the router - and a newline inside it forges a whole log line here
@@ -273,13 +339,35 @@ export async function updateDirect(
     ? asked === 'fallback'
       ? 'fallback'
       : 'hold'
-    : row.whenDown === 'fallback'
+    : current.whenDown === 'fallback'
       ? 'fallback'
       : 'hold'
-  const enabled = boolField(values, 'enabled', row.enabled)
+  const enabled = boolField(values, 'enabled', current.enabled)
 
-  if (name === row.name && whenDown === row.whenDown && enabled === row.enabled) {
+  if (name === current.name && whenDown === current.whenDown && enabled === current.enabled) {
     return { ok: true, data: 'nothing changed' }
+  }
+
+  // Ticking Enabled on a switched-off binding is the row's Enable button, and
+  // has to be refused on the same terms and in the same words.
+  //
+  // It is the *transition* that is tested, never the submitted value, and the
+  // difference is the whole safety of this gate: the row's form posts all three
+  // fields on every Save, so a value test would refuse a plain rename of any
+  // switched-on binding on a degraded router - which is exactly what the three
+  // cases under "what the gate must not stop" forbid. Switching off is not
+  // gated at all, because the way out of a broken state never is.
+  //
+  // Note this cannot fire when the form did not carry the checkbox: `boolField`
+  // falls back to what the router holds, so `enabled && !current.enabled` is
+  // unreachable without an explicit tick.
+  //
+  // And it must be here rather than inside the job. `runMutationJob` answers
+  // `{ ok: true, data: <job id> }` the moment the job starts, so anything the
+  // work function decides reaches the job list and never the Save button. A
+  // refusal a person is waiting for has to be returned before that.
+  if (enabled && !current.enabled && enableRefusal) {
+    return { ok: false, error: enableRefusal }
   }
 
   return runMutationJob(
@@ -287,7 +375,11 @@ export async function updateDirect(
     'direct-edit',
     `Save one-to-one binding ${name}`,
     async () => {
-      const written = await directEdit(runtime, id, { name, whenDown, enabled })
+      // All three sent, and every one of them derived from `current` above - so
+      // a field this Save was not about restates what the router itself just
+      // said rather than what a cache remembered. `current` goes with them so
+      // the write is made against the answer the decisions were made against.
+      const written = await directEdit(runtime, id, { name, whenDown, enabled }, current)
       if (!written.ok) return written
       runtime.service.forceDump()
       recordEvent(runtime, 'edited', `one-to-one binding ${name} was changed on the router`)

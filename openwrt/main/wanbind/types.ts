@@ -234,6 +234,19 @@ export interface DirectRow {
   /** That choice as the two selects word it; this is what the column renders. */
   whenDownLabel: string
   enabled: boolean
+  /**
+   * Whether the router has a firewall path for this binding, in the daemon's
+   * own words: `ok`, `missing`, `wrong`, `no-lan`, `no-zone`, or empty when it
+   * said nothing.
+   *
+   * Carried because dropping it hid the one failure this release exists to
+   * abolish. A rule is written over netlink and needs no firewall at all, so a
+   * binding on a router with no zones gets its rule, comes back `bound`, and
+   * carries traffic nowhere: the daemon only prepares a forwarding for
+   * `missing` and `wrong`, and answers `no-zone` by declining to try. The row
+   * used to render that as plain green with an empty Why column.
+   */
+  forwarding: WanbindBindingsReply['bindings'][number]['forwarding']
   state: WanbindBindingState
   stateBadges: ValueBadge[]
   /** App-clock ms this state began; the renderer's `duration` counts from it. */

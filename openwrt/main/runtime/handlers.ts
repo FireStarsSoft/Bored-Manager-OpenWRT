@@ -286,9 +286,23 @@ export function registerHandlers(runtime: OpenWrtRuntime): void {
   // enabled, in that order.
   handle('directCheck', (values: unknown) => binding.bindCheck(values))
   handle('directApply', (payload: unknown) => binding.bindApply(payload))
-  handle('directUpdate', (id: unknown, ...rest: unknown[]) =>
-    binding.directUpdate(id, formValues(['name', 'whenDown', 'enabled'], rest))
-  )
+  // Ticking Enabled on a switched-off binding is the row's Enable button by
+  // another route, and the two have to refuse a router in the same words.
+  //
+  // The sentence is fetched from `directEnable`'s own entry rather than listed
+  // again here, so neither door can be reworded without the other. Whether this
+  // particular Save is a switch-on depends on what the binding currently is,
+  // which only the domain knows - so the verdict is rendered here and the
+  // decision is made there. `requirementRefusal` returns an `OkResult` for an
+  // action, so it can only answer with an `OkResult`. The shape is narrowed
+  // anyway because the return type admits both and reading `.error` off a check
+  // report would hand the domain an empty string - a save let straight through.
+  // It is a type narrowing, not a guard against something that happens today.
+  handle('directUpdate', (id: unknown, ...rest: unknown[]) => {
+    const verdict = requirementRefusal('directEnable', latch.capabilities)
+    const refusal = verdict && !isReport(verdict) ? (verdict.error ?? '') : ''
+    return binding.directUpdate(id, formValues(['name', 'whenDown', 'enabled'], rest), refusal)
+  })
   handle('directEnable', (id: unknown) => binding.directEnable(id))
   handle('directDisable', (id: unknown) => binding.directDisable(id))
   handle('directDelete', (id: unknown) => binding.directDelete(id))

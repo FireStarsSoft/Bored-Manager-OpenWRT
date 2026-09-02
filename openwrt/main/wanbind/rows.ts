@@ -471,6 +471,37 @@ function ruleLine(binding: RouterBinding): string {
 }
 
 /**
+ * The chip for a binding the router is steering with no firewall path behind
+ * it, or null when there is nothing to say.
+ *
+ * Worded for what the reader has to do rather than with the daemon's token. The
+ * two silent states are the ones that matter: they mean traffic leaves by the
+ * rule and is then not forwarded or not masqueraded, on a row that otherwise
+ * reads as working.
+ */
+function forwardingBadge(binding: RouterBinding): ValueBadge | null {
+  if (!binding.enabled) return null
+  switch (binding.forwarding) {
+    case 'no-zone':
+      // Not "no firewall path", which this table retired as ambiguous: it was
+      // true of two conditions that call for different things, so it said
+      // nothing about the one that mattered. This chip names the condition -
+      // the router has no zone for one end of this binding - which is what a
+      // person has to go and fix.
+      return badge('no firewall zone', BADGE.bad)
+    case 'no-lan':
+      return badge('no LAN to forward from', BADGE.bad)
+    case 'missing':
+    case 'wrong':
+      // Only once the rest of the binding is working: before that this is the
+      // ordinary state of a binding between its create and the next pass.
+      return binding.state === 'bound' ? badge('firewall path pending', BADGE.warn) : null
+    default:
+      return null
+  }
+}
+
+/**
  * One binding as the table renders it - a seat an instance handed out and a
  * section somebody wrote by hand, through one builder.
  *
@@ -495,6 +526,17 @@ export function bindingRow(binding: RouterBinding, now: number): DirectRow {
   // said `bound` through that is the most misleading thing this table could
   // say, so the chip goes on beside whatever the state is.
   if (rule && !binding.verified) badges.push(badge('no rule standing', BADGE.missing))
+  // The other half of the same question, and the half that was silent.
+  //
+  // `no-zone` and `no-lan` are the daemon saying it will not even attempt a
+  // forwarding for this binding - not that one failed - so nothing is logged
+  // and nothing else on the row moves: the rule stands, `verified` is true and
+  // the state is `bound`. `missing` and `wrong` are a forwarding the next pass
+  // will write, which is ordinary and would be noise on every create, so they
+  // are chipped only once the binding is otherwise working and the pass has
+  // therefore already had its chance.
+  const path = forwardingBadge(binding)
+  if (path) badges.push(path)
   return {
     id: binding.id,
     // The daemon falls back to the section name itself, so this is belt and
@@ -519,6 +561,7 @@ export function bindingRow(binding: RouterBinding, now: number): DirectRow {
     since,
     sinceLabel: since ? durationLabel(now - since) : '',
     rule,
+    forwarding: binding.forwarding,
     source: binding.source,
     verified: binding.verified,
     reason: binding.reason

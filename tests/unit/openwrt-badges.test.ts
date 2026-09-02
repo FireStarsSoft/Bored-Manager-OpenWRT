@@ -9,6 +9,7 @@ import type { OpenWrtOverview, OpenWrtSeriesPoint } from '../../openwrt/main/typ
 import { moduleHarness, sharedModuleConfig } from '../helpers/module-harness'
 import {
   assignment,
+  binding,
   fakeWanbind,
   instanceConfig,
   instanceState,
@@ -442,6 +443,84 @@ describe('the binding payload', () => {
     // it would describe a healthy empty instance rather than a stopped one.
     expect(labels(stopped.manager.list()[0]?.stateBadges)).toEqual(['stopped'])
     stopped.dispose()
+  })
+})
+
+describe('a binding the router is steering nowhere', () => {
+  // The silence this chip exists to break.
+  //
+  // A one-to-one rule is written over netlink and needs no firewall at all, so
+  // a binding on a router with no zones gets its rule, is verified in the
+  // kernel, and comes back `bound`. The forwarding is the half that is missing,
+  // and the daemon does not complain about it: it prepares one only for
+  // `missing` and `wrong`, and answers `no-zone` by declining to try - nothing
+  // attempted, nothing logged, `reason` empty. The row rendered that as plain
+  // green with an empty Why column, which is the exact shape of failure this
+  // release exists to abolish: a page agreeing with itself over a router that
+  // is dropping the traffic.
+  type Forwarding = NonNullable<Parameters<typeof binding>[0]>['forwarding']
+
+  async function rowFor(forwarding: Forwarding, enabled = true, state = 'bound') {
+    const client = wanbindClient({
+      daemon: fakeWanbind({
+        bindings: [
+          binding({
+            id: 'bmdir_nas',
+            name: 'NAS',
+            enabled,
+            state: state as ReturnType<typeof binding>['state'],
+            forwarding
+          })
+        ]
+      })
+    })
+    await client.tick()
+    const [row] = client.manager.directRows()
+    client.dispose()
+    return row
+  }
+
+  it('says so when the router has no firewall zone to forward from', async () => {
+    const row = await rowFor('no-zone')
+
+    expect(row?.forwarding).toBe('no-zone')
+    expect(labels(row?.stateBadges)).toContain('no firewall zone')
+  })
+
+  it('says so when the binding sits behind no LAN', async () => {
+    const row = await rowFor('no-lan')
+
+    expect(labels(row?.stateBadges)).toContain('no LAN to forward from')
+  })
+
+  it('stays quiet when the router has the path', async () => {
+    const row = await rowFor('ok')
+
+    expect(labels(row?.stateBadges)).toEqual(['bound'])
+  })
+
+  it('does not nag about a forwarding the next pass is going to write', async () => {
+    // `missing` on a binding that is not yet bound is the ordinary state
+    // between a create and the pass that prepares it. Chipping that would put a
+    // red mark on every new binding for one tick and teach people to ignore it.
+    const pending = await rowFor('missing', true, 'waiting')
+
+    expect(labels(pending.stateBadges)).not.toContain('firewall path pending')
+  })
+
+  it('does say so when a bound binding is still waiting for one', async () => {
+    // Bound and still `missing` means the pass has had its chance and the
+    // reload did not take - `applyReloads`' failure only reaches syslog, so
+    // this chip is the only place it surfaces at all.
+    const stuck = await rowFor('missing', true, 'bound')
+
+    expect(labels(stuck.stateBadges)).toContain('firewall path pending')
+  })
+
+  it('says nothing at all about a binding that is switched off', async () => {
+    const off = await rowFor('no-zone', false, 'disabled')
+
+    expect(labels(off.stateBadges)).not.toContain('no firewall zone')
   })
 })
 

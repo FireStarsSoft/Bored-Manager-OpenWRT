@@ -425,25 +425,35 @@ export const FEATURES: Record<string, FeatureSpec | null> = {
   // Switching one back on puts a rule and a firewall path on the router, so it
   // is gated exactly as the apply is.
   directEnable: { kind: 'action', requires: DIRECT_CREATE },
-  // Deliberately lighter than `directEnable` above, and the difference is worth
-  // stating because it used to be papered over by an escalation in
-  // `runtime/handlers.ts` that no longer exists.
+  // Lighter than `directEnable` above **in this table**, and the rest of the
+  // difference is made up in `runtime/handlers.ts`. Both halves are needed and
+  // neither is enough alone.
   //
   // Two of this form's three fields have to go through on a router that can do
   // nothing else at all: a rename, and switching a binding *off*. The way out
   // of a broken state is never refused, and refusing a rename on the router
   // where somebody most wants to label what is wrong is a gate for its own
-  // sake. So this entry asks for the daemon and nothing else.
+  // sake. A standing list cannot express that, because whether a Save is an
+  // enable depends on the values submitted and on what the binding currently
+  // is - so the list here holds only what all three fields need, and the handler
+  // escalates the one case that needs more, reading the sentence off
+  // `directEnable`'s own entry so the two doors cannot be worded apart.
   //
-  // The third field is ticking Enabled, and the bug that escalation was written
-  // for is gone rather than moved. It was: the form answered "Save: done", the
-  // flag went into a record here, and the rule failed inside a reconcile a
-  // minute later where nobody was looking. There is no record and no later
-  // reconcile now - the save is one `bind` call, and what comes back is the row
-  // itself, saying `held` or `refused` and why, on the page the person is
-  // already looking at. The Enable button keeps the heavier list because it
-  // knows it is an enable before it runs and can say so first; this form finds
-  // out by asking the router, and then shows the answer.
+  // This entry did briefly carry no escalation at all, on the reasoning that
+  // the daemon would report the problem back. It does not. `bind` in
+  // `service.uc` contains no firewall test of any kind: it writes the section
+  // and runs a pass, the rule goes in over netlink - which needs no fw4, no nft
+  // and no `ip` binary - and the row comes back `bound`. The daemon prepares a
+  // forwarding only for `missing` and `wrong`; a router with no firewall zones
+  // answers `no-zone`, which it declines to act on and does not log. So the
+  // save landed, the page went green, and nothing was forwarding. That is the
+  // failure this release exists to abolish, reintroduced by trusting a report
+  // that is not made.
+  //
+  // The row now carries the daemon's `forwarding` field, which the module was
+  // dropping, so the cases no gate can reach - a binding enabled before fw4 was
+  // removed, or enabled at a router shell - say so on the page. The gate and
+  // the chip cover different halves and neither replaces the other.
   directUpdate: { kind: 'action', requires: ['bindingDaemon'] },
   // The way out of a broken state is never refused for anything but the one
   // thing that would make it impossible: a router with no daemon has no

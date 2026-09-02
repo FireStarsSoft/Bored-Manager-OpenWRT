@@ -292,6 +292,182 @@ describe('ticking Enabled is the same action as pressing Enable', () => {
   })
 })
 
+describe('the router that has the daemon and nothing else', () => {
+  // The case the whole file is named for, and the one it could not actually
+  // see until now.
+  //
+  // Its first describe block asserts that both doors refuse in the same words,
+  // and that assertion passed while being blind: its router has no daemon at
+  // all, so both requirement lists fail on the entry they share
+  // (`bindingDaemon`) and would have agreed however far apart the rest of the
+  // lists had drifted. `directEnable` carries fw4 and `directUpdate` does not,
+  // so a router one requirement short is where the two doors part company - and
+  // on that router the button refused while the checkbox went through, wrote
+  // the rule over netlink, and left the row reading `bound` and green with no
+  // firewall path behind it.
+
+  it('refuses the tick in the sentence the button refuses with', async () => {
+    const owrt = await router({ without: ['fw4'] })
+
+    const button = await owrt.call('directEnable', SECTION)
+    const form = await save(owrt, 'NAS', 'hold', true)
+    await settle()
+
+    expect((button as OkResult).ok).toBe(false)
+    expect((form as OkResult).ok).toBe(false)
+    expect(errorOf(form)).toBe(errorOf(button))
+    expect(errorOf(form)).toContain('Firewall4 is required')
+    owrt.dispose()
+  })
+
+  it('asks the router nothing when it refuses the tick', async () => {
+    const owrt = await router({ without: ['fw4'] })
+    const before = owrt.daemon.count('bind')
+
+    await save(owrt, 'NAS', 'hold', true)
+    await settle()
+
+    expect(owrt.daemon.count('bind')).toBe(before)
+    expect(wroteNoRule(owrt)).toBe(true)
+    owrt.dispose()
+  })
+
+  it('still renames a binding that is already switched on', async () => {
+    // The gate is on the transition and never on the submitted value, and this
+    // is the case that tells the two apart. The row's form posts all three
+    // fields on every Save, so a gate that read `enabled: true` alone would
+    // refuse every rename of every working binding on this router - which is
+    // the thing the block below forbids, arrived at from the other side.
+    const owrt = await router({
+      without: ['fw4'],
+      daemon: fakeWanbind({ bindings: [binding({ id: SECTION, name: 'NAS', enabled: true })] })
+    })
+
+    const result = await save(owrt, 'Media box', 'hold', true)
+    await settle()
+
+    expect(result).toMatchObject({ ok: true })
+    expect(owrt.daemon.payloads('bind').at(-1)).toMatchObject({ name: 'Media box' })
+    owrt.dispose()
+  })
+})
+
+describe('what a Save sends about the switch', () => {
+  it('takes Enabled from the router on a rename, not from the cached row', async () => {
+    // The rule at the top of `wanbind/direct.ts` says a change restates the
+    // identifying fields from a fresh read rather than from the cached row,
+    // which is up to one tick old. `enabled` was breaking it, and silently:
+    // `boolField` always returns a boolean, so `changes.enabled` was always
+    // set, so `directEdit`'s `changes.enabled ?? current.enabled` could never
+    // reach the value it had just fetched off the router.
+    //
+    // The cost is below, and it is the sharpest kind of wrong: somebody
+    // switches a binding off at a router shell; inside the same tick somebody
+    // else renames it in the app; the rename carries the cache's `true` and
+    // switches it back on, answering "Save: done". Nobody asked for that and
+    // nothing on any surface said it happened.
+    const owrt = await router({
+      daemon: fakeWanbind({ bindings: [binding({ id: SECTION, name: 'NAS', enabled: true })] })
+    })
+
+    // Switched off underneath this module, the way a router shell does it, with
+    // no sweep in between - so the cache still says it is on.
+    owrt.daemon.state.bindings = [binding({ id: SECTION, name: 'NAS', enabled: false })]
+    expect((await owrt.row(SECTION)).enabled).toBe(true)
+
+    const result = await save(owrt, 'Media box')
+    await settle()
+
+    expect(result).toMatchObject({ ok: true })
+    const sent = owrt.daemon.payloads('bind').at(-1)
+    expect(sent).toMatchObject({ name: 'Media box' })
+    // The router's own answer, not the stale row's. Sending `true` here is the
+    // rename switching a binding back on behind the user's back.
+    expect(sent).toMatchObject({ enabled: false })
+    owrt.dispose()
+  })
+
+  it('sends Enabled when the Save is actually about the switch', async () => {
+    const owrt = await router()
+
+    await save(owrt, 'NAS', 'hold', true)
+    await settle()
+
+    expect(owrt.daemon.payloads('bind').at(-1)).toMatchObject({ enabled: true })
+    owrt.dispose()
+  })
+
+  it('switches one off even when the cached row already thought it was off', async () => {
+    // The way out of a broken state is never refused, and it must not be
+    // quietly dropped either - which is subtler and was briefly worse.
+    //
+    // The first attempt at the fix above omitted `enabled` whenever it matched
+    // the cached row. On a row the cache had stale-off - a switch-on made in
+    // another window, or the gap between an Enable job finishing and the next
+    // dump - an explicit untick matched the stale value, was omitted, and the
+    // router's own `true` was restated in its place. The binding stayed on and
+    // the Save said it had worked.
+    const owrt = await router({
+      daemon: fakeWanbind({ bindings: [binding({ id: SECTION, name: 'NAS', enabled: false })] })
+    })
+
+    // Switched on underneath this module, with no sweep, so the row is stale.
+    owrt.daemon.state.bindings = [binding({ id: SECTION, name: 'NAS', enabled: true })]
+    expect((await owrt.row(SECTION)).enabled).toBe(false)
+
+    const result = await save(owrt, 'NAS', 'hold', false)
+    await settle()
+
+    expect(result).toMatchObject({ ok: true })
+    expect(owrt.daemon.payloads('bind').at(-1)).toMatchObject({ enabled: false })
+    owrt.dispose()
+  })
+
+  it('does not revert When that WAN is down while renaming', async () => {
+    // The same fault as the switch, one field over, and it was the older of the
+    // two: `whenDown` fell back to the cached row and was sent on every Save,
+    // so a rename typed inside one tick of somebody choosing `fallback` at a
+    // router shell put the binding back to `hold` - fail-closed again, without
+    // anybody asking, on the field whose entire job is to say what happens when
+    // a WAN dies.
+    const owrt = await router({
+      daemon: fakeWanbind({
+        bindings: [binding({ id: SECTION, name: 'NAS', enabled: true, whenDown: 'hold' })]
+      })
+    })
+
+    owrt.daemon.state.bindings = [
+      binding({ id: SECTION, name: 'NAS', enabled: true, whenDown: 'fallback' })
+    ]
+    expect((await owrt.row(SECTION)).whenDown).toBe('hold')
+
+    const result = await save(owrt, 'Media box')
+    await settle()
+
+    expect(result).toMatchObject({ ok: true })
+    const sent = owrt.daemon.payloads('bind').at(-1)
+    expect(sent).toMatchObject({ name: 'Media box', when_down: 'fallback' })
+    owrt.dispose()
+  })
+
+  it('does not revert a rename made on the router while changing the switch', async () => {
+    const owrt = await router({
+      daemon: fakeWanbind({ bindings: [binding({ id: SECTION, name: 'NAS', enabled: true })] })
+    })
+
+    owrt.daemon.state.bindings = [binding({ id: SECTION, name: 'Renamed at a shell', enabled: true })]
+
+    await save(owrt, undefined, undefined, false)
+    await settle()
+
+    expect(owrt.daemon.payloads('bind').at(-1)).toMatchObject({
+      name: 'Renamed at a shell',
+      enabled: false
+    })
+    owrt.dispose()
+  })
+})
+
 describe('what the gate must not stop', () => {
   /** Everything gone but the daemon, which is the router this form is opened on. */
   const HOPELESS: RouterProbeOptions = { without: ['dnsmasq', 'fw4', 'nft', 'ip-full'] }

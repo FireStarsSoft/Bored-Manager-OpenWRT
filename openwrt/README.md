@@ -279,7 +279,7 @@ whatever BusyBox prints for a subcommand that does not exist.
 | Create a binding instance (`bindingCheck`, `bindingApply`) and Start (`bindingStart`) | Firewall4 present - its ruleset loaded - `ip rule` support - dnsmasq present - dnsmasq running - netifd running |
 | Unassign / Reassign / Pin (`bindingUnassign`, `bindingReassign`, `bindingPin`) | `ip rule` support |
 | Create a one-to-one binding (`directCheck`, `directApply`) and switch one back on (`directEnable`) | Firewall4 present - its ruleset loaded - `ip rule` support - netifd running. Deliberately **not** dnsmasq: an instance exists to distribute whatever DHCP hands out, while a binding on a typed address does not care whether anything is leasing at all. A MAC target does need the lease file, and says so as a finding on the check rather than as a refusal here - the device may simply be offline this minute. The **Enabled** checkbox on a row's edit form is the same action arriving by a second door, and is refused on the same terms; see the row below |
-| Edit a one-to-one binding (`directUpdate`) | nothing for a rename or a change to *When that WAN is down*. Ticking **Enabled** is a different matter: that save writes the flag and the next pass writes the rule from it, so a save that switches a binding from off to on is held to exactly what the row above needs - Firewall4 present, its ruleset loaded, `ip rule` support, netifd running - and refuses in the same sentence the row's **Enable** button refuses with, because both fetch it from that one entry rather than each wording it. The gate runs *inside* the save rather than in front of it, though, so a rename or a change to *When that WAN is down* in the same submission still lands and the refusal ends by naming what was kept; a form that returned the refusal before reaching the domain threw away edits that needed nothing from the router, on the router where they are most likely to be wanted. Switching a binding off, and every save that leaves it as it already was, stay ungated: the way out of a broken state is never refused, and a running binding arrives at every save with the box already ticked |
+| Edit a one-to-one binding (`directUpdate`) | the binding daemon, for any of it. Ticking **Enabled** is a different matter: a save that switches a binding from **off to on** is held to exactly what the row above needs - the daemon, Firewall4 present, its ruleset loaded, netifd running - and refuses in the same sentence the row's **Enable** button refuses with, because both fetch it from that one entry rather than each wording it. The test is on the transition and never on the value submitted: this form posts all three of its fields on every save, so refusing whenever **Enabled** arrived ticked would refuse every rename of every working binding. Renames, changes to *When that WAN is down*, switching a binding **off**, and every save that leaves it as it already was stay ungated - the way out of a broken state is never refused. There is no half-saved state to word: `bind` carries all three fields in one call, so a refused save writes nothing and the binding is left exactly as the router holds it |
 | Rename an instance (`bindingUpdate`), the Rules editor, job bookkeeping | nothing. None of them touches the router |
 | Scan again (`scanNow`) | nothing. A monitor that refused to look at a router until that router was already understood would be a refusal aimed at the one page written to explain the refusals |
 | Router limits (`limitsEffective`, `limitsCheck`, `limitsApply`) | nothing, deliberately. The domain gates itself - no router connected, no slow-sweep reading yet, a conntrack max below the entries in use - because raising a kernel limit is sometimes the fix for the very state a capability gate would refuse on. Who writes is decided per apply: the agent's `tune_set` from packages 2.1.0, SSH before that |
@@ -1065,27 +1065,43 @@ forwardings and the claim go, and one `uci` option is left behind on purpose. A
 table this module did not assign is never written in either direction, so a WAN
 that carried its own `ip4table` before any of this is left exactly as it was.
 
-Switching a binding back on writes a rule, so it is gated exactly as the apply
-is - and that is true of both doors, the row's **Enable** button and the edit
-form's **Enabled** checkbox, which are one action spelled two ways: the rule is
-written while you wait, and if the router will not take it the flag goes back
-off and the Save is refused with what the router said. The rest of that same
-Save is kept, and the refusal says so - **Binding name** and **When that WAN is
-down** reach the router through nothing at all, and undoing a rename because an
-`ip rule` would not write is a second surprise stacked on the first. That holds
-for both ways a switch-on can be refused, and the second is the one that used to
-lose the rename: a router with no `ip-full`, or one whose readiness has not been
-read yet, is refused before any command is sent at all, in the same sentence the
-row's **Enable** button gives - the two doors may not describe one router two
-ways. Where that Save carried something else, the sentence ends by saying the
-binding is still off, that no rule was written, and which fields did save.
-Switching
-the checkbox the other way stays a plain record write for the same reason
-inverted: off is how somebody stops the module managing an address, and a save
-refused because the removal would not write is exactly the moment they would
-have no door left. **Disable and delete are never refused on capability grounds**
-either, because a binding on a router that has since lost `ip-full` is exactly
-the one somebody most needs to be able to remove.
+Switching a binding back on puts a rule and a firewall path on the router, so
+it is gated exactly as a create is - and that is true of **both** doors, the
+row's **Enable** button and the edit form's **Enabled** checkbox, which are one
+action spelled two ways. Neither may describe one router differently from the
+other, so both read their refusal from one entry in the requirements table.
+
+That took some getting right, and the way it was wrong is worth keeping. Only
+the button was ever gated. The checkbox went to the daemon, which has no
+firewall test of any kind: it writes the section, the rule goes in over netlink
+- which needs no fw4, no nft and no `ip` binary - and the row comes back
+`bound`. On a router with no firewall zones the daemon prepares no forwarding
+either, because it does that only for a path that is *missing* or *wrong* and
+answers *no zone* by declining to act. So the Save succeeded, the page went
+green, and nothing was being forwarded. Pressing Enable on that same row said
+Firewall4 was required.
+
+The gate is on the **transition**, never on the value submitted. This form posts
+all three of its fields on every Save, so a gate that saw `enabled: true` would
+refuse every rename of every working binding on a degraded router - which is the
+opposite of what this form is for. A rename, and a change to **When that WAN is
+down**, go through on a router that can do nothing else at all; a Save that
+turns a switched-off binding on is held to what a create is held to; and
+**switching one off is never refused**, because off is how somebody stops the
+router steering an address and a refusal there is exactly the moment they would
+have no door left. Disable and delete are never refused on capability grounds
+either.
+
+When a Save is refused nothing is sent at all, so the binding is left exactly as
+the router holds it. There is no half-saved state to word, because `bind` is one
+call carrying all three fields: it either lands or it does not.
+
+Every field that Save does send is read back off the router first rather than
+taken from the table on screen, which is up to one poll old. That is not
+fastidiousness. A rename typed in the tick after somebody chose *fallback* at a
+router shell used to resend the cached *hold* and quietly undo them - on the one
+field whose whole job is to say what happens when a WAN dies - and the same
+mechanism could switch a binding back on that had just been switched off.
 
 On a router where `bm-wanbind` owns binding, one-to-one bindings are still
 written by this module, into their own band - the two writers never touch the

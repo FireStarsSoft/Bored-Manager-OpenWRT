@@ -287,8 +287,15 @@ export class BindingManager {
     return deleteInstance(this.runtime, id)
   }
 
-  directUpdate(id: unknown, values: unknown): Promise<OkResult> {
-    return updateDirect(this.runtime, id, values)
+  /**
+   * `enableRefusal` is `directEnable`'s own sentence, rendered by the caller.
+   *
+   * Passed through rather than looked up, because this half deliberately holds
+   * no opinion about what a router can do - see the parameter's own note in
+   * `wanbind/direct.ts`.
+   */
+  directUpdate(id: unknown, values: unknown, enableRefusal?: string): Promise<OkResult> {
+    return updateDirect(this.runtime, id, values, enableRefusal)
   }
 
   directEnable(id: unknown): Promise<OkResult> {
