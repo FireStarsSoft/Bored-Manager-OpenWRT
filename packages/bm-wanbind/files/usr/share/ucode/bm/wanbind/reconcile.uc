@@ -34,6 +34,10 @@ import * as wans from 'bm.wanbind.wans';
  * through a reconcile would otherwise report a pass that took two hours or
  * minus one, and the number exists to be compared against a budget.
  */
+function objectOr(value) {
+	return type(value) == 'object' ? value : {};
+}
+
 function millis() {
 	let now = clock(true);
 	return type(now) == 'array' ? (now[0] * 1000 + now[1] / 1000000) : 0;
@@ -110,7 +114,8 @@ function adopt(st, present, pool, now) {
 		delete device.table;
 	}
 
-	st.wanOwner = {};
+	st.wanOwners = {};
+	st.wanCount = {};
 	st.prefFree = [];
 	st.prefNext = st.instance.rulePrefBase;
 
@@ -127,7 +132,22 @@ function adopt(st, present, pool, now) {
 		let wan = ip ? byTable[sprintf('%d', one.table)] : null;
 		let mac = ip ? byIp[ip] : null;
 
-		if (!wan || !mac || st.wanOwner[wan] || st.devices[mac].wan) {
+		// A rule beyond the seating limit is a stray, not an adoption. That is
+		// the case an operator creates by lowering `clients_per_wan` on an
+		// instance that is already full: the rules above the new limit are the
+		// daemon's own, and leaving them would mean a limit that only applies
+		// to clients who arrive later.
+		if (!wan || !mac || !engine.wanRoom(st, wan) || st.devices[mac].wan) {
+			push(strays, one);
+			continue;
+		}
+
+		// A device a hand-placed binding follows keeps no rule of this
+		// instance's. Adopting one would leave two rules for one address, the
+		// lower-numbered binding deciding it, and this instance holding a WAN
+		// open for traffic that never arrives - with every surface reporting
+		// the client as bound to a line it does not use.
+		if (st.reservedMacs[mac] !== null) {
 			push(strays, one);
 			continue;
 		}
@@ -136,7 +156,7 @@ function adopt(st, present, pool, now) {
 		device.wan = wan;
 		device.pref = one.pref;
 		device.table = one.table;
-		st.wanOwner[wan] = mac;
+		engine.claimWan(st, wan, mac);
 		engine.prefClaim(st, one.pref);
 		engine.dequeue(st, mac);
 
@@ -194,8 +214,10 @@ function remap(st, pool, now) {
 		if (now - st.wanErrorSince[name] < st.instance.wanErrorGrace)
 			continue;
 
-		let mac = st.wanOwner[name];
-		if (mac)
+		// Every client on it, not the first: above one client per WAN a failing
+		// line is several people off the internet, and moving one of them would
+		// leave the rest on a WAN this pass has already decided is broken.
+		for (let mac in engine.wanHolders(st, name))
 			push(candidates, { mac: mac, wan: name, since: st.wanErrorSince[name] });
 	}
 
@@ -228,6 +250,13 @@ function fillQueue(st, current, now) {
 		if (!device || device.wan || st.held[mac])
 			continue;
 
+		// Reserved is not "waiting for a WAN": nothing coming free would change
+		// it, and a queue that grew a permanent head would starve everybody
+		// behind it. `waiting()` reports these separately, with a reason that
+		// says a binding decides this address.
+		if (st.reservedMacs[mac] !== null)
+			continue;
+
 		engine.enqueue(st, mac, now);
 	}
 }
@@ -240,7 +269,11 @@ function drain(st, pool, now) {
 	for (let wan in pool) {
 		if (!wans.usable(wan, st.instance.wanWarnUptime))
 			continue;
-		if (st.wanOwner[wan.name])
+
+		// Room rather than emptiness. With the default limit of one client per
+		// WAN the two are the same question; above it, a line carrying two of
+		// four is still somewhere the next client can go.
+		if (!engine.wanRoom(st, wan.name))
 			continue;
 
 		tables[wan.name] = wan.table;
@@ -328,11 +361,42 @@ export function run(st, ctx) {
 
 	st.lanCidr = lanCidr;
 
+	// What this instance is actually willing to bind: the whole LAN, or the
+	// blocks covering exactly its range. Asked before the catch-all is written
+	// because it is what the catch-all is written as.
+	let scope = rules.catchAllCidrs(st.instance, lanCidr);
+	let ranged = length(st.instance.rangeFrom) && length(st.instance.rangeTo);
+
+	if (ranged && !wans.contains(lanCidr, st.instance.rangeFrom)) {
+		st.ready = false;
+		return {
+			ok: false,
+			reason: sprintf('range %s-%s is not inside %s subnet %s, so no lease could ever fall in it',
+				st.instance.rangeFrom, st.instance.rangeTo, st.instance.lan, lanCidr)
+		};
+	}
+
+	if (ranged && !wans.contains(lanCidr, st.instance.rangeTo)) {
+		st.ready = false;
+		return {
+			ok: false,
+			reason: sprintf('range %s-%s reaches outside %s subnet %s, so part of it names addresses this instance could never bind',
+				st.instance.rangeFrom, st.instance.rangeTo, st.instance.lan, lanCidr)
+		};
+	}
+
+	st.scope = scope;
+
 	// The safety net first, every pass. It is cheap when it is already there,
 	// and the one ordering that must never happen is client rules on a router
 	// whose unassigned clients are not blocked.
+	//
+	// The connected route is written for the whole LAN even under a scoped
+	// instance, and deliberately: it is what keeps the router itself reachable
+	// from the addresses pointed at this table, and a device inside the range
+	// still has to be able to reach the router beside it.
 	let safe = rules.unreachableDefault(st.instance, lanCidr, wans.lanDevice(list, st.instance.lan)) &&
-		rules.installCatchAll(st.instance, lanCidr, present);
+		rules.installCatchAll(st.instance, scope, present);
 
 	if (!safe) {
 		st.ready = false;
@@ -348,16 +412,70 @@ export function run(st, ctx) {
 	if (current === null)
 		debug('instance ' + st.instance.id + ': ' + leases.LEASE_FILE + ' could not be read this pass');
 
+	// Whose addresses this instance may not decide, this pass. Handed in by the
+	// caller rather than read here, because it is a fact about the whole router
+	// - every hand-placed binding on it - and two instances working it out
+	// separately would be two chances to disagree.
+	st.reserved = objectOr(ctx.reserved);
+
 	refreshDevices(st, current, now);
+
+	// Resolved to MACs before anything reads it, and this is the whole of the
+	// fix for a reservation that never fired on any router.
+	//
+	// The caller keys a binding that follows a MAC by that MAC, and a binding
+	// that follows an address by the address - it has nothing else to key it by,
+	// since no device need exist yet. Every reader here is a device table, and
+	// device tables are keyed by MAC. So on the one case people actually use -
+	// `bmwan bind --ip` - the lookup was an address against a table of MACs, it
+	// missed every time, and the instance went on seating an address a binding
+	// already decided: two rules, the binding winning, and a pool WAN held open
+	// for traffic that left by another one. Nothing said so on any surface.
+	//
+	// Done after `refreshDevices` because that is what puts this pass's leases
+	// into `st.devices`, and an address can only be turned into a MAC by a lease.
+	st.reservedMacs = {};
+
+	for (let mac in st.devices) {
+		let device = st.devices[mac];
+		let ip = (type(device) == 'object' && type(device.ip) == 'string') ? device.ip : '';
+
+		if (st.reserved[mac] !== null)
+			st.reservedMacs[mac] = st.reserved[mac];
+		else if (length(ip) && st.reserved[ip] !== null)
+			st.reservedMacs[mac] = st.reserved[ip];
+	}
+
 	let released = expire(st, current, now);
 
-	// Only leases inside the LAN's own subnet. dnsmasq serves more than one
-	// network on some routers, and a rule for an address this instance does not
-	// own would take somebody else's client off their route.
+	// A device that was seated before its binding was written gives its WAN back
+	// now. The binding already decides the address; the client rule beneath it
+	// steers nothing and the WAN it holds is one nobody can use.
+	for (let mac in st.reservedMacs) {
+		if (st.devices[mac] && st.devices[mac].wan) {
+			engine.unbind(st, mac);
+			notice(sprintf('instance %s: %s is bound by hand, so its pool WAN was given back',
+				st.instance.id, mac));
+		}
+
+		engine.dequeue(st, mac);
+	}
+
+	// Only leases this instance owns. dnsmasq serves more than one network on
+	// some routers, and a rule for an address this instance does not own would
+	// take somebody else's client off their route - which since 2.4.0 includes
+	// a second instance on the same LAN with a different range.
 	if (current !== null) {
 		let foreign = [];
 		for (let mac in current) {
-			if (!wans.contains(lanCidr, current[mac].ip))
+			let ip = current[mac].ip;
+
+			if (!wans.contains(lanCidr, ip)) {
+				push(foreign, mac);
+				continue;
+			}
+
+			if (ranged && !wans.inRange(st.instance.rangeFrom, st.instance.rangeTo, ip))
 				push(foreign, mac);
 		}
 
@@ -385,6 +503,7 @@ export function run(st, ctx) {
 		ok: true,
 		instance: st.instance.id,
 		lan: lanCidr,
+		scope: scope,
 		wans: length(pool),
 		adopted: taken.adopted,
 		removedStrays: taken.removed,

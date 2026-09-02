@@ -64,6 +64,7 @@ import * as cfg from 'bm.wanbind.config';
 import * as layout from 'bm.wanbind.layout';
 import * as leases from 'bm.wanbind.leases';
 import * as netlink from 'bm.wanbind.netlink';
+import * as prepare from 'bm.wanbind.prepare';
 import * as rules from 'bm.wanbind.rules';
 import * as wans from 'bm.wanbind.wans';
 
@@ -116,28 +117,6 @@ const RELEASE_GRACE = 120;
  */
 const PREPARE_RETRY = 300;
 
-/**
- * The firewall sections this file owns.
- *
- * Named from the binding's own id rather than from a slot number, because on
- * the router the section name *is* the binding's identity - `config direct
- * 'desk'` is `desk` on every surface - and a second numbering scheme would only
- * be a way for the two to disagree about which forwarding belongs to which
- * binding. The prefix is what lets a sweep recognise its own work, and what
- * stops it touching a forwarding somebody wrote by hand.
- */
-const FORWARD_PREFIX = 'bmd_';
-
-/**
- * What may be pasted into a UCI section name.
- *
- * Guarded rather than trusted even though a `config direct` section name comes
- * from UCI, which has its own idea of a legal name: the value is concatenated
- * into a section name that a `uci delete` is later built from, and this is the
- * only thing between a hand-edited /etc/config and a token nobody meant.
- */
-const SAFE_ID = /^[A-Za-z0-9_]{1,48}$/;
-
 function text(value) {
 	return type(value) == 'string' ? trim(value) : '';
 }
@@ -159,48 +138,6 @@ function millis() {
 	let now = clock(true);
 	return type(now) == 'array' ? (now[0] * 1000 + now[1] / 1000000) : 0;
 }
-
-/** The firewall section one binding's forwarding lives in, or '' for an unusable id. */
-export function forwardingName(id) {
-	let one = text(id);
-	return match(one, SAFE_ID) ? (FORWARD_PREFIX + one) : '';
-};
-
-/** The binding id behind one of our firewall sections, or ''. */
-function forwardingId(name) {
-	let one = text(name);
-	if (substr(one, 0, length(FORWARD_PREFIX)) != FORWARD_PREFIX)
-		return '';
-
-	return substr(one, length(FORWARD_PREFIX));
-}
-
-/**
- * The forwardings this file has written, by binding id.
- *
- * Read on every pass rather than remembered, for the reason everything else
- * here is read every pass: somebody deleting the section from LuCI or by hand
- * has to be something the next pass notices and puts back, and a cache would
- * make it something nothing ever notices at all.
- */
-export function forwardings() {
-	let out = {};
-
-	try {
-		cursor().foreach('firewall', 'forwarding', (section) => {
-			let id = forwardingId(section['.name']);
-			if (!length(id))
-				return;
-
-			out[id] = { src: text(section.src), dest: text(section.dest) };
-		});
-	}
-	catch (e) {
-		debug('cannot read /etc/config/firewall: ' + e);
-	}
-
-	return out;
-};
 
 // ---------------------------------------------------------------------------
 // The pure pass. Given a moment, the sections, and what the router says it is
@@ -807,25 +744,14 @@ let state = {
 	passes: 0,
 	written: 0,
 	removed: 0,
+	// Rules the socket accepted and the kernel was not holding a moment later.
+	// Counted rather than only logged, because the number is the answer to
+	// "why is this address on the wrong WAN when every row reads bound".
+	unverified: 0,
+	lastUnverified: [],
 	events: 0,
 	lastPassAt: 0,
 	lastPassMs: 0
-};
-
-/**
- * Hand in the runner for the one command here that is not a ubus call.
- *
- * `/etc/init.d/firewall reload` has no ubus equivalent, so the entry point
- * passes ucode's own `system()` and everything below it can be driven by the CI
- * probes without a single command ever running on the machine doing the
- * checking. The same arrangement bm-pppoe-pool uses, for the same reason.
- *
- * With nothing attached the firewall is never reloaded, and `prepare()` says so
- * in the sentence it returns rather than reporting a forwarding as in force
- * when fw4 has not read it.
- */
-export function attachSystem(runner) {
-	state.system = runner;
 };
 
 /** Start again from nothing. What `flush` leaves behind, and what a probe resets to. */
@@ -836,29 +762,8 @@ export function reset() {
 	state.preparedAt = {};
 	state.ready = false;
 	state.reason = '';
+	state.lastUnverified = [];
 };
-
-function reloadFirewall() {
-	if (type(state.system) != 'function')
-		return false;
-
-	let status = state.system('/etc/init.d/firewall reload', 30000);
-	return (status === 0);
-}
-
-function reloadNetwork(bus) {
-	if (!bus)
-		return false;
-
-	try {
-		bus.call('network', 'reload', {});
-		return true;
-	}
-	catch (e) {
-		debug('network reload failed: ' + e);
-		return false;
-	}
-}
 
 /**
  * The LANs held bindings sit on, so the hold table can keep them reachable.
@@ -891,242 +796,6 @@ function holdingLans(bindings, verdicts) {
 
 	return out;
 }
-
-// ---------------------------------------------------------------------------
-// The two writes that are not ip rules.
-
-/**
- * Give this binding the two things on the router a rule is no use without.
- *
- * Called by the pass when it finds either missing, and by the ubus `add` path
- * so that a binding created from the app or from LuCI works before the next
- * tick rather than after it. Both callers reach the same code, because a create
- * that prepared the router differently from a reconcile would be two routers
- * wearing one configuration.
- *
- * Nothing here overwrites a value somebody else chose. `option ip4table` is
- * written only when the WAN section has none: a different number there is an
- * administrator's decision about their own router, and the honest response is
- * to say so and let the binding be re-stamped, not to quietly take that
- * interface's routes somewhere they were not put.
- *
- * `ctx.defer` returns the reloads as flags for a caller that is preparing
- * several bindings at once. Without it they happen here.
- */
-function refusePrepare(reason, changed) {
-	return { ok: false, changed: changed, network: false, firewall: false, reason: reason };
-}
-
-/**
- * Everything `prepare` writes, with neither reload performed.
- *
- * Split out so that every return below hands back the same shape and the
- * reloads happen in exactly one place. A version that reloaded from inside each
- * branch reloaded netifd on some failures and not others, which is the kind of
- * difference nobody sees until a router bounces its WANs for a binding that was
- * refused anyway.
- */
-function writePreparation(one, view) {
-	let changed = [];
-	let owedNetwork = false;
-
-	if (type(one) != 'object' || one.usable !== true)
-		return refusePrepare('this binding is not usable, so there is nothing to prepare for it', changed);
-
-	let section = forwardingName(one.id);
-	if (!length(section))
-		return refusePrepare(sprintf('%s cannot be used as a firewall section name', one.id), changed);
-
-	let verdicts = objectOr(objectOr(view).byName);
-	let verdict = verdicts[one.wan];
-
-	if (verdict && verdict.role == 'lan') {
-		return refusePrepare(sprintf('%s is one of this router\'s own LANs, because %s - nothing will be written for a binding that leaves by the network it is already on',
-			one.wan, layout.clauses(verdict.lanEvidence)), changed);
-	}
-
-	let uci;
-	try {
-		uci = cursor();
-	}
-	catch (e) {
-		return refusePrepare('cannot open /etc/config: ' + e, changed);
-	}
-
-	if (!uci)
-		return refusePrepare('cannot open /etc/config', changed);
-
-	// --- the WAN's own routing table.
-	if (uci.get('network', one.wan) == null)
-		return refusePrepare(sprintf('/etc/config/network has no section called %s', one.wan), changed);
-
-	let written = uci.get('network', one.wan, 'ip4table');
-	let already = (written == null) ? '' : text('' + written);
-
-	if (!length(already)) {
-		if (!uci.set('network', one.wan, 'ip4table', sprintf('%d', one.table)) || !uci.commit('network')) {
-			return refusePrepare(sprintf('could not give %s routing table %d in /etc/config/network',
-				one.wan, one.table), changed);
-		}
-
-		push(changed, sprintf('%s now puts its routes in table %d', one.wan, one.table));
-
-		// Reloaded rather than left for the next reboot. Until netifd has read
-		// it the table is empty, and a rule pointing at an empty table does not
-		// fail - it falls through to main, so the binding would report itself
-		// bound while the address left over the default connection.
-		owedNetwork = true;
-	}
-	else if (already != sprintf('%d', one.table)) {
-		return refusePrepare(sprintf('%s already puts its routes in table %s and this binding is stamped with %d. Nothing was changed - one of the two has to move, and which is not this daemon\'s decision',
-			one.wan, already, one.table), changed);
-	}
-
-	// --- the firewall forwarding.
-	if (!length(one.lan)) {
-		return {
-			ok: true,
-			changed: changed,
-			network: owedNetwork,
-			firewall: false,
-			reason: sprintf('no lan is set on this binding, so there is no source zone to write a forwarding from. Set option lan to the interface %s sits behind',
-				one.label)
-		};
-	}
-
-	let lanVerdict = verdicts[one.lan];
-	let lanZone = lanVerdict ? text(lanVerdict.zone) : '';
-	let wanZone = verdict ? text(verdict.zone) : '';
-
-	if (!length(lanZone) || !length(wanZone)) {
-		let refusal = sprintf('%s is in %s and %s is in %s, and a forwarding needs both',
-			one.lan, length(lanZone) ? ('zone ' + lanZone) : 'no firewall zone',
-			one.wan, length(wanZone) ? ('zone ' + wanZone) : 'no firewall zone');
-
-		// The table write above still happened and still has to be applied, so
-		// this refusal carries the reload it owes rather than dropping it.
-		return { ok: false, changed: changed, network: owedNetwork, firewall: false, reason: refusal };
-	}
-
-	let src = text(uci.get('firewall', section, 'src'));
-	let dest = text(uci.get('firewall', section, 'dest'));
-
-	if (src == lanZone && dest == wanZone)
-		return { ok: true, changed: changed, network: owedNetwork, firewall: false, reason: '' };
-
-	uci.set('firewall', section, 'forwarding');
-	uci.set('firewall', section, 'src', lanZone);
-	uci.set('firewall', section, 'dest', wanZone);
-
-	if (!uci.commit('firewall')) {
-		return { ok: false, changed: changed, network: owedNetwork, firewall: false,
-			reason: sprintf('could not write the firewall forwarding %s -> %s', lanZone, wanZone) };
-	}
-
-	push(changed, sprintf('%s -> %s is forwarded', lanZone, wanZone));
-
-	return { ok: true, changed: changed, network: owedNetwork, firewall: true, reason: '' };
-}
-
-export function prepare(one, view, ctx) {
-	let options = objectOr(ctx);
-	let out = writePreparation(one, view);
-
-	if (options.defer === true)
-		return out;
-
-	if (out.network) {
-		reloadNetwork(options.bus);
-		out.network = false;
-	}
-
-	if (out.firewall) {
-		out.firewall = false;
-
-		if (!reloadFirewall()) {
-			out.ok = false;
-			out.reason = 'the firewall forwarding was written and fw4 was not reloaded, so it is not in force yet';
-		}
-	}
-
-	return out;
-};
-
-/**
- * Take one binding's firewall forwarding off the router.
- *
- * The rule is not touched here, deliberately: a section that is still in the
- * config is still a binding, and the pass is the only thing that decides what
- * rule it should have. This is what the ubus `remove` path calls once the
- * section has gone, and what the sweep below calls for a section that went while
- * nothing was watching.
- *
- * `option ip4table` is never taken back. It is a statement about the WAN rather
- * than about the binding - other bindings and the instance half may be resting
- * on it - and an interface losing its own routing table is a router-wide event
- * that no single binding being deleted should cause.
- */
-export function withdraw(id, ctx) {
-	let options = objectOr(ctx);
-	let section = forwardingName(id);
-
-	if (!length(section))
-		return false;
-
-	let uci;
-	try {
-		uci = cursor();
-	}
-	catch (e) {
-		debug('cannot open /etc/config: ' + e);
-		return false;
-	}
-
-	if (!uci || uci.get('firewall', section) == null)
-		return false;
-
-	uci.delete('firewall', section);
-
-	if (!uci.commit('firewall')) {
-		err(sprintf('the firewall forwarding for binding %s could not be removed', id));
-		return false;
-	}
-
-	if (options.defer !== true && !reloadFirewall())
-		err(sprintf('the firewall forwarding for binding %s was removed and fw4 was not reloaded, so it is still in force', id));
-
-	notice(sprintf('binding %s: its firewall forwarding was removed', id));
-	return true;
-};
-
-/**
- * Every forwarding this file owns whose binding has gone.
- *
- * `keep` is the set of section ids the config still has, refused ones included:
- * a binding refused for a bad priority is still a binding somebody is about to
- * correct, and taking its firewall path away in the meantime would turn one
- * mistake into two.
- */
-export function sweep(keep) {
-	let kept = objectOr(keep);
-	let gone = [];
-
-	for (let id in forwardings()) {
-		if (kept[id] !== true)
-			push(gone, id);
-	}
-
-	let removed = 0;
-	for (let id in gone) {
-		if (withdraw(id, { defer: true }))
-			removed++;
-	}
-
-	if (removed)
-		reloadFirewall();
-
-	return removed;
-};
 
 /**
  * One full pass: from what the router says, to what it should say.
@@ -1195,7 +864,7 @@ export function run(ctx) {
 		leases: leases.fromFile(),
 		rules: present,
 		hold: hold,
-		forwardings: forwardings(),
+		forwardings: prepare.forwardings(),
 		memory: state.memory,
 		policy: {
 			base: band.base,
@@ -1219,13 +888,49 @@ export function run(ctx) {
 	}
 
 	let written = 0;
+	let landed = [];
 	for (let one in planned.add) {
-		if (netlink.add(one.pref, one.cidr, one.table))
+		if (netlink.add(one.pref, one.cidr, one.table)) {
 			written++;
-		else
+			push(landed, one);
+		}
+		else {
 			err(sprintf('the rule at priority %d (%s -> table %d) could not be written, so that address is not going where its binding says',
 				one.pref, one.cidr, one.table));
+		}
 	}
+
+	// Ask the kernel whether it kept them, rather than believing the socket.
+	//
+	// A write that is accepted and then removed by something else looks, from
+	// inside this pass, exactly like a write that landed - and that is not a
+	// hypothetical: a Bored Manager module older than 3.4.0 sweeps this whole
+	// priority band every two seconds and deletes every rule no record of its
+	// own describes, which on a router the daemon is binding is all of them.
+	// The pass used to report twelve rules written and the address to be on the
+	// wrong WAN, with nothing anywhere saying the two were connected.
+	let unverified = 0;
+	let missing = [];
+
+	if (written) {
+		let readBack = netlink.verifyPresent(landed);
+
+		// A dump that failed is not evidence about any of them. Counting it as
+		// twelve lost rules would put a false alarm on every pass of a router
+		// with a busy socket.
+		if (readBack.read) {
+			missing = readBack.missing;
+			unverified = length(missing);
+
+			for (let one in missing) {
+				err(sprintf('the rule at priority %d (%s -> table %d) was accepted by the kernel and is not in the rule table a moment later - something else on this router is removing rules in this band. A Bored Manager module older than 3.4.0 does exactly that, every two seconds, while it is connected',
+					one.pref, one.cidr, one.table));
+			}
+		}
+	}
+
+	state.unverified = state.unverified + unverified;
+	state.lastUnverified = missing;
 
 	for (let event in planned.events)
 		notice('binding ' + event.text);
@@ -1267,7 +972,7 @@ export function run(ctx) {
 
 		// Deferred, so that a router coming up with five bindings that all need
 		// a forwarding reloads fw4 once rather than five times.
-		let done = prepare(one, view, { bus: options.bus, defer: true });
+		let done = prepare.prepare(one, view, { bus: options.bus, defer: true });
 
 		owedNetwork = owedNetwork || done.network;
 		owedFirewall = owedFirewall || done.firewall;
@@ -1281,12 +986,12 @@ export function run(ctx) {
 		}
 	}
 
-	if (owedNetwork)
-		reloadNetwork(options.bus);
-
-	if (owedFirewall && !reloadFirewall()) {
-		err('a firewall forwarding was written and fw4 was not reloaded, so it is not in force yet');
-	}
+	// One reload apiece, however many bindings were prepared. The flags are
+	// collected above rather than acted on inside the loop for exactly that
+	// reason: five bindings that all need a forwarding on a router coming up
+	// should reload fw4 once, not five times.
+	prepare.applyReloads({ ok: true, network: owedNetwork, firewall: owedFirewall, reason: '' },
+		options.bus);
 
 	// Forwardings whose section has gone. A binding removed from the config has
 	// its rule withdrawn by the diff above - nothing desires it, so it is a
@@ -1296,7 +1001,7 @@ export function run(ctx) {
 	for (let one in bindings)
 		keep[one.id] = true;
 
-	let swept = sweep(keep);
+	let swept = prepare.sweep(keep);
 
 	state.lastPassAt = now;
 	state.lastPassMs = millis() - started;
@@ -1318,6 +1023,7 @@ export function run(ctx) {
 		refused: intOr(counts.refused, 0),
 		added: written,
 		removed: removed,
+		unverified: unverified,
 		prepared: prepared,
 		swept: swept,
 		holdTable: (hold.table === null) ? 0 : hold.table,
@@ -1478,6 +1184,8 @@ export function summary() {
 		passes: state.passes,
 		written: state.written,
 		removed: state.removed,
+		unverified: state.unverified,
+		lastUnverified: state.lastUnverified,
 		events: state.events,
 		lastPassAt: state.lastPassAt,
 		lastPassMs: state.lastPassMs
@@ -1515,7 +1223,7 @@ export function flush() {
 	}
 
 	let removed = rules.directFlush(present, band.base, band.top, stamped);
-	let swept = sweep({});
+	let swept = prepare.sweep({});
 
 	if (state.hold.table !== null && state.hold.shared !== true)
 		rules.removeHold(state.hold.table);

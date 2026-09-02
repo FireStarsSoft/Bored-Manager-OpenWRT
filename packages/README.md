@@ -9,7 +9,7 @@ themselves independently.
 |---|---|---|---|
 | `bm-agent` | `bm.agent` | `/etc/config/bm_agent` | The common ground: a version handshake, readiness in one ubus call, the requirements report and its allowlisted installer, the scale limits (`tune_get`/`tune_set`), the `bmctl` CLI, snapshots, the commit-confirm guard, schema migrations and the update engine |
 | `bm-pppoe-pool` | `bm.pppoe` | `/etc/config/bm_pppoe` | Pools of PPPoE sessions - one member per VLAN - owned end to end on the router: the record, the network sections, the firewall zone, the derived MACs, the `bmpppoe` CLI, counters and the redial watchdog |
-| `bm-wanbind` | `bm.wanbind` | `/etc/config/bm_wanbind` | One DHCP client, one WAN, decided on the router: the `bmwan` CLI, the lease hotplug hook and the 30-second reconcile |
+| `bm-wanbind` | `bm.wanbind` | `/etc/config/bm_wanbind` | WAN Binding, owned end to end on the router: one address nailed to one WAN port by hand, and instances that hand a LAN's clients out across a pool - a line each, N to a line, or all of them on one - optionally scoped to an address range. The `bmwan` CLI, the lease hotplug hook, the netifd hook and the 30-second reconcile |
 | `luci-app-bm` | — | — | The router's own pages: four tabs under Services in LuCI, calling the same three objects above |
 
 ## Why any of this exists
@@ -29,9 +29,18 @@ session, however good the code is:
   bounded by the router.
 
 So the packages are the main road and SSH becomes a compatibility mode. It is
-never removed: a router running the module today has to keep working after an
-update, and an agent whose `apiVersion` does not match the module has to fall
-back rather than break.
+never removed for the *transport*: every call the module makes still travels
+over the one SSH connection it has always had, as `ubus call` rather than as a
+shell script writing configuration.
+
+Where it has been removed is the *writing*, and WAN Binding is the second
+feature to make that move. PPPoE pools went first at 2.0.0. From packages
+**2.4.0** and module **3.4.0** the daemon owns binding outright - the sections,
+the routing tables, the firewall paths, the catch-all and every ip rule - and
+the module adds, removes and reads. Two writers of one priority band was never
+a slower arrangement than one; it was a wrong one, and the release notes for
+2.3.0 say what it cost. A router without these packages has no WAN Binding at
+all now, and the app says so rather than quietly doing a worse job of it.
 
 ## Layout
 
@@ -105,9 +114,13 @@ end at the same daemon call.
 | Create a PPPoE pool, credentials and all | Create a pool | `bmpppoe create ID --from F` | yes |
 | Edit one - members, label, everything but prefix and mode | Edit | `bmpppoe set ID --from F` | yes |
 | Delete a pool, start/stop/redial/enable/disable sessions | yes | `bmpppoe delete` / `up` / `down` / `redial` / `enable` / `disable` | yes |
-| Add, edit, delete a binding instance | yes | `uci` + `bmwan instance delete` | yes |
-| See why an instance was refused | on the row | `bmwan check` | yes |
+| Add, edit, delete a binding instance | yes | `bmwan instance add` / `set` / `delete` | yes |
+| Scope one to an address range, or seat several clients per WAN | yes | `bmwan instance set --range` / `--clients-per-wan` | yes |
+| Bind one address to one WAN port, by hand | yes | `bmwan bind` / `unbind` | yes |
+| See why an instance or a binding was refused | on the row | `bmwan check` / `instance check` | yes |
 | Pin, move, hold, release a client | yes | `bmwan pin` / `reassign` / `unassign` / `release` | yes |
+| See every ip rule on the router and who wrote it | Rules on this router | `bmwan rules` | yes, the Monitor |
+| Prove the kernel is holding what the daemon wrote | Verify | `bmwan verify` | yes |
 | Snapshot, compare, restore, download | yes | `bmctl config ...` | yes |
 | Check for updates, update, roll back | yes | `bmctl check-update` / `update` / `rollback` | yes |
 | See what every feature needs, install the missing piece | Overview → Requirements | `bmctl requirements` / `install-group` | yes, the readiness page |

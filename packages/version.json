@@ -1,6 +1,6 @@
 {
-  "release": "2.3.0",
+  "release": "2.4.0",
   "apiVersion": 3,
-  "configSchema": 2,
+  "configSchema": 3,
   "minAgentVersion": "1.0.0"
 }

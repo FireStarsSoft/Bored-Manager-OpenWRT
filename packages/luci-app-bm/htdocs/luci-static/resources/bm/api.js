@@ -62,6 +62,31 @@ const POOL_SPEC = {
 	masq: true, mtu_fix: true, lan_forward: true
 };
 
+/*
+ * Every key a one-to-one binding may carry, and every key an instance may
+ * carry. Both are sent to three methods each - the check, the write, and in
+ * the binding's case the same method for create and for edit - so the shape
+ * lives here once.
+ *
+ * `pref` and `table` are declared as integers and not as the strings UCI
+ * stores them as, because ubus checks an argument against the daemon's own
+ * template and refuses the whole call when the type disagrees. Leaving either
+ * out is how a form says "the router picks"; absent is not zero.
+ */
+const BIND_SPEC = {
+	id: '', name: '', ip: '', mac: '', wan: '', lan: '',
+	when_down: '', pref: 0, table: 0, enabled: true
+};
+
+const INSTANCE_SPEC = {
+	id: '', enabled: true, name: '', lan: '', carrier: '',
+	sticky: true, remap: true, clients_per_wan: 0,
+	range_from: '', range_to: '',
+	rule_pref_base: 0, catch_all_pref: 0, catch_all_table: 0,
+	wan_warn_uptime: 0, wan_error_grace: 0, release_grace: 0,
+	raise_dhcp_limits: false
+};
+
 const calls = {
 	agentInfo: declare(AGENT, 'info'),
 	agentStats: declare(AGENT, 'stats'),
@@ -107,6 +132,42 @@ const calls = {
 	wanbindRelease: declare(WANBIND, 'release', { instance: '', mac: '' }),
 	wanbindReconcile: declare(WANBIND, 'reconcile', { instance: '' }),
 	wanbindFlush: declare(WANBIND, 'flush', { instance: '' }),
+
+	// Every binding the router holds, by hand or grown from a lease, and the
+	// two ways to change a hand-placed one. `source` filters; leaving it out
+	// asks for all of them, which is what an older daemon that has never heard
+	// of the key answers anyway.
+	wanbindBindings: declare(WANBIND, 'bindings', { id: '', source: '' }),
+	wanbindBind: declare(WANBIND, 'bind', BIND_SPEC),
+	wanbindBindCheck: declare(WANBIND, 'bind_check', BIND_SPEC),
+	wanbindUnbind: declare(WANBIND, 'unbind', { id: '' }),
+
+	// What this router reads each of its interfaces as, and what it can hand
+	// out. Asked when a form opens rather than on the poll: neither answer
+	// changes while somebody is typing into the box it filled.
+	wanbindLayout: declare(WANBIND, 'layout'),
+	wanbindWans: declare(WANBIND, 'wans'),
+
+	// The router's whole ip rule table, and the check that what the daemon
+	// wrote is still in it. Both read-only; `rules` is the only call on this
+	// page that can be capped, and says so in its own reply.
+	wanbindRules: declare(WANBIND, 'rules', { limit: 0 }),
+	wanbindVerify: declare(WANBIND, 'verify', { instance: '' }),
+
+	// Instances are the router's to write from 2.4.0 on. The browser sends a
+	// spec and the daemon does the whole dance - flush first, write, prepare,
+	// pass - because only it can do those in the one order that leaves no rule
+	// behind that nothing admits to.
+	wanbindInstanceCheck: declare(WANBIND, 'instance_check', INSTANCE_SPEC),
+	wanbindInstanceSet: declare(WANBIND, 'instance_set', INSTANCE_SPEC),
+	wanbindInstanceDelete: declare(WANBIND, 'instance_delete', { id: '' }),
+
+	wanbindSettingsGet: declare(WANBIND, 'settings_get'),
+	wanbindSettingsSet: declare(WANBIND, 'settings_set', {
+		enabled: false, interval: 0, direct_pref_base: 0, rule_pref_base: 0,
+		catch_all_pref_base: 0, catch_all_table: 0, wan_table_base: 0,
+		wan_warn_uptime: 0, wan_error_grace: 0, release_grace: 0
+	}),
 
 	poolInfo: declare(PPPOE, 'info'),
 	poolStats: declare(PPPOE, 'stats'),

@@ -10,7 +10,8 @@
 // The structures:
 //
 //   devices     mac -> what is known about it, bound or not
-//   wanOwner    wan -> the mac holding it, so "is this WAN free" is a lookup
+//   wanOwners   wan -> the set of macs on it, so "who is on this line" is a
+//               lookup and "is there room" is a count against the limit
 //   freeWans    an array plus a position index, so taking a named one, taking
 //               any one, and putting one back are all constant time
 //   waitOrder   a FIFO with a head cursor and lazy deletion, so leaving the
@@ -49,15 +50,33 @@ export function create(instance) {
 	let st = {
 		instance: instance,
 		lanCidr: null,
+		// The address blocks this instance fences, which is the whole LAN for an
+		// unscoped one and exactly its range for a scoped one. Filled by the
+		// pass, because it needs the LAN's subnet to know what "the whole LAN"
+		// is; empty here rather than absent so nothing has to test for the key.
+		scope: [],
 		ready: false,
 
 		devices: {},
 		sticky: {},
 		assignedAt: {},
-		wanOwner: {},
+		// wan -> { mac: true }, and wan -> how many. A set rather than a single
+		// name because `clients_per_wan` may be more than one; the count is
+		// carried beside it because "is there room" is asked far more often
+		// than "who is on it", and counting keys every time would make the
+		// hot path linear in the number of clients on a line.
+		wanOwners: {},
+		wanCount: {},
 
 		freeWans: [],
 		freePos: {},
+
+		// Addresses a hand-placed binding already decides, mac -> ip, rebuilt
+		// every pass. A device in here is never seated and never queued: the
+		// binding's rule sits below this instance's whole range, so the kernel
+		// reaches it first and a client rule for the same address would steer
+		// nothing while holding a WAN open that nobody is using.
+		reserved: {},
 
 		waiting: {},
 		waitOrder: [],
@@ -150,6 +169,53 @@ export function persist(st, now, force) {
 // put-back are all constant time, and the order is netifd's rather than
 // anything this file invents.
 
+/**
+ * How many clients one WAN may carry: 1 by default, N, or 0 for no limit.
+ *
+ * The default is what every instance written before 2.4.0 meant and is still
+ * what most people want - a line each. 0 with a one-WAN pool is the other thing
+ * a multi-WAN router gets bought for: everybody out of that one, with the
+ * instance still owning the fail-closed catch-all underneath.
+ */
+function limitOf(st) {
+	let limit = st.instance.clientsPerWan;
+	return (type(limit) == 'int' && limit >= 0) ? limit : 1;
+}
+
+/** How many clients are on one WAN right now. */
+export function wanLoad(st, name) {
+	let count = st.wanCount[name];
+	return (type(count) == 'int') ? count : 0;
+};
+
+/** Whether one more client would fit on it. */
+export function wanRoom(st, name) {
+	let limit = limitOf(st);
+	return (limit == 0) || (wanLoad(st, name) < limit);
+};
+
+/** Who is on one WAN, in no particular order. */
+export function wanHolders(st, name) {
+	let out = [];
+
+	for (let mac in (type(st.wanOwners[name]) == 'object' ? st.wanOwners[name] : {}))
+		push(out, mac);
+
+	return out;
+};
+
+/** Whether one particular client is already on one particular WAN. */
+export function onWan(st, name, mac) {
+	let held = st.wanOwners[name];
+	return (type(held) == 'object') && (held[mac] === true);
+};
+
+/** The one client on a WAN, or null - for the surfaces that predate capacity. */
+export function wanHolder(st, name) {
+	let held = wanHolders(st, name);
+	return length(held) ? held[0] : null;
+};
+
 export function poolHas(st, name) {
 	// A key that is not there reads as null, and `0` is a real position - so
 	// this is a null test and not a truth test.
@@ -199,23 +265,93 @@ export function poolTakeNamed(st, name) {
 };
 
 /**
+ * Record that `mac` is on `wan`, and take the WAN out of the pool if it is now
+ * full.
+ *
+ * A WAN with room left stays in the free pool, which is the whole of what
+ * `clients_per_wan` changes about the seating: with the default limit of one it
+ * comes straight back out, exactly as it always did.
+ */
+export function claimWan(st, name, mac) {
+	if (type(st.wanOwners[name]) != 'object')
+		st.wanOwners[name] = {};
+
+	if (st.wanOwners[name][mac] === true)
+		return;
+
+	st.wanOwners[name][mac] = true;
+	st.wanCount[name] = wanLoad(st, name) + 1;
+
+	if (!wanRoom(st, name))
+		poolTakeNamed(st, name);
+};
+
+/** And the mirror: `mac` is off `wan`, which may now have room again. */
+export function releaseWan(st, name, mac) {
+	if (type(st.wanOwners[name]) != 'object' || st.wanOwners[name][mac] !== true)
+		return;
+
+	delete st.wanOwners[name][mac];
+	st.wanCount[name] = wanLoad(st, name) - 1;
+
+	if (st.wanCount[name] < 1) {
+		delete st.wanCount[name];
+		delete st.wanOwners[name];
+	}
+};
+
+/** The named WAN if it is in the pool, without taking it out of it. */
+export function poolPickNamed(st, name) {
+	return poolHas(st, name) ? name : null;
+};
+
+/**
  * Any free WAN, preferring not to hand back the one being moved away from.
  *
- * The first entry rather than a random one. The module draws randomly so that
- * two instances started at once do not fill the same WANs first; here there is
- * one pool and one decider, and taking the front is both cheaper and easier to
- * reason about when somebody asks why a particular client got a particular
- * line.
+ * With the default limit of one client per WAN every entry in the pool is empty
+ * and the front is as good an answer as any - the module draws randomly so that
+ * two instances started at once do not fill the same WANs first, but here there
+ * is one pool and one decider, and taking the front is cheaper and far easier
+ * to explain when somebody asks why a particular client got a particular line.
+ *
+ * Above one it is the least-loaded entry instead, which is what makes a pool
+ * fill evenly rather than stacking everybody on the first WAN until it is full.
+ * That scan is linear in the size of the pool - tens of WANs, not thousands of
+ * clients - and only runs on the path that seats somebody.
  */
 export function poolTakeAny(st, avoid) {
 	if (!length(st.freeWans))
 		return null;
 
-	let index = 0;
-	if (avoid && st.freeWans[0] == avoid && length(st.freeWans) > 1)
-		index = 1;
+	if (limitOf(st) == 1) {
+		let index = 0;
+		if (avoid && st.freeWans[0] == avoid && length(st.freeWans) > 1)
+			index = 1;
 
-	return poolTakeAt(st, index);
+		return st.freeWans[index];
+	}
+
+	let best = -1;
+	let bestLoad = 0;
+
+	for (let i = 0; i < length(st.freeWans); i++) {
+		let name = st.freeWans[i];
+
+		if (avoid && name == avoid && length(st.freeWans) > 1)
+			continue;
+
+		let load = wanLoad(st, name);
+
+		if (best < 0 || load < bestLoad) {
+			best = i;
+			bestLoad = load;
+		}
+	}
+
+	if (best < 0)
+		best = 0;
+
+	return st.freeWans[best];
 };
 
 // ---------------------------------------------------------------------------
@@ -343,38 +479,35 @@ export function bind(st, mac, wanTables, options) {
 	let wan = null;
 
 	if (opts.prefer)
-		wan = poolTakeNamed(st, opts.prefer);
+		wan = poolPickNamed(st, opts.prefer);
 
 	if (!wan && !opts.prefer && st.instance.sticky && st.sticky[mac])
-		wan = poolTakeNamed(st, st.sticky[mac]);
+		wan = poolPickNamed(st, st.sticky[mac]);
 
 	if (!wan)
 		wan = poolTakeAny(st, opts.avoid);
 
 	if (!wan) {
-		st.lastReason = 'every WAN in the pool is taken or unusable';
+		st.lastReason = 'every WAN in the pool is full or unusable';
 		return null;
 	}
 
 	let table = wanTables[wan];
 	if (type(table) != 'int') {
-		// Put it straight back: a WAN with no routing table cannot carry a rule,
-		// and leaving it out of the pool would lose it until the next reset.
-		poolPut(st, wan);
+		// Nothing to put back: picking does not remove, and a WAN with no
+		// routing table of its own cannot carry a rule.
 		st.lastReason = wan + ' has no routing table of its own';
 		return null;
 	}
 
 	let pref = prefTake(st);
 	if (pref === null) {
-		poolPut(st, wan);
 		st.lastReason = sprintf('no ip rule priority left between %d and %d',
 			st.instance.rulePrefBase, st.instance.catchAllPref);
 		return null;
 	}
 
 	if (!netlink.add(pref, device.ip + '/32', table)) {
-		poolPut(st, wan);
 		prefPut(st, pref);
 		st.lastReason = 'the router refused the ip rule';
 		return null;
@@ -389,7 +522,7 @@ export function bind(st, mac, wanTables, options) {
 	device.wan = wan;
 	device.pref = pref;
 	device.table = table;
-	st.wanOwner[wan] = mac;
+	claimWan(st, wan, mac);
 	dequeue(st, mac);
 
 	if (moved) {
@@ -421,9 +554,7 @@ export function unbind(st, mac) {
 	if (type(device.pref) == 'int' && length(device.ip))
 		netlink.remove(device.pref, device.ip + '/32', device.table);
 
-	if (st.wanOwner[device.wan] == mac)
-		delete st.wanOwner[device.wan];
-
+	releaseWan(st, device.wan, mac);
 	poolPut(st, device.wan);
 	prefPut(st, device.pref);
 
@@ -442,8 +573,7 @@ function unbindAfterFailure(st, mac) {
 		return;
 
 	if (device.wan) {
-		if (st.wanOwner[device.wan] == mac)
-			delete st.wanOwner[device.wan];
+		releaseWan(st, device.wan, mac);
 		poolPut(st, device.wan);
 	}
 

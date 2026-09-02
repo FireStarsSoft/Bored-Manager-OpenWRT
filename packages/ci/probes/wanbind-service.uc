@@ -364,6 +364,40 @@ says('and a binding with no WAN has no port to leave through',
 	/name the WAN/);
 check('and nothing was written for that either', uci.get(PACKAGE, 'nowan'), null);
 
+// The one that cost a router a subnet.
+//
+// `bind` took the WAN name on trust. Told to bind an address to LAN_WIRED - a
+// name a person can reach for, because it is the LAN the address is on and it
+// reads like an interface - it found no `option ip4table` there, allocated one,
+// wrote it and reloaded netifd. That LAN's connected route moved out of `main`
+// into a table nothing else consults, and the 12.10.10.0/24 subnet stopped
+// being reachable from the other LAN, from the router's own services, and from
+// the person who had just run the command. Thirty-five devices re-ran DHCP.
+// The reply said `ok: true`.
+//
+// So the assertion that matters here is the last one. A refusal that still
+// wrote the option would satisfy the first two and cut the router off exactly
+// as before.
+says('a LAN is not a WAN, and binding to one is refused',
+	service.bind({ id: 'wrongside', ip: '12.10.10.240', wan: 'LAN_WIRED' }).reason,
+	/one of this router.s own LANs/);
+check('and no binding was written', uci.get(PACKAGE, 'wrongside'), null);
+check('and that LAN still has no routing table of its own',
+	uci.get('network', 'LAN_WIRED', 'ip4table'), null);
+
+// The same name through the check verb, which is what a form asks before it
+// offers a Save button.
+says('and the check verb says so before anything is typed',
+	service.bindCheck({ id: 'wrongside', ip: '12.10.10.240', wan: 'LAN_WIRED' }).findings[0].detail,
+	/one of this router.s own LANs/);
+
+// An interface netifd has never heard of is refused for the same reason and at
+// the same point: the name is what the table would have been written against.
+says('an interface this router does not have is refused',
+	service.bind({ id: 'ghost', ip: '12.10.1.42', wan: 'WAN9' }).reason,
+	/knows no interface called WAN9/);
+check('and nothing was written for it', uci.get(PACKAGE, 'ghost'), null);
+
 // A WAN with no routing table of its own is given one.
 //
 // This used to be a refusal, and on a real router that made the whole feature
@@ -442,10 +476,49 @@ check('and no table is claimed to be in force', row.table, 0);
 check('an address binding is its own address', row.ip, '12.10.1.50');
 check('and no rule is claimed to have been written', row.since, 0);
 
-let both = service.bindings('');
+let both = service.bindings('', '');
 check('naming nothing lists every binding in the file', length(both.bindings), 2);
 check('the band rides along for a caller about to add one', both.band.base, 19000);
 check('and says whether it may take any at all', both.band.usable, true);
+
+// ------------------------------------------------- one list, two kinds of row
+//
+// An instance is a generator of bindings rather than a different kind of thing:
+// what it puts on the wire is the same address-to-table rule a hand-placed
+// binding is. So both belong in one list, told apart by `source` - and a
+// surface asking "what is bound on this router" gets the answer rather than
+// half of it and a second call to make.
+
+check('every row somebody placed says so', both.bindings[0].source, 'manual');
+check('and the counts separate the two kinds', both.counts.manual, 2);
+check('with none seated by an instance on this router yet', both.counts.derived, 0);
+check('and an unfiltered list says it was not narrowed', both.filtered, false);
+
+let states = both.counts.byState;
+check('the states are counted', type(states) == 'object', true);
+
+// The distinction the whole reply hangs on: an empty list after a filter is not
+// a router with nothing on it. Nothing else in the answer could tell them
+// apart, and a page that could not would state a fact about the whole router
+// while showing a view that can never hold a row.
+let none = service.bindings('', 'home');
+
+check('a filter that matches nothing answers an empty list', length(none.bindings), 0);
+check('and says the list was narrowed', none.filtered, true);
+check('while the counts still describe the router', none.counts.manual, 2);
+
+let one = service.bindings('desk', '');
+
+check('an id narrows to that binding', length(one.bindings), 1);
+check('and it is the one asked for', one.bindings[0].id, 'desk');
+check('and that is narrowed too', one.filtered, true);
+
+// Every band a rule could legitimately sit in, so a reader does not have to
+// know this daemon's numbering to tell a binding from an instance's client.
+check('the instance bands ride along', length(both.instances), 1);
+check('named', both.instances[0].id, 'home');
+check('with the range its clients are numbered in', both.instances[0].base, 20000);
+check('and the priority its fence sits at', both.instances[0].catchAllPref, 30000);
 
 // ------------------------------------------------------------------ removing
 
@@ -491,8 +564,8 @@ let now = service.reconcileNow({});
 
 check('a pass with nothing named runs', now.ok, true);
 check('over the one instance', length(now.passes), 1);
-check('and over the bindings, which belong to no instance', now.direct ? now.direct.ok : false, true);
-check('all one of them', now.direct ? now.direct.bindings : 0, 1);
+check('and over the bindings, which belong to no instance', now.core ? now.core.ok : false, true);
+check('all one of them', now.core ? now.core.bindings : 0, 1);
 
 let narrow = service.reconcileNow({ instance: 'home' });
 
@@ -500,10 +573,39 @@ check('naming an instance still runs it', narrow.ok, true);
 check('over that instance', length(narrow.passes), 1);
 // Deliberately: a binding belongs to no instance, and reconciling one is not
 // part of what somebody asked about the other.
-check('and deliberately leaves the bindings alone', narrow.direct, null);
+check('and deliberately leaves the bindings alone', narrow.core, null);
 
 says('a name that is not an instance is refused',
 	service.reconcileNow({ instance: 'nope' }).reason, /no instance by that name/);
+
+// The router below has the conflict built into it: `desk` is a binding on
+// 12.10.1.41, `home` is an instance over the LAN that address is on, and
+// /tmp/dhcp.leases hands 12.10.1.41 to aa:bb:cc:dd:ee:01. So a pass either
+// leaves that device to the binding or seats it as one of the instance's
+// clients, and which one it does is the whole of this check.
+//
+// It has to be asserted here rather than only against `reconcile.run`, because
+// what was wrong was neither the instance half nor the binding half but the
+// wiring between them: the thirty-second timer built the list of addresses
+// already spoken for and handed it over, and this method - the one behind
+// `Run a pass now`, the module's reconcile action and `bmwan reconcile` - did
+// not build it at all. Every address on the router read as free, so a button
+// undid what the timer had just decided, on a router where nothing was
+// misconfigured and nothing was logged.
+let leftAlone = service.waiting({});
+let spokenFor = null;
+
+for (let one in leftAlone.waiting) {
+	if (one.why == 'reserved')
+		spokenFor = one;
+}
+
+check('a pass run by hand leaves the address a binding already decides',
+	spokenFor ? spokenFor.ip : '', '12.10.1.41');
+check('and knows the device by its MAC, not by the address it was keyed under',
+	spokenFor ? spokenFor.mac : '', 'aa:bb:cc:dd:ee:01');
+says('and says why rather than dropping it off every table',
+	spokenFor ? spokenFor.reason : '', /already decides this address/);
 
 // --------------------------------------------------------------- the uninstall
 //
@@ -530,9 +632,12 @@ let all = service.flush({});
 
 check('the uninstall flush succeeds', all.ok, true);
 check('with nothing to say went wrong', all.reason, null);
-// This router was given no ip rules to start with, so the count that means
-// something here is the forwardings.
-check('no rule was on a router that had none', all.removed, 0);
+// The binding above really has a rule in the kernel by now - `bind` runs a pass
+// before it answers - so this is the count that says `apk del` leaves nothing
+// steering traffic, rather than a zero that only meant nothing was ever there.
+check('the rule the binding had comes off with it', all.removed, 1);
+check('and the kernel is holding nothing this package wrote',
+	length(rtnl.kernelRules()), 0);
 check('both firewall paths come off', all.forwardings, 2);
 check('the binding\'s', uci.get('firewall', 'bmd_desk'), null);
 check('and the orphan\'s', uci.get('firewall', 'bmd_ghost'), null);

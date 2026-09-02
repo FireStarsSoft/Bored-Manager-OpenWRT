@@ -27,18 +27,26 @@ import { cursor } from 'uci';
 import { timer } from 'uloop';
 
 import { err, notice } from 'bm.log';
+// Only these two. The instance state itself is engine.uc's to read and write;
+// what this file needs is the one thing that outlives an instance - the file
+// under /etc/bm/state/ that remembers its sticky choices and its holds - so
+// that deleting an instance does not leave a router remembering the WAN
+// preferences of something that no longer exists.
+import { read as readState, remove as removeState } from 'bm.state';
 
 import * as cfg from 'bm.wanbind.config';
 import * as direct from 'bm.wanbind.direct';
 import * as engine from 'bm.wanbind.engine';
 import * as layout from 'bm.wanbind.layout';
 import * as leases from 'bm.wanbind.leases';
+import * as monitor from 'bm.wanbind.monitor';
 import * as netlink from 'bm.wanbind.netlink';
+import * as prepare from 'bm.wanbind.prepare';
 import * as reconcile from 'bm.wanbind.reconcile';
 import * as ruleset from 'bm.wanbind.rules';
 import * as wans from 'bm.wanbind.wans';
 
-export const RELEASE = '2.3.0';
+export const RELEASE = '2.4.0';
 
 /**
  * Where a WAN's own routing table is numbered from when this half has to give
@@ -46,6 +54,67 @@ export const RELEASE = '2.3.0';
  * ends keeps one convention rather than two.
  */
 const WAN_TABLE_BASE = 10000;
+
+/**
+ * What an instance is stamped with when whoever created it named no number.
+ *
+ * Defaults for a create, and nothing else. Every instance carries its own copy
+ * of each of these in its own section and reads that copy for ever after, which
+ * is exactly what makes them safe to change on a running router: moving one
+ * decides what the next instance gets and says nothing about the ones already
+ * in the file, whose rules were written against the numbers they carry.
+ *
+ * `config wanbind 'main'` may override any of them - that is what `settings_get`
+ * answers with, and what the commented block in /etc/config/bm_wanbind
+ * describes at a shell.
+ */
+const RULE_PREF_BASE = 20000;
+const CATCH_ALL_PREF_BASE = 30000;
+const CATCH_ALL_TABLE = 253;
+const WAN_WARN_UPTIME = 5;
+const WAN_ERROR_GRACE = 20;
+const RELEASE_GRACE = 120;
+
+/**
+ * How far above `catch_all_pref_base` a new instance may be seated.
+ *
+ * One priority per instance, taken in order, so a router with three instances
+ * numbers them 30000, 30001 and 30002 and a surface can say "slot 2" rather
+ * than quoting a five-digit number nobody chose.
+ */
+const CATCH_ALL_SPAN = 1000;
+
+// The room an instance needs between its client rules and its catch-all, which
+// is also the largest number of clients it can seat. `bm.wanbind.config`
+// refuses a narrower one; this is here so that a caller is told before the
+// write rather than by the read-back afterwards.
+const MIN_PREF_SPAN = 64;
+
+// And the other two ceilings that file applies, for the same reason.
+const MAX_CLIENTS_PER_WAN = 4096;
+const MAX_TABLE = 65535;
+const MAX_PREF = 0x7fffffff;
+
+// Below this a full pass on a large LAN would overlap the previous one.
+const MIN_INTERVAL = 5;
+const MAX_INTERVAL = 3600;
+
+// The longest any of the three per-instance timers may be. A day is already far
+// past the point where a number is a policy rather than a typo.
+const MAX_GRACE = 86400;
+
+/**
+ * How much of the router's rule table `rules` reads.
+ *
+ * A monitor answer is one blob over ubus and a router with a five-thousand
+ * session PPPoE pool has a rule per client, so the whole table is not always a
+ * thing that fits. The default is what a caller who named no number gets, and
+ * the maximum is what one who named a large one gets - reported as `capped`
+ * rather than silently truncated, because a monitor that quietly stopped at two
+ * thousand rules would be the one surface on this router that lies by omission.
+ */
+const RULES_LIMIT = 2000;
+const RULES_LIMIT_MAX = 5000;
 
 /**
  * The ubus contract version, separate from the release.
@@ -60,8 +129,16 @@ const WAN_TABLE_BASE = 10000;
  * feature descriptor's `provides` rather than from a number it would have to
  * compare. A capability is a thing a router either offers or does not, which is
  * exactly the question being asked.
+ *
+ * 2.4.0 moves it, because this time an older module is broken by the change
+ * rather than merely unaware of it. `stats` and `reconcile` renamed the key a
+ * 2.3.0 module reads the binding numbers out of - `direct` is `core` now, since
+ * one engine writes every rule on the router and a key called `direct` would be
+ * read as being about one of the two kinds - and a module reading the old name
+ * would report zero of everything and say nothing was wrong. The number is what
+ * tells it to stop and say so instead.
  */
-export const API_VERSION = 1;
+export const API_VERSION = 2;
 
 const STARTED = time();
 
@@ -174,7 +251,7 @@ export function attach(bus) {
  * nothing on any surface said so.
  */
 export function attachSystem(runner) {
-	direct.attachSystem(runner);
+	prepare.attachSystem(runner);
 };
 
 /** Every instance state, in config order. */
@@ -187,8 +264,23 @@ function each() {
 
 function summary(st) {
 	let bound = 0;
-	for (let name in st.wanOwner)
-		bound++;
+	let seats = 0;
+	let carrying = 0;
+	let limit = (type(st.instance.clientsPerWan) == 'int') ? st.instance.clientsPerWan : 1;
+
+	for (let name in st.wanOwners) {
+		let load = engine.wanLoad(st, name);
+
+		if (load < 1)
+			continue;
+
+		bound = bound + load;
+		carrying++;
+	}
+
+	// What the pool could seat, or -1 for a pool with no limit. The pool itself
+	// is what `free` counts; this is the ceiling that number is heading for.
+	seats = (limit == 0) ? -1 : (length(st.freeWans) + carrying) * limit;
 
 	return {
 		id: st.instance.id,
@@ -200,6 +292,23 @@ function summary(st) {
 		sticky: st.instance.sticky,
 		remap: st.instance.remap,
 		bound: bound,
+		clientsPerWan: limit,
+		seats: seats,
+		carrying: carrying,
+
+		// Which addresses this instance is willing to bind, said twice because
+		// the two readings are wanted by different surfaces. `range` is what
+		// somebody typed, and it is null rather than a pair of empty strings on
+		// an ordinary whole-LAN instance so that a page branches on one thing.
+		// `cidrs` is the same fact as the blocks the fail-closed catch-all is
+		// written as - so "which addresses does this instance fence" is
+		// answerable without reading the router's rule table - and it is empty
+		// until the first pass has run, which is the truth about it.
+		range: (length(st.instance.rangeFrom) && length(st.instance.rangeTo))
+			? { from: st.instance.rangeFrom, to: st.instance.rangeTo }
+			: null,
+		cidrs: st.scope,
+
 		waiting: length(st.waiting),
 		held: length(st.held),
 		free: length(st.freeWans),
@@ -208,6 +317,46 @@ function summary(st) {
 		lastPassMs: st.lastPassMs,
 		reason: st.lastReason
 	};
+}
+
+/**
+ * The addresses a hand-placed binding already decides, as mac -> ip.
+ *
+ * Every binding's rule sits below every instance's client range, so the kernel
+ * reaches it first. An instance that seated the same device anyway would write
+ * a second rule the kernel never gets to, and would hold one of its WANs open
+ * for traffic that leaves by the binding's instead - a client reported bound to
+ * a line it does not use, and one fewer WAN for everybody actually waiting.
+ *
+ * Keyed by MAC because that is what an instance knows a device by, and resolved
+ * from the pass's own rows rather than from the sections: a binding naming a
+ * MAC is only on an address once a pass has read the leases, and a binding
+ * whose WAN is down still decides its address - being held is not being absent.
+ *
+ * A disabled or refused binding reserves nothing. It writes no rule, so there
+ * is nothing for an instance's rule to sit underneath.
+ */
+function reservedAddresses() {
+	let out = {};
+
+	for (let row in direct.bindings()) {
+		if (type(row) != 'object' || row.enabled !== true || row.usable !== true)
+			continue;
+
+		let ip = (type(row.ip) == 'string') ? trim(row.ip) : '';
+		if (!length(ip))
+			continue;
+
+		// The MAC when the binding follows one; otherwise the address itself is
+		// the only key an instance could match on, and `reserved` is read by
+		// address as well as by MAC for exactly that reason.
+		let label = (type(row.label) == 'string') ? trim(row.label) : '';
+		let mac = (row.targetKind == 'mac') ? lc(label) : '';
+
+		out[length(mac) ? mac : ip] = ip;
+	}
+
+	return out;
 }
 
 /**
@@ -232,9 +381,14 @@ export function pass() {
 	let now = time();
 	let out = [];
 
+	// Read before the instances run, from the rows the last binding pass left,
+	// so that every instance on the router is told the same thing about which
+	// addresses are already spoken for.
+	let reserved = reservedAddresses();
+
 	if (state.main.enabled) {
 		for (let st in each())
-			push(out, reconcile.run(st, { bus: state.bus, now: now }));
+			push(out, reconcile.run(st, { bus: state.bus, now: now, reserved: reserved }));
 	}
 
 	// Deliberately after the instances. A binding's priority is below every
@@ -333,7 +487,181 @@ function count(value) {
 	return 0;
 }
 
+/**
+ * The same, with a real default behind it.
+ *
+ * `count()` answers 0 for "nothing usable was sent", which is right wherever 0
+ * means "not given". It is wrong in the two places below: `clients_per_wan 0`
+ * is a real value meaning no limit, and a UCI option that is simply absent has
+ * to come back as the shipped default rather than as zero.
+ */
+function numberOr(value, fallback) {
+	if (type(value) == 'int')
+		return value;
+
+	if (type(value) == 'double')
+		return int(value);
+
+	if (type(value) == 'string' && match(trim(value), /^[0-9]+$/))
+		return int(trim(value));
+
+	return fallback;
+}
+
+/**
+ * Whether the caller sent this key at all.
+ *
+ * The whole of "absent means unchanged" rests on this rather than on
+ * truthiness, and the difference is not academic: `clients_per_wan 0` is no
+ * limit, an empty `range_from` is the whole LAN, and `enabled false` is a
+ * deliberate stop. Every one of those is falsy and every one of them is a real
+ * instruction, so a merge written the obvious way would silently keep the old
+ * value for exactly the three edits somebody most wanted to make.
+ */
+function given(args, key) {
+	return (type(args) == 'object') && exists(args, key);
+}
+
+function pickText(args, key, fallback) {
+	return given(args, key) ? trim(text(args[key])) : fallback;
+}
+
+function pickNumber(args, key, fallback) {
+	return given(args, key) ? numberOr(args[key], fallback) : fallback;
+}
+
+/**
+ * A flag out of whatever the caller sent.
+ *
+ * ubus type-checks an argument against the template and hands a real boolean
+ * through, but the same functions are reached from a shell and from LuCI, where
+ * the answer to a checkbox is the string UCI stores. Reading '0' as true would
+ * switch an instance back on that somebody had just switched off, which is the
+ * kind of mistake nobody goes looking for in a method that reported success.
+ */
+function pickFlag(args, key, fallback) {
+	if (!given(args, key))
+		return fallback;
+
+	let value = args[key];
+
+	if (type(value) == 'bool')
+		return value;
+
+	if (type(value) == 'int')
+		return value != 0;
+
+	if (type(value) == 'string')
+		return !(trim(value) in [ '', '0', 'no', 'off', 'false', 'disabled' ]);
+
+	return fallback;
+}
+
+/**
+ * A UCI cursor, or null - never an exception out of a ubus callback.
+ *
+ * `cursor()` answers null rather than raising when /etc/config cannot be
+ * opened, so an unguarded one is a `uci.set` on null one read-only overlay
+ * later - and that raise leaves the ubus callback it happened in, which is the
+ * daemon's liveness rather than one failed call. Both outcomes are turned into
+ * the single answer every caller below has a sentence for, which is the shape
+ * `config.uc` and `direct.uc` already use for the same reason.
+ */
+function openConfig() {
+	let uci = null;
+
+	try {
+		uci = cursor();
+	}
+	catch (e) {
+		uci = null;
+	}
+
+	return uci;
+}
+
+/**
+ * `config wanbind 'main'` in full, with the shipped defaults filled in.
+ *
+ * The seven numbers are read here rather than in `bm.wanbind.config` because
+ * that file's question is whether one *section* can be used, and none of these
+ * is about a section. They are what a section is given when it is created and
+ * says nothing for itself; an instance that already exists carries its own copy
+ * and never looks at them again, which is the whole reason they can be changed
+ * on a running router at all.
+ *
+ * `enabled` and `interval` come from `cfg.main()` rather than from a second
+ * reader of the same two options, so this method and the running process cannot
+ * come to different conclusions about whether anything is happening.
+ * `direct_pref_base` comes from the band for the same reason: the clamping and
+ * the refusal for that number already live there.
+ *
+ * `band` rides along because a caller about to write a priority needs to know
+ * whether the band it would go in is safe at all, and that is a question about
+ * the instances rather than about this section.
+ */
+function settingsRead() {
+	let main = cfg.main();
+	let band = cfg.directBand();
+
+	let out = {
+		enabled: main.enabled,
+		interval: main.interval,
+		direct_pref_base: band.base,
+		rule_pref_base: RULE_PREF_BASE,
+		catch_all_pref_base: CATCH_ALL_PREF_BASE,
+		catch_all_table: CATCH_ALL_TABLE,
+		wan_table_base: WAN_TABLE_BASE,
+		wan_warn_uptime: WAN_WARN_UPTIME,
+		wan_error_grace: WAN_ERROR_GRACE,
+		release_grace: RELEASE_GRACE,
+		band: band
+	};
+
+	let uci = openConfig();
+
+	// The defaults above are the shipped ones, so a router that lost
+	// /etc/config/bm_wanbind still answers this question. It simply has no
+	// instances for the answer to apply to.
+	if (!uci)
+		return out;
+
+	out.rule_pref_base = numberOr(uci.get(PACKAGE, 'main', 'rule_pref_base'), RULE_PREF_BASE);
+	out.catch_all_pref_base = numberOr(uci.get(PACKAGE, 'main', 'catch_all_pref_base'), CATCH_ALL_PREF_BASE);
+	out.catch_all_table = numberOr(uci.get(PACKAGE, 'main', 'catch_all_table'), CATCH_ALL_TABLE);
+	out.wan_table_base = numberOr(uci.get(PACKAGE, 'main', 'wan_table_base'), WAN_TABLE_BASE);
+	out.wan_warn_uptime = numberOr(uci.get(PACKAGE, 'main', 'wan_warn_uptime'), WAN_WARN_UPTIME);
+	out.wan_error_grace = numberOr(uci.get(PACKAGE, 'main', 'wan_error_grace'), WAN_ERROR_GRACE);
+	out.release_grace = numberOr(uci.get(PACKAGE, 'main', 'release_grace'), RELEASE_GRACE);
+
+	return out;
+}
+
 /** Everything the module needs to decide whether to drive this router here. */
+/**
+ * What the kernel did with the rules the last passes wrote.
+ *
+ * Lifted out of `stats` because `info` carries it too, and a second reading of
+ * the same numbers a few lines apart is how two surfaces come to disagree about
+ * whether this router is holding what it was told.
+ *
+ * `unverified` is the number that matters and the reason any of this exists: a
+ * rule the socket accepted and the kernel is not holding a moment later is the
+ * whole explanation for an address being on the wrong WAN while every row on
+ * every page reads bound.
+ */
+function netlinkCounters() {
+	let one = direct.summary();
+
+	return {
+		written: one.written,
+		verified: one.written - one.unverified,
+		unverified: one.unverified,
+		removed: one.removed,
+		lastUnverified: one.lastUnverified
+	};
+}
+
 export function info() {
 	let out = [];
 	for (let st in each())
@@ -353,6 +681,14 @@ export function info() {
 		interval: state.main.interval,
 		started: STARTED,
 		uptime: time() - STARTED,
+
+		// The whole of `config wanbind 'main'`, the same object `settings_get`
+		// answers with. Here as well because every surface that draws this
+		// answer also has to decide what to offer as the default for a *new*
+		// instance, and a second call to find that out is a second chance for
+		// the two to be read a tick apart and disagree.
+		settings: settingsRead(),
+
 		instances: out,
 
 		// Everything in the file, including whatever this daemon refused and
@@ -360,7 +696,16 @@ export function info() {
 		// `instances` above, because neither has any state to report. A page
 		// that drew only `instances` would leave out exactly the rows somebody
 		// opened it to fix.
-		configured: cfg.configured()
+		configured: cfg.configured(),
+
+		// The one-to-one half's own totals, and what the kernel did with the
+		// last pass's writes. Both are on `stats` as well, and both are here
+		// because this is the call every surface makes first: a page that had to
+		// fetch `stats` to find out whether any binding exists would either make
+		// two calls to draw one row or quietly leave the hand-placed bindings
+		// out of its counts, which is what the first draft of the page did.
+		core: direct.summary(),
+		netlink: netlinkCounters()
 	};
 };
 
@@ -380,6 +725,12 @@ export function stats() {
 			lastPassMs = st.lastPassMs;
 	}
 
+	// Read once. Two calls a few statements apart are two different routers as
+	// far as anything comparing `written` against `unverified` is concerned.
+	let core = direct.summary();
+	let written = count(core.written);
+	let unverified = count(core.unverified);
+
 	return {
 		rssKb: rssKb(),
 		uptime: time() - STARTED,
@@ -394,7 +745,32 @@ export function stats() {
 		// The other half's own numbers, kept separate rather than added into
 		// the ones above. A binding and an instance assignment are not the same
 		// unit and a total of the two would answer no question anybody has.
-		direct: direct.summary()
+		//
+		// Called `core` since 2.4.0, and `direct` before it. The name was
+		// accurate while this engine wrote nothing but the hand-placed
+		// bindings; it writes every rule this daemon puts on the router now, so
+		// a key called `direct` would be read as being about one of the two
+		// kinds of binding rather than about the engine underneath both.
+		core: core,
+
+		// What the kernel was still holding a moment after each write, which is
+		// a different question from how many writes the socket accepted.
+		//
+		// It is here rather than left inside `core` because it is a fact about
+		// this router rather than about the bindings on it: a rule that is
+		// accepted and gone a moment later is the signature of something else
+		// removing rules in this band, and this number is the answer to "why is
+		// that address on the wrong WAN when every row reads bound".
+		//
+		// `verified` is derived rather than counted. Every write is read back,
+		// so what did not come back missing landed.
+		netlink: {
+			written: written,
+			verified: (written > unverified) ? written - unverified : 0,
+			unverified: unverified,
+			removed: count(core.removed),
+			lastUnverified: (type(core.lastUnverified) == 'array') ? core.lastUnverified : []
+		}
 	};
 };
 
@@ -406,22 +782,26 @@ export function assignments(id) {
 		if (length(id) && st.instance.id != id)
 			continue;
 
-		for (let wan in st.wanOwner) {
-			let mac = st.wanOwner[wan];
-			let device = st.devices[mac];
-			if (!device)
-				continue;
+		// One row per seat, not one per WAN: above one client per WAN a line
+		// carries several people and a table that showed one of them would be
+		// hiding the rest from every surface at once.
+		for (let wan in st.wanOwners) {
+			for (let mac in engine.wanHolders(st, wan)) {
+				let device = st.devices[mac];
+				if (!device)
+					continue;
 
-			push(out, {
-				instance: st.instance.id,
-				mac: mac,
-				ip: device.ip,
-				host: device.host,
-				wan: wan,
-				pref: device.pref,
-				table: device.table,
-				assignedAt: type(st.assignedAt[mac]) == 'int' ? st.assignedAt[mac] : 0
-			});
+				push(out, {
+					instance: st.instance.id,
+					mac: mac,
+					ip: device.ip,
+					host: device.host,
+					wan: wan,
+					pref: device.pref,
+					table: device.table,
+					assignedAt: type(st.assignedAt[mac]) == 'int' ? st.assignedAt[mac] : 0
+				});
+			}
 		}
 	}
 
@@ -469,6 +849,31 @@ export function waiting(id) {
 				held: true,
 				why: 'held',
 				reason: 'held out of the pool by hand'
+			});
+		}
+
+		// Devices this instance is deliberately leaving alone. Listed rather
+		// than left out, because a device that is on the LAN, has a lease, and
+		// appears in none of this instance's tables is the hardest thing to
+		// account for on the page - and the answer is not that something went
+		// wrong, it is that somebody bound it by hand.
+		// Read from the MAC-keyed set the pass resolves, not from what the
+		// caller handed in: that one keys an address binding by its address, so
+		// walking it here put a row on the page whose "device" column held an
+		// IPv4 address and whose lease was never looked up.
+		for (let mac in st.reservedMacs) {
+			let device = st.devices[mac];
+
+			push(out, {
+				instance: st.instance.id,
+				mac: mac,
+				ip: device ? device.ip : text('' + st.reservedMacs[mac]),
+				host: device ? device.host : '',
+				order: 0,
+				since: 0,
+				held: false,
+				why: 'reserved',
+				reason: 'a one-to-one binding already decides this address, so this instance leaves it alone'
 			});
 		}
 	}
@@ -527,13 +932,32 @@ export function pin(args) {
 	if (type(table) != 'int')
 		return { ok: false, reason: wan + ' is not a WAN this instance can hand out' };
 
-	// Whoever has it now loses it and goes back in the queue. A pin is a
-	// deliberate instruction about one client, so it outranks the other's claim
-	// - but they are put in line rather than left with nothing and no record.
-	let holder = st.wanOwner[wan];
-	if (holder && holder != mac) {
-		engine.unbind(st, holder);
-		engine.enqueue(st, holder, time());
+	// A pin is a deliberate instruction about one client, so it outranks
+	// somebody else's claim on the line - but only when there is no room for
+	// both. Above one client per WAN the ordinary case is that the pinned
+	// device simply joins the others and nobody is moved at all.
+	//
+	// The newest holder is the one evicted, and only one of them: they have had
+	// the line for the shortest time, and taking the whole WAN off everybody to
+	// seat one person would be a far larger act than the button describes. They
+	// go into the queue rather than being left with nothing and no record.
+	if (!engine.wanRoom(st, wan) && !engine.onWan(st, wan, mac)) {
+		let newest = null;
+		let newestAt = 0;
+
+		for (let holder in engine.wanHolders(st, wan)) {
+			let at = (type(st.assignedAt[holder]) == 'int') ? st.assignedAt[holder] : 0;
+
+			if (newest === null || at >= newestAt) {
+				newest = holder;
+				newestAt = at;
+			}
+		}
+
+		if (newest) {
+			engine.unbind(st, newest);
+			engine.enqueue(st, newest, time());
+		}
 	}
 
 	engine.unbind(st, mac);
@@ -663,17 +1087,31 @@ export function reconcileNow(args) {
 	let now = time();
 	let out = [];
 
+	// The same map the timer builds, and it has to be built here too.
+	//
+	// It was not, and the effect was invisible in exactly the way this release
+	// is about: on the thirty-second timer an instance left a hand-bound address
+	// alone, and on `Run a pass now` - the button, the module's own action, and
+	// `bmwan reconcile` - it seated it, because `ctx.reserved` arrived undefined
+	// and every address on the router read as free. One pass would undo what the
+	// last one decided, on a router where nothing was misconfigured and no
+	// message was printed.
+	let reserved = reservedAddresses();
+
 	for (let st in each()) {
 		if (length(id) && st.instance.id != id)
 			continue;
 
-		push(out, reconcile.run(st, { bus: state.bus, now: now }));
+		push(out, reconcile.run(st, { bus: state.bus, now: now, reserved: reserved }));
 	}
 
 	if (length(id) && !length(out))
 		return { ok: false, reason: 'no instance by that name' };
 
-	return { ok: true, passes: out, direct: length(id) ? null : direct.run({ bus: state.bus, now: now }) };
+	// `core` rather than `direct`, for the reason `stats` gives: one engine
+	// writes every rule on this router now, and the key names the engine rather
+	// than one of the two kinds of binding it writes for.
+	return { ok: true, passes: out, core: length(id) ? null : direct.run({ bus: state.bus, now: now }) };
 };
 
 /**
@@ -767,29 +1205,6 @@ export function flush(args) {
 // acceptable, so a section written from here is put through exactly the checks
 // a section typed in by hand goes through - and a call that cannot pass them
 // leaves the file the way it found it.
-
-/**
- * A UCI cursor, or null - never an exception out of a ubus callback.
- *
- * `cursor()` answers null rather than raising when /etc/config cannot be
- * opened, so an unguarded one is a `uci.set` on null one read-only overlay
- * later - and that raise leaves the ubus callback it happened in, which is the
- * daemon's liveness rather than one failed call. Both outcomes are turned into
- * the single answer every caller below has a sentence for, which is the shape
- * `config.uc` and `direct.uc` already use for the same reason.
- */
-function openConfig() {
-	let uci = null;
-
-	try {
-		uci = cursor();
-	}
-	catch (e) {
-		uci = null;
-	}
-
-	return uci;
-}
 
 /** The binding by that name as the file has it, refused ones included. */
 function configuredBinding(id) {
@@ -909,6 +1324,108 @@ function restore(id, previous) {
 }
 
 /**
+ * Whether the router's rule table agrees with each of these rows.
+ *
+ * One dump for the whole list, and nothing written. A row that reads bound,
+ * held or fallback is claiming a rule at a priority, and `verified` is true
+ * when that exact rule is there. A row claiming none - disabled, refused,
+ * waiting for a lease to name an address - has nothing to check and is true,
+ * because the question is whether the router matches what the row says, and for
+ * those rows it does.
+ *
+ * False therefore means one of two things and both are worth the same colour: a
+ * rule this daemon believes it wrote is not on the router, or the rule table
+ * could not be read at all and nothing was confirmed. `verify` next door is
+ * where the difference is spelled out, and it writes nothing either.
+ */
+function markVerified(rows) {
+	let held = netlink.rules();
+	let seen = {};
+
+	for (let one in (held === null) ? [] : held)
+		seen[sprintf('%d|%s|%d', one.pref, one.cidr, one.table)] = true;
+
+	for (let row in rows) {
+		let claims = (row.state in [ 'bound', 'held', 'fallback' ]) &&
+			row.pref >= 1 && row.table >= 1 && length(text(row.ip));
+
+		row.verified = claims
+			? (seen[sprintf('%d|%s/32|%d', row.pref, row.ip, row.table)] === true)
+			: (held !== null);
+	}
+
+	return rows;
+}
+
+/**
+ * The seats every instance is currently holding, as bindings.
+ *
+ * An instance is a generator of bindings rather than a different kind of thing:
+ * it watches a LAN and hands out WANs, and what it produces on the wire is the
+ * same address-to-table rule a hand-placed binding is. So the two belong in one
+ * list, told apart by `source`, and a surface asking "what is bound on this
+ * router" gets the answer rather than half of it and a second call to make.
+ *
+ * Their id is `<instance>:<mac>`, which is not a section name and is not meant
+ * to be: nothing writes these, they exist for as long as the lease does, and
+ * `unbind` refuses one by name rather than pretending it could remove it.
+ *
+ * `whenDown` is `hold` for all of them and is not a choice anybody made. An
+ * instance's client that loses its WAN keeps its rule and is caught by the
+ * instance's own fail-closed catch-all underneath, which is the same promise a
+ * held binding makes by a different route.
+ */
+function derivedBindings() {
+	let out = [];
+
+	for (let st in each()) {
+		for (let wan in st.wanOwners) {
+			for (let mac in engine.wanHolders(st, wan)) {
+				let device = st.devices[mac];
+
+				if (!device)
+					continue;
+
+				push(out, {
+					id: sprintf('%s:%s', st.instance.id, mac),
+					name: length(text(device.host)) ? text(device.host) : mac,
+					enabled: true,
+					usable: true,
+					source: st.instance.id,
+					instance: st.instance.id,
+					targetKind: 'mac',
+					label: mac,
+					mac: mac,
+					host: text(device.host),
+					wan: wan,
+					lan: st.instance.lan,
+					lanCidr: text(st.lanCidr),
+					lanZone: '',
+					wanZone: '',
+					whenDown: 'hold',
+					pref: device.pref,
+					table: device.table,
+					stampedTable: device.table,
+					wanTable: device.table,
+					state: 'bound',
+					parkedBy: 'catch-all',
+					ip: text(device.ip),
+					since: (type(st.assignedAt[mac]) == 'int') ? st.assignedAt[mac] : 0,
+					reason: sprintf('seated by instance %s', st.instance.id),
+					shadowedBy: '',
+					forwarding: '',
+					needsForwarding: false,
+					needsTable: false,
+					evidence: ''
+				});
+			}
+		}
+	}
+
+	return out;
+}
+
+/**
  * Every binding in the file, with what the router is doing about it.
  *
  * The row is `bm.wanbind.direct`'s own, unchanged, wherever the last pass
@@ -925,7 +1442,7 @@ function restore(id, previous) {
  * `band` rides along because a caller about to add one needs to know which
  * priorities it may take, and whether it may take any at all.
  */
-export function bindings(id) {
+export function bindings(id, source) {
 	let live = {};
 
 	for (let row in direct.bindings()) {
@@ -939,13 +1456,25 @@ export function bindings(id) {
 		if (length(id) && one.id != id)
 			continue;
 
+		// Copied rather than pushed by reference: the two fields added below
+		// this loop would otherwise be written into the pass's own rows, and a
+		// read method quietly editing the state it is reporting on is a thing
+		// nobody looks for when the numbers stop adding up.
 		if (type(live[one.id]) == 'object') {
-			push(out, live[one.id]);
+			push(out, { ...live[one.id], source: 'manual' });
 			continue;
 		}
 
 		push(out, {
 			id: one.id,
+			// Every row here is one somebody placed by hand: a `config direct`
+			// section is the only kind of binding this daemon holds, and an
+			// instance's client assignments are answered by `assignments`
+			// rather than here. The field exists so that a reader never has to
+			// work that out - it is the same word the monitor labels a rule
+			// with, and what a surface showing hand-placed and pool-assigned
+			// addresses in one table sorts on.
+			source: 'manual',
 			name: one.name,
 			enabled: one.enabled,
 			usable: one.usable,
@@ -979,8 +1508,68 @@ export function bindings(id) {
 		});
 	}
 
+	for (let one in derivedBindings())
+		push(out, one);
+
+	let rows = markVerified(out);
+
+	// Narrowed after the rows are built rather than before, so that `counts`
+	// below is about the router rather than about the filter - a page showing
+	// "3 by hand" beside a filtered list of one would be answering a question
+	// nobody asked.
+	let want = text(source);
+	let wantId = text(id);
+	let shown = [];
+	let manual = 0;
+	let derived = 0;
+	let byState = {};
+
+	for (let row in rows) {
+		if (row.source == 'manual')
+			manual++;
+		else
+			derived++;
+
+		let key = length(row.state) ? row.state : 'pending';
+		byState[key] = (type(byState[key]) == 'int' ? byState[key] : 0) + 1;
+
+		if (length(want) && row.source != want)
+			continue;
+
+		if (length(wantId) && row.id != wantId)
+			continue;
+
+		push(shown, row);
+	}
+
+	// Every band a rule could legitimately sit in, so a reader does not have to
+	// know this daemon's numbering to tell a binding from an instance's client.
+	let bands = [];
+	for (let one in cfg.configured()) {
+		push(bands, {
+			id: one.id,
+			base: one.rulePrefBase,
+			top: one.catchAllPref - 1,
+			catchAllPref: one.catchAllPref,
+			catchAllTable: one.catchAllTable,
+			scope: ruleset.catchAllCidrs(one, '')
+		});
+	}
+
 	return {
-		bindings: out,
+		// One rule dump for the whole list, after it is built, so that the
+		// question "is the router actually doing this" costs the same on a
+		// router with one binding and one with two hundred.
+		bindings: shown,
+
+		// Whether anything was asked for, and therefore whether an empty list
+		// means "this router holds none" or "none matched what you asked".
+		// Those are different sentences and a surface cannot tell them apart
+		// from the list alone - which is how a filtered view comes to state a
+		// fact about the whole router.
+		filtered: (length(want) > 0 || length(wantId) > 0),
+		counts: { manual: manual, derived: derived, byState: byState },
+		instances: bands,
 		band: cfg.directBand(),
 
 		// Whether anything is keeping these rows true. A list of bindings read
@@ -991,6 +1580,116 @@ export function bindings(id) {
 		maintained: BINDINGS_MAINTAINED
 	};
 };
+
+/**
+ * Every routing table number something on this router is already routing
+ * through.
+ *
+ * Four sources, and leaving any of them out is the same failure wearing a
+ * different hat: two interfaces sharing one table is one connection's traffic
+ * leaving by another's port. netifd's dump is what is true now; the `ip4table`
+ * options in /etc/config/network are what will be true after the next reload,
+ * and a table written a moment ago is in the second and not the first; a
+ * binding's stamped table carries that binding's WAN.
+ *
+ * 254 and 255 are the router's own. 253 is deliberately not claimed here -
+ * OpenWrt leaves `default` empty, which is exactly what makes it the natural
+ * home for an `unreachable default` - so the two callers below add it or not
+ * according to what they are choosing a number for.
+ *
+ * Keyed by the number written out, because ucode object literals take labels
+ * and strings and not integers. `rules.uc` keeps the same set the same way.
+ */
+function routedTables(list) {
+	let taken = {};
+	let uci = openConfig();
+
+	let claim = function(n) {
+		if (type(n) == 'int' && n > 0)
+			taken[sprintf('%d', n)] = true;
+	};
+
+	claim(254);
+	claim(255);
+
+	for (let one in (type(list) == 'array') ? list : []) {
+		claim(one.table);
+
+		if (uci)
+			claim(numberOr(uci.get('network', one.name, 'ip4table'), 0));
+	}
+
+	for (let one in cfg.directConfigured())
+		claim(one.table);
+
+	return taken;
+}
+
+/**
+ * Why this interface must not be treated as a way out of the router, or null.
+ *
+ * Every path that acts on a WAN name asks this first, and the reason it exists
+ * is a router that lost a whole subnet. `bind` used to take the name on trust,
+ * find no `option ip4table` on it, and write one - and the name it had been
+ * given was a LAN. netifd reloaded, that LAN's connected route moved out of
+ * `main` into a table of its own, and from that moment nothing else on the
+ * router could reach the subnet: not the other LAN, not the router's own
+ * services, not the person who had just typed the command. Thirty-five devices
+ * re-ran DHCP. Nothing in the reply said anything had gone wrong.
+ *
+ * The check `bind_check` and `prepare` already make, made once more here at the
+ * point where the damage would be done, because a refusal a caller may skip is
+ * not a guard. A netifd that did not answer is not a verdict either way and is
+ * left to the caller: `allocateWanTable` refuses on it, and `bind` does not,
+ * because a binding written against a router that could not be read is one
+ * whose rule simply does not appear until it can be.
+ */
+function wanRoleRefusal(wan) {
+	let live = wans.dump(state.bus);
+
+	if (live === null)
+		return null;
+
+	let view = layout.classify(live, layout.statements());
+	let verdicts = (type(view.byName) == 'object') ? view.byName : {};
+	let verdict = verdicts[wan];
+
+	if (!verdict) {
+		return sprintf('netifd knows no interface called %s. This wants the name of the section in /etc/config/network - wan, wan2 - and not the device underneath it, which is what eth1.101 and pppoe-wan2 are', wan);
+	}
+
+	if (verdict.role == 'lan') {
+		return sprintf('%s is one of this router\'s own LANs, because %s. A binding that left by the network it is already on would send nothing anywhere - and giving it a routing table of its own, which is what preparing a WAN means, would take that subnet out of the router\'s main table and cut it off from everything else on this router',
+			wan, layout.clauses(verdict.lanEvidence));
+	}
+
+	return null;
+};
+
+/**
+ * The same, for choosing a table to give a WAN that has none.
+ *
+ * Two more are off limits here than when a catch-all table is being chosen. A
+ * WAN may not be handed 253 or any instance's `catch_all_table`, because those
+ * hold nothing but `unreachable default`: every client seated on that WAN would
+ * be dropped while every row on every surface read bound.
+ *
+ * Handed to `prepare` rather than left to it, so that one call preparing four
+ * WANs cannot give two of them the same number - `prepare` adds each one it
+ * allocates as it goes, and this is what it starts from.
+ */
+function wanTablesTaken(list) {
+	let taken = routedTables(list);
+
+	taken['253'] = true;
+
+	for (let one in cfg.configured()) {
+		if (one.catchAllTable > 0)
+			taken[sprintf('%d', one.catchAllTable)] = true;
+	}
+
+	return taken;
+}
 
 /**
  * A routing table for a WAN that has none, and the option that makes it real.
@@ -1015,29 +1714,53 @@ function allocateWanTable(wan) {
 	if (!uci)
 		return 0;
 
+	// Whatever the section already says, before anything is chosen.
+	//
+	// netifd is not the whole answer to "does this WAN have a table": an option
+	// written and not yet reloaded is in the file and not in the dump, so a
+	// reader that asked only netifd would decide the interface had none and
+	// write a second number over somebody else's. The number in the file wins
+	// and nothing is written.
+	let already = uci.get('network', wan, 'ip4table');
+
+	if (already != null && numberOr('' + already, 0) > 0)
+		return numberOr('' + already, 0);
+
+	// A dump that failed is not a router with no routing tables. Reading it that
+	// way would hand this WAN a number another interface is already using, which
+	// is the one state that sends one binding's traffic out of another's port -
+	// so a missing answer refuses rather than guesses.
+	let live = wans.dump(state.bus);
+
+	if (live === null) {
+		err(sprintf('netifd did not answer, so %s was not given a routing table - nothing was written', wan));
+		return 0;
+	}
+
 	// Keyed by the number written out, because ucode object literals take labels
 	// and strings and not integers - `{ 254: true }` does not parse. `rules.uc`
 	// keeps the same set the same way, for the same reason.
-	let taken = {};
-	let claim = function(n) {
-		if (n > 0)
-			taken[sprintf('%d', n)] = true;
-	};
+	// Asked here as well as at every caller, because this is the line that
+	// writes the option. `live` is already in hand, so the classification costs
+	// nothing, and what it prevents is the one write in this file that can take
+	// a subnet off the router.
+	let refusal = wanRoleRefusal(wan);
 
-	// The router's own, which nothing may take.
-	claim(254);
-	claim(255);
-	claim(253);
+	if (refusal) {
+		err(sprintf('%s was not given a routing table: %s', wan, refusal));
+		return 0;
+	}
 
-	for (let one in wans.dump(state.bus) ?? [])
-		claim(one.table);
+	let taken = wanTablesTaken(live);
 
-	for (let one in cfg.directConfigured() ?? [])
-		claim(one.table);
+	for (let one in cfg.directConfigured() ?? []) {
+		if (one.table > 0)
+			taken[sprintf('%d', one.table)] = true;
+	}
 
 	let table = 0;
 	for (let candidate = WAN_TABLE_BASE; candidate < WAN_TABLE_BASE + 1000; candidate++) {
-		if (!taken[sprintf('%d', candidate)]) {
+		if (taken[sprintf('%d', candidate)] !== true) {
 			table = candidate;
 			break;
 		}
@@ -1119,6 +1842,14 @@ export function bind(args) {
 
 	if (!length(wan))
 		return { ok: false, reason: 'name the WAN this binding leaves through' };
+
+	// Before a priority is chosen, before a table is allocated, and before one
+	// character is written. `bind_check` says the same thing, but a caller is
+	// free not to ask it, and the cost of finding out afterwards is a subnet.
+	let wanRefusal = wanRoleRefusal(wan);
+
+	if (wanRefusal)
+		return { ok: false, reason: wanRefusal };
 
 	let previous = configuredBinding(id);
 	let band = cfg.directBand();
@@ -1356,6 +2087,1833 @@ export function interfaces() {
 	return { ok: true, interfaces: out.list, stated: out.stated };
 };
 
+// ---------------------------------------------------------------------------
+// The instances, written from here.
+//
+// The binding half above writes /etc/config/bm_wanbind and re-reads it to find
+// out what it did, and everything below does the same. What is different is
+// that an instance already has rules on the router, written at numbers its own
+// section carries, so the order of the steps is not a matter of taste: a
+// section whose numbers move while its rules are still in place is an instance
+// whose next pass finds none of its own work and writes a second complete set.
+// See "Taking rules off before the config stops describing them" in
+// packages/README.md - this is that rule, carried out rather than described.
+//
+// Nothing here restarts the daemon. procd does restart it when this file
+// changes, which is how a hand edit takes effect and is deliberately not how
+// these do: a restart drops every other instance's queue and takes every
+// binding's rule off for the second or two it takes, and somebody editing one
+// instance has not asked for that.
+
+/** One finding: a level a surface can colour, a field it can point at, a sentence. */
+function finding(level, label, detail) {
+	return { level: level, label: label, detail: detail };
+}
+
+function hasError(findings) {
+	for (let one in findings) {
+		if (one.level == 'error')
+			return true;
+	}
+
+	return false;
+}
+
+/**
+ * What dnsmasq will hand out on this LAN, and where the two numbers live.
+ *
+ * Read here rather than in `bm.wanbind.prepare` because this is the half that
+ * only looks. Raising the ceilings is opt-in, so the ordinary answer to one
+ * that is too low is a sentence naming the exact `uci set` lines rather than a
+ * write nobody asked for.
+ *
+ * The section-naming rule - a `config dhcp` with no `option interface` means
+ * itself - is `prepare`'s spelling of it, and it is the one thing three
+ * separate readers of /etc/config/dhcp have disagreed about before.
+ */
+function dhcpCeilings(lan) {
+	let out = { section: '', global: '', limit: 0, ceiling: 0 };
+	let uci = openConfig();
+
+	if (!uci || !length(lan))
+		return out;
+
+	try {
+		uci.foreach('dhcp', 'dhcp', (one) => {
+			let name = text(one['.name']);
+			let iface = text(one.interface);
+
+			if ((length(iface) ? iface : name) == lan)
+				out.section = name;
+		});
+
+		uci.foreach('dhcp', 'dnsmasq', (one) => {
+			if (!length(out.global))
+				out.global = text(one['.name']);
+		});
+	}
+	catch (e) {
+		// No /etc/config/dhcp, or one that will not parse. Both mean this
+		// router cannot be asked, which is not the same as an answer of zero -
+		// the caller checks for the section names before it says anything.
+		return out;
+	}
+
+	if (length(out.section))
+		out.limit = numberOr(uci.get('dhcp', out.section, 'limit'), 0);
+
+	if (length(out.global))
+		out.ceiling = numberOr(uci.get('dhcp', out.global, 'dhcpleasemax'), 0);
+
+	return out;
+}
+
+/**
+ * How many clients this instance could ever seat.
+ *
+ * The pool times the per-WAN limit, which is the number every surface shows -
+ * except when the limit is 0, which is no limit, and then the pool is not the
+ * ceiling at all. What bounds it there is how many addresses the instance's
+ * scope holds, because every one of them could arrive and every one of them
+ * would be seated on the same line.
+ *
+ * Counted by multiplication for the reason `wans.uc` gives about its own
+ * arithmetic: ucode's shifts are signed 64-bit, and a wide block shifted rather
+ * than multiplied comes back negative.
+ */
+function seatsFor(spec, pool, cidrs) {
+	if (spec.clientsPerWan > 0)
+		return length(pool) * spec.clientsPerWan;
+
+	let addresses = 0;
+
+	for (let cidr in (type(cidrs) == 'array') ? cidrs : []) {
+		let parts = match(cidr, /^[0-9.]+\/([0-9]+)$/);
+		if (!parts)
+			continue;
+
+		let size = 1;
+		for (let i = 0; i < 32 - int(parts[1]); i++)
+			size = size * 2;
+
+		addresses = addresses + size;
+	}
+
+	return addresses;
+}
+
+/** The instance by that name as the file has it, refused ones included. */
+function configuredInstance(id) {
+	for (let one in cfg.configured()) {
+		if (one.id == id)
+			return one;
+	}
+
+	return null;
+}
+
+/**
+ * One section exactly as UCI holds it, for putting back after a refused write.
+ *
+ * Raw options rather than the record `configured()` builds, and that is the
+ * whole point of it. That record has every default filled in, so a section
+ * restored from it would come back carrying an `option release_grace '120'`
+ * this daemon invented on the way past - a section that reads the same today
+ * and differently the day a default moves. What a person actually wrote is what
+ * goes back, including the options they left out staying out.
+ */
+function rawSection(id) {
+	let uci = openConfig();
+
+	if (!uci)
+		return null;
+
+	let all = uci.get_all(PACKAGE, id);
+	return (type(all) == 'object') ? all : null;
+}
+
+/**
+ * Put a section back the way it was, after a write the config reader refused.
+ *
+ * `restore()` next door does the same job for a binding by naming each field;
+ * this does it by copying, for the reason `rawSection` gives. `previous` is
+ * null when there was no such section, and then this is simply the delete -
+ * which is the correct undo of a create that was refused.
+ */
+function restoreSection(id, kind, previous) {
+	// Nothing to answer here - the caller is already returning the refusal that
+	// brought us in - so the only thing this can do about a config it cannot
+	// open is say so where somebody will find it afterwards.
+	let uci = openConfig();
+
+	if (!uci) {
+		err(sprintf('%s %s: /etc/config could not be opened, so the refused write was left exactly as it is; check /etc/config/bm_wanbind by hand', kind, id));
+		return;
+	}
+
+	let kept = (type(previous) == 'object') ? previous : null;
+	let sectionType = kept ? text(kept['.type']) : '';
+
+	uci.delete(PACKAGE, id);
+
+	if (kept && !length(sectionType)) {
+		err(sprintf('%s %s: the section that was there had no type, so it could not be put back; check /etc/config/bm_wanbind by hand', kind, id));
+	}
+	else if (kept) {
+		uci.set(PACKAGE, id, sectionType);
+
+		for (let key in kept) {
+			// UCI's own bookkeeping - .name, .type, .anonymous, .index - is not
+			// an option, and setting one would write it into the file as one.
+			if (substr(key, 0, 1) == '.')
+				continue;
+
+			uci.set(PACKAGE, id, key, kept[key]);
+		}
+	}
+
+	if (uci.commit(PACKAGE) === null)
+		err(sprintf('%s %s: the refused write could not be undone; check /etc/config/bm_wanbind by hand', kind, id));
+}
+
+/**
+ * Why this name cannot be an instance, or null.
+ *
+ * The same three questions `bind` asks about a binding's name, pointed the
+ * other way. The third is the one that matters: a `config direct` section of
+ * the same name would be turned into an instance by the write below, which is
+ * one address's hand-placed binding replaced by a whole LAN's pool - by a call
+ * that was editing something else entirely.
+ */
+function refuseInstanceId(id) {
+	if (!length(id))
+		return 'name the instance: the section name is its identity here, in the app, and in every log line about it';
+
+	if (!match(id, SECTION_NAME))
+		return sprintf('%s is not a name a UCI section can have; letters, digits and underscores, up to 32 of them', id);
+
+	if (id == 'main')
+		return 'main is this package\'s own settings section and is not an instance';
+
+	for (let one in cfg.directConfigured()) {
+		if (one.id == id) {
+			return sprintf('%s is already a one-to-one binding in /etc/config/bm_wanbind - one address nailed to one WAN port by hand. Give the instance another name', id);
+		}
+	}
+
+	return null;
+}
+
+
+
+/**
+ * The numbers a create is given when the caller named none.
+ *
+ * `rule_pref_base` follows the instances already on this router when there are
+ * any, rather than the setting. Two instances numbering their clients from
+ * different bases is legal and works; it is also one more thing for somebody
+ * reading `ip -4 rule show` at three in the morning to hold in their head, and
+ * nothing is bought by it. The setting is what a router with no instances uses.
+ *
+ * `catch_all_pref` is the lowest number from the base upwards that no section
+ * in the file is using - disabled and refused ones included, because either may
+ * have a rule at that priority on the router right now, and a second catch-all
+ * written there would have the two rewriting each other on every pass. `slot`
+ * is how far above the base it landed, which is the number a surface shows
+ * instead of a five-digit priority nobody chose.
+ *
+ * `catch_all_table` is the setting unless something is actually routing through
+ * it. Two instances sharing one is fine and ordinary - it holds nothing but
+ * `unreachable default`, and both write the same route into it - so only real
+ * traffic is in the way, and that means netifd's tables and the tables the
+ * hand-placed bindings are stamped with.
+ */
+function allocateInstance(id, settings, configured, list) {
+	let out = {
+		rule_pref_base: settings.rule_pref_base,
+		catch_all_pref: 0,
+		catch_all_table: 0,
+		slot: -1
+	};
+
+	let takenPref = {};
+	let followed = 0;
+
+	for (let one in configured) {
+		if (one.id == id)
+			continue;
+
+		takenPref[sprintf('%d', one.catchAllPref)] = true;
+
+		if (!followed && one.rulePrefBase >= 1)
+			followed = one.rulePrefBase;
+	}
+
+	if (followed)
+		out.rule_pref_base = followed;
+
+	for (let candidate = settings.catch_all_pref_base;
+		candidate < settings.catch_all_pref_base + CATCH_ALL_SPAN; candidate++) {
+		if (takenPref[sprintf('%d', candidate)] !== true) {
+			out.catch_all_pref = candidate;
+			out.slot = candidate - settings.catch_all_pref_base;
+			break;
+		}
+	}
+
+	// Only what is actually carrying traffic is in the way. Two instances
+	// sharing one catch-all table is fine and ordinary - it holds nothing but
+	// `unreachable default`, and both write the same route into it - so the
+	// other instances' choices are not claimed here.
+	let takenTable = routedTables(list);
+
+	for (let candidate = settings.catch_all_table;
+		candidate > settings.catch_all_table - 16 && candidate > 0; candidate--) {
+		if (takenTable[sprintf('%d', candidate)] !== true) {
+			out.catch_all_table = candidate;
+			break;
+		}
+	}
+
+	return out;
+}
+
+/**
+ * One spec out of what the caller sent and what the section already says.
+ *
+ * Absent means unchanged, everywhere, and on a create it means "allocate" for
+ * the four numbers `allocateInstance` picks and "the main section's default"
+ * for the three timers. Both are read through `given()` rather than through
+ * truthiness - see there for the three edits that would otherwise silently do
+ * nothing.
+ *
+ * The result is the record shape `bm.wanbind.config` builds, not the snake_case
+ * the arguments arrive in, so that it can be handed straight to `wans.pool`,
+ * `rules.catchAllCidrs` and `prepare.prepareInstance` without a second
+ * translation for any of them to disagree about.
+ */
+function mergeInstance(id, args, live) {
+	let previous = (type(live.previous) == 'object') ? live.previous : null;
+	let settings = live.settings;
+
+	let allocated = previous
+		? {
+			rule_pref_base: previous.rulePrefBase,
+			catch_all_pref: previous.catchAllPref,
+			catch_all_table: previous.catchAllTable,
+			slot: (previous.catchAllPref >= settings.catch_all_pref_base)
+				? previous.catchAllPref - settings.catch_all_pref_base : -1
+		}
+		: allocateInstance(id, settings, live.configured, live.list);
+
+	let spec = {
+		id: id,
+		name: pickText(args, 'name', text(live.previousName)),
+		enabled: pickFlag(args, 'enabled', previous ? previous.enabled : true),
+		lan: pickText(args, 'lan', previous ? previous.lan : ''),
+		carrier: pickText(args, 'carrier', previous ? previous.carrier : ''),
+		sticky: pickFlag(args, 'sticky', previous ? previous.sticky : true),
+		remap: pickFlag(args, 'remap', previous ? previous.remap : true),
+		clientsPerWan: pickNumber(args, 'clients_per_wan', previous ? previous.clientsPerWan : 1),
+		rangeFrom: pickText(args, 'range_from', previous ? previous.rangeFrom : ''),
+		rangeTo: pickText(args, 'range_to', previous ? previous.rangeTo : ''),
+		rulePrefBase: pickNumber(args, 'rule_pref_base', allocated.rule_pref_base),
+		catchAllPref: pickNumber(args, 'catch_all_pref', allocated.catch_all_pref),
+		catchAllTable: pickNumber(args, 'catch_all_table', allocated.catch_all_table),
+		wanWarnUptime: pickNumber(args, 'wan_warn_uptime',
+			previous ? previous.wanWarnUptime : settings.wan_warn_uptime),
+		wanErrorGrace: pickNumber(args, 'wan_error_grace',
+			previous ? previous.wanErrorGrace : settings.wan_error_grace),
+		releaseGrace: pickNumber(args, 'release_grace',
+			previous ? previous.releaseGrace : settings.release_grace),
+
+		// Never written into the section. It is an instruction about this call -
+		// go and raise somebody else's lease ceilings - rather than a fact about
+		// the instance, and a router that had been asked once should not go on
+		// raising them every time the instance is edited afterwards.
+		raiseDhcpLimits: pickFlag(args, 'raise_dhcp_limits', false)
+	};
+
+	if (!length(spec.name))
+		spec.name = id;
+
+	return { spec: spec, allocated: allocated };
+}
+
+/**
+ * Everything wrong with this spec, weighed against this router.
+ *
+ * Shared by `instance_check` and `instance_set` so that the sentence somebody
+ * reads before pressing Save is the same sentence that would have refused the
+ * write - a check that agreed and a write that then refused would be two
+ * opinions with one name.
+ *
+ * `error` means nothing is written. `warning` means it will work and somebody
+ * should look; `info` is what this call is about to do to the router beyond the
+ * section itself. The classifier's own verdict is what decides the first of
+ * those for the LAN, and the evidence is quoted rather than summarised: an
+ * operator can check "it has a default route" against their own router where
+ * they cannot check "it looks like an uplink".
+ */
+function instanceFindings(spec, previous, live) {
+	let out = [];
+	let list = (type(live.list) == 'array') ? live.list : null;
+	let verdicts = (type(live.view) == 'object' && type(live.view.byName) == 'object')
+		? live.view.byName : {};
+	let configured = (type(live.configured) == 'array') ? live.configured : [];
+	let settings = live.settings;
+
+	if (list === null) {
+		push(out, finding('warning', 'router', 'netifd did not answer, so nothing here has been weighed against this router\'s own interfaces - only the numbers were checked. The LAN, the pool and the range are all being taken on trust'));
+	}
+
+	// --- which side of the router the LAN is on.
+	if (!length(spec.lan)) {
+		push(out, finding('error', 'lan', 'no LAN is set, so there is no subnet to bind clients from and nothing for the fail-closed catch-all to cover'));
+	}
+	else if (list !== null) {
+		let verdict = verdicts[spec.lan];
+
+		if (!verdict) {
+			push(out, finding('warning', 'lan', sprintf('netifd knows no interface called %s. This wants the name of the section in /etc/config/network - lan, lan_guest - and not the bridge device underneath it, which is what br-lan is', spec.lan)));
+		}
+		else if (verdict.role == 'uplink') {
+			push(out, finding('error', 'lan', sprintf('%s is one of this router\'s ways out, because %s. An instance binds the clients of a LAN; pointed at an uplink it would fence the addresses on the far side of the router and hand them WANs out of a pool they are already in',
+				spec.lan, layout.clauses(verdict.uplinkEvidence))));
+		}
+		else if (verdict.role == 'unclear') {
+			push(out, finding('warning', 'lan', sprintf('this router cannot tell which side %s is on. It reads as a LAN because %s, and as a way out because %s. Check it before the catch-all fences a subnet nobody meant',
+				spec.lan, layout.clauses(verdict.lanEvidence), layout.clauses(verdict.uplinkEvidence))));
+		}
+		else if (!length(text(verdict.zone))) {
+			push(out, finding('warning', 'lan', sprintf('%s is in no firewall zone, so there is no source zone to forward its clients from and no forwarding will be written. Their rules would select them into a WAN\'s table and fw4 would drop the traffic, with nothing on any surface saying so', spec.lan)));
+		}
+	}
+
+	// --- the pool.
+	let pool = (list !== null) ? wans.pool(list, spec) : [];
+
+	if (!length(spec.carrier)) {
+		push(out, finding('error', 'carrier', 'no carrier is set, so there are no WANs to hand out'));
+	}
+	else if (list !== null && !length(pool)) {
+		push(out, finding('warning', 'carrier', sprintf('no interface on this router sits on %s, so the pool is empty and every client would wait in the queue. A carrier is the device the WANs are on - eth1 - and every VLAN of it, eth1.101 and eth1.102, is in the pool with it',
+			spec.carrier)));
+	}
+
+	let untabled = [];
+	for (let one in pool) {
+		if (!one.table)
+			push(untabled, one.name);
+	}
+
+	if (length(untabled)) {
+		push(out, finding('info', 'tables', sprintf('%d WAN(s) in this pool have no routing table of their own - %s. Each is given one from %d upwards in /etc/config/network and netifd is reloaded once; a WAN without one is a client whose rule points at an empty table and falls through to the default connection',
+			length(untabled), join(', ', untabled), settings.wan_table_base)));
+	}
+
+	// --- the addresses this instance would claim.
+	let lanCidr = (list !== null && length(spec.lan)) ? wans.lanCidr(list, spec.lan) : null;
+	let ranged = length(spec.rangeFrom) && length(spec.rangeTo);
+
+	if (length(spec.rangeFrom) && !length(spec.rangeTo))
+		push(out, finding('error', 'range_to', 'range_from is set without range_to, so there is no range. Set both, or neither for the whole LAN'));
+
+	if (length(spec.rangeTo) && !length(spec.rangeFrom))
+		push(out, finding('error', 'range_from', 'range_to is set without range_from, so there is no range. Set both, or neither for the whole LAN'));
+
+	if (ranged) {
+		let low = wans.ipToInt(spec.rangeFrom);
+		let high = wans.ipToInt(spec.rangeTo);
+
+		if (low === null) {
+			push(out, finding('error', 'range_from', sprintf('range_from %s is not an IPv4 address', spec.rangeFrom)));
+		}
+		else if (high === null) {
+			push(out, finding('error', 'range_to', sprintf('range_to %s is not an IPv4 address', spec.rangeTo)));
+		}
+		else if (low > high) {
+			push(out, finding('error', 'range_from', sprintf('range_from %s is above range_to %s; a range runs upwards', spec.rangeFrom, spec.rangeTo)));
+		}
+		else if (!length(wans.rangeCidrs(spec.rangeFrom, spec.rangeTo))) {
+			push(out, finding('error', 'range_from', sprintf('range %s-%s cannot be written as a set of address blocks, so there is no catch-all that would cover exactly it - and a fence with a hole in it is worse than none',
+				spec.rangeFrom, spec.rangeTo)));
+		}
+		else if (lanCidr && (!wans.contains(lanCidr, spec.rangeFrom) || !wans.contains(lanCidr, spec.rangeTo))) {
+			push(out, finding('error', 'range_from', sprintf('range %s-%s is not inside %s\'s subnet %s, so no lease could ever fall in it and this instance would bind nobody',
+				spec.rangeFrom, spec.rangeTo, spec.lan, lanCidr)));
+		}
+	}
+
+	// What no section can see on its own: the other sections. `bm.wanbind.config`
+	// makes the same test when it reads the file back, and refuses the *later*
+	// section - which by then is this one, written. Saying it here is what keeps
+	// the write from happening at all.
+	let mineLow = ranged ? wans.ipToInt(spec.rangeFrom) : 0;
+	let mineHigh = ranged ? wans.ipToInt(spec.rangeTo) : 4294967295;
+
+	if (mineLow !== null && mineHigh !== null) {
+		for (let one in configured) {
+			if (one.id == spec.id || !one.enabled || one.reason || one.lan != spec.lan)
+				continue;
+
+			let whole = !(length(one.rangeFrom) && length(one.rangeTo));
+			let theirLow = whole ? 0 : wans.ipToInt(one.rangeFrom);
+			let theirHigh = whole ? 4294967295 : wans.ipToInt(one.rangeTo);
+
+			if (theirLow === null || theirHigh === null)
+				continue;
+
+			if (mineLow > theirHigh || mineHigh < theirLow)
+				continue;
+
+			push(out, finding('error', 'range_from', sprintf('instance %s already binds %s on %s, and two instances cannot decide the same address - each would read the other\'s rules as strays and delete them, once a pass, for ever. Give this one a range that does not overlap, or a different LAN',
+				one.id, whole ? 'the whole of it' : sprintf('%s-%s', one.rangeFrom, one.rangeTo), spec.lan)));
+			break;
+		}
+	}
+
+	// --- the numbers the rules are written at.
+	if (spec.rulePrefBase < 1 || spec.rulePrefBase > MAX_PREF) {
+		push(out, finding('error', 'rule_pref_base', sprintf('rule_pref_base %d is not an ip rule priority', spec.rulePrefBase)));
+	}
+	else if (spec.rulePrefBase <= settings.band.top) {
+		push(out, finding('error', 'rule_pref_base', sprintf('rule_pref_base %d is inside the %d-%d band the hand-placed bindings are numbered in. The kernel takes the lowest matching rule, so down there a binding stops outranking this instance - and worse, this instance counts its own client priorities from here upwards, adopts that binding\'s rule as one of its assignments, finds no lease behind it and deletes it on the next pass',
+			spec.rulePrefBase, settings.band.base, settings.band.top)));
+	}
+
+	if (spec.catchAllPref < 1) {
+		push(out, finding('error', 'catch_all_pref', sprintf('every catch-all priority from %d to %d is already taken by an instance in this file, so there is none left to give a new one. Widen the band with `option catch_all_pref_base` on the main section, or delete an instance that is no longer wanted',
+			settings.catch_all_pref_base, settings.catch_all_pref_base + CATCH_ALL_SPAN - 1)));
+	}
+	else if (spec.catchAllPref <= spec.rulePrefBase) {
+		push(out, finding('error', 'catch_all_pref', sprintf('rule_pref_base %d is not below catch_all_pref %d, so there is no range to write client rules in',
+			spec.rulePrefBase, spec.catchAllPref)));
+	}
+	else if (spec.catchAllPref - spec.rulePrefBase < MIN_PREF_SPAN) {
+		push(out, finding('error', 'catch_all_pref', sprintf('only %d ip rule priorities between rule_pref_base %d and catch_all_pref %d; at least %d are needed, and that number is also the most clients this instance could ever seat',
+			spec.catchAllPref - spec.rulePrefBase, spec.rulePrefBase, spec.catchAllPref, MIN_PREF_SPAN)));
+	}
+
+	for (let one in configured) {
+		if (one.id == spec.id)
+			continue;
+
+		if (one.catchAllPref == spec.catchAllPref && spec.catchAllPref >= 1) {
+			push(out, finding('error', 'catch_all_pref', sprintf('catch_all_pref %d is already instance %s\'s. The whole priority group is compared as a set, so each of the two would find the other\'s blocks sitting there and replace them, on every pass, for ever',
+				spec.catchAllPref, one.id)));
+			break;
+		}
+	}
+
+	if (spec.catchAllTable < 1 || spec.catchAllTable > MAX_TABLE) {
+		push(out, finding('error', 'catch_all_table', sprintf('catch_all_table %d is not a routing table number, and there was none free near %d to give this instance instead',
+			spec.catchAllTable, settings.catch_all_table)));
+	}
+	else if (spec.catchAllTable == 254 || spec.catchAllTable == 255) {
+		push(out, finding('error', 'catch_all_table', sprintf('catch_all_table %d is the router\'s own main or local table; putting an `unreachable default` in it would take the router off the network',
+			spec.catchAllTable)));
+	}
+	else {
+		for (let one in pool) {
+			if (one.table == spec.catchAllTable) {
+				push(out, finding('error', 'catch_all_table', sprintf('catch_all_table %d is %s\'s own routing table, and the catch-all writes `unreachable default` into it. Every client this instance seated on %s would be blocked while every row read bound',
+					spec.catchAllTable, one.name, one.name)));
+				break;
+			}
+		}
+	}
+
+	if (spec.clientsPerWan < 0 || spec.clientsPerWan > MAX_CLIENTS_PER_WAN) {
+		push(out, finding('error', 'clients_per_wan', sprintf('clients_per_wan %d is not a number of clients; 1 gives each WAN to one device, a larger number is how many may share one, and 0 means no limit',
+			spec.clientsPerWan)));
+	}
+
+	for (let one in [ [ 'wan_warn_uptime', spec.wanWarnUptime ], [ 'wan_error_grace', spec.wanErrorGrace ], [ 'release_grace', spec.releaseGrace ] ]) {
+		if (one[1] < 0 || one[1] > MAX_GRACE) {
+			push(out, finding('error', one[0], sprintf('%s %d is not a number of seconds; 0 to %d',
+				one[0], one[1], MAX_GRACE)));
+		}
+	}
+
+	// --- what dnsmasq will actually hand out, which bounds all of the above.
+	let cidrs = ruleset.catchAllCidrs(spec, lanCidr ? lanCidr : '');
+	let seats = seatsFor(spec, pool, cidrs);
+	let dhcp = dhcpCeilings(spec.lan);
+
+	if (seats > 0 && length(dhcp.section) && length(dhcp.global)) {
+		// Absent means dnsmasq's own default of 150 rather than no limit, which
+		// is the mistake worth avoiding here: a router that has never been
+		// touched reads as unlimited and is the one most likely to run out.
+		let limit = (dhcp.limit > 0) ? dhcp.limit : 150;
+		let ceiling = (dhcp.ceiling > 0) ? dhcp.ceiling : 150;
+
+		if (limit < seats || ceiling < seats) {
+			push(out, finding(spec.raiseDhcpLimits ? 'info' : 'warning', 'dhcp', sprintf('this pool could seat %d clients and dnsmasq stops at %d on %s, %d on the router. It does not say so when it stops - it simply answers no more leases, and a client with no lease is a client with no rule%s:  uci set dhcp.%s.limit=%d ; uci set dhcp.%s.dhcpleasemax=%d ; uci commit dhcp ; /etc/init.d/dnsmasq restart',
+				seats, limit, spec.lan, ceiling,
+				spec.raiseDhcpLimits ? '. This call raises both, which is these two lines' : '. Raise both',
+				dhcp.section, seats, dhcp.global, seats)));
+		}
+	}
+
+	// --- and what this call is about to do beyond the section.
+	if (previous && previous.enabled && !spec.enabled) {
+		push(out, finding('info', 'enabled', sprintf('%s is being switched off, so its rules come off the router first - the catch-all with them. Its clients go back to whatever routing this router would have given them',
+			spec.id)));
+	}
+
+	return out;
+}
+
+/**
+ * What the rules already on the router were written against and is now moving.
+ *
+ * Six fields, and every one of them decides either where a rule sits or which
+ * addresses count as this instance's. Change one while the rules are in place
+ * and the next pass looks for its own work at the new numbers, finds none, and
+ * writes a second complete set beside the first - so a move here is exactly
+ * what makes `instance_set` flush before it writes rather than after.
+ *
+ * `enabled` going false is in the list for the same reason turned around: a
+ * section that is switched off is one the daemon never reads again, and its
+ * rules would stay on the router with nothing left that knew whose they were.
+ */
+function instanceMoves(spec, previous) {
+	let out = [];
+
+	if (!previous)
+		return out;
+
+	let pairs = [
+		[ 'lan', previous.lan, spec.lan ],
+		[ 'rule_pref_base', sprintf('%d', previous.rulePrefBase), sprintf('%d', spec.rulePrefBase) ],
+		[ 'catch_all_pref', sprintf('%d', previous.catchAllPref), sprintf('%d', spec.catchAllPref) ],
+		[ 'catch_all_table', sprintf('%d', previous.catchAllTable), sprintf('%d', spec.catchAllTable) ],
+		[ 'range_from', previous.rangeFrom, spec.rangeFrom ],
+		[ 'range_to', previous.rangeTo, spec.rangeTo ]
+	];
+
+	for (let one in pairs) {
+		if (one[1] != one[2])
+			push(out, { field: one[0], from: one[1], to: one[2] });
+	}
+
+	if (previous.enabled && !spec.enabled)
+		push(out, { field: 'enabled', from: '1', to: '0' });
+
+	return out;
+}
+
+/**
+ * What the last pass decided, held up against what the kernel is holding.
+ *
+ * Reads and answers; writes nothing, deliberately. A pass that finds a rule
+ * missing writes it again, which is the right thing for a pass and the wrong
+ * thing for a question - somebody asking what the difference *is* has to be
+ * able to ask twice and get the same answer both times.
+ *
+ * `missing` is a rule this daemon believes it wrote and the kernel is not
+ * holding. That is not hypothetical: a Bored Manager module older than 3.4.0
+ * sweeps the whole binding band every two seconds while it is connected and
+ * deletes every rule no record of its own describes, which on a router this
+ * daemon is binding is all of them.
+ *
+ * `extra` is the other direction - a rule sitting inside one of this daemon's
+ * own claims that nothing here wants. Anything outside every claim appears in
+ * neither list and is never counted: it belongs to another tool or to whoever
+ * administers the router, and this method has no opinion about it.
+ */
+function verifyRules(id) {
+	let present = netlink.rules();
+
+	if (present === null) {
+		return {
+			ok: false,
+			read: false,
+			checked: 0,
+			present: 0,
+			missing: [],
+			extra: [],
+			reason: 'the router\'s ip rules could not be read, so there was nothing to compare against'
+		};
+	}
+
+	let held = {};
+	for (let one in present)
+		held[sprintf('%d|%s|%d', one.pref, one.cidr, one.table)] = true;
+
+	let wanted = {};
+	let order = [];
+
+	let want = function(pref, cidr, table, who, source) {
+		let key = sprintf('%d|%s|%d', pref, cidr, table);
+
+		if (key in wanted)
+			return;
+
+		wanted[key] = { pref: pref, cidr: cidr, table: table, id: who, source: source };
+		push(order, key);
+	};
+
+	for (let st in each()) {
+		if (length(id) && st.instance.id != id)
+			continue;
+
+		for (let mac in st.devices) {
+			let device = st.devices[mac];
+
+			if (!device.wan || type(device.pref) != 'int' || type(device.table) != 'int')
+				continue;
+
+			if (!length(text(device.ip)))
+				continue;
+
+			want(device.pref, device.ip + '/32', device.table, mac, st.instance.id);
+		}
+
+		// The blocks the fail-closed catch-all is written as, which is the one
+		// rule group whose absence is not one client going astray but a whole
+		// LAN leaking out of the router's default connection.
+		for (let cidr in st.scope)
+			want(st.instance.catchAllPref, cidr, st.instance.catchAllTable, 'catch-all', st.instance.id);
+	}
+
+	// The hand-placed bindings belong to no instance, so a call that named one
+	// leaves them out - the same rule `reconcile` follows for the same reason.
+	if (!length(id)) {
+		for (let row in direct.bindings()) {
+			if (!(row.state in [ 'bound', 'held', 'fallback' ]))
+				continue;
+
+			if (row.pref < 1 || row.table < 1 || !length(text(row.ip)))
+				continue;
+
+			want(row.pref, row.ip + '/32', row.table, row.id, 'manual');
+		}
+	}
+
+	let missing = [];
+	let found = 0;
+
+	for (let key in order) {
+		if (held[key] === true)
+			found++;
+		else
+			push(missing, wanted[key]);
+	}
+
+	let extra = [];
+	let counted = {};
+
+	let stray = function(one, source) {
+		let key = sprintf('%d|%s|%d', one.pref, one.cidr, one.table);
+
+		if (key in wanted || counted[key] === true)
+			return;
+
+		counted[key] = true;
+		push(extra, { pref: one.pref, cidr: one.cidr, table: one.table, id: '', source: source });
+	};
+
+	for (let st in each()) {
+		if (length(id) && st.instance.id != id)
+			continue;
+
+		for (let one in ruleset.ownedClientRules(present, st.instance, st.lanCidr))
+			stray(one, st.instance.id);
+
+		for (let one in present) {
+			if (one.pref == st.instance.catchAllPref)
+				stray(one, st.instance.id);
+		}
+	}
+
+	if (!length(id)) {
+		let band = cfg.directBand();
+		let stamped = {};
+
+		for (let one in cfg.directConfigured()) {
+			if (one.pref >= 1)
+				stamped[sprintf('%d', one.pref)] = true;
+		}
+
+		for (let one in ruleset.directOwned(present, band.base, band.top, stamped))
+			stray(one, 'manual');
+	}
+
+	return {
+		ok: (!length(missing) && !length(extra)),
+		read: true,
+		checked: length(order),
+		present: found,
+		missing: missing,
+		extra: extra,
+		reason: null
+	};
+}
+
+/**
+ * What would happen, without anything happening.
+ *
+ * The same merge, the same findings and the same allocation `instance_set`
+ * runs, stopped one step before the write. That is the whole contract: a check
+ * that said yes and a write that then refused would be two opinions wearing one
+ * name, and the surfaces are built to put Save behind this answer.
+ */
+export function instanceCheck(args) {
+	let id = trim(text(args.id));
+	let refusal = refuseInstanceId(id);
+
+	if (refusal) {
+		return {
+			ok: false,
+			reason: refusal,
+			findings: [ finding('error', 'id', refusal) ],
+			allocated: null,
+			effective: null,
+			scope: null,
+			pool: [],
+			moves: []
+		};
+	}
+
+	let settings = settingsRead();
+	let configured = cfg.configured();
+	let list = wans.dump(state.bus);
+
+	// One reading of netifd for the whole answer. `layout.read()` would dump it
+	// a second time, and two dumps a few milliseconds apart are two different
+	// routers as far as anything comparing them is concerned.
+	let view = (list === null)
+		? { byName: {}, list: [], stated: false }
+		: layout.classify(list, layout.statements());
+
+	let previous = configuredInstance(id);
+	let raw = previous ? rawSection(id) : null;
+
+	let merged = mergeInstance(id, args, {
+		previous: previous,
+		previousName: raw ? text(raw.name) : '',
+		settings: settings,
+		configured: configured,
+		list: list
+	});
+
+	let findings = instanceFindings(merged.spec, previous, {
+		list: list,
+		view: view,
+		settings: settings,
+		configured: configured
+	});
+
+	let lanCidr = (list !== null && length(merged.spec.lan)) ? wans.lanCidr(list, merged.spec.lan) : null;
+	let names = [];
+
+	for (let one in (list !== null) ? wans.pool(list, merged.spec) : [])
+		push(names, one.name);
+
+	return {
+		ok: !hasError(findings),
+		findings: findings,
+		allocated: merged.allocated,
+		effective: merged.spec,
+
+		// Null rather than an empty pair when the LAN has no address yet. The
+		// blocks are what the catch-all is written as, and "we do not know"
+		// must not be readable as "it fences nothing".
+		scope: lanCidr ? { lanCidr: lanCidr, cidrs: ruleset.catchAllCidrs(merged.spec, lanCidr) } : null,
+		pool: names,
+
+		// What the rules on the router were written against and would move, so
+		// that a surface can say "this takes its rules off first" before
+		// somebody presses the button rather than afterwards.
+		moves: instanceMoves(merged.spec, previous)
+	};
+};
+
+/**
+ * Create an instance, or change one that is there.
+ *
+ * One method for both, exactly as `bind` is: the router is the source of truth,
+ * the caller says what the section should contain, and this makes the file say
+ * it. A module that lost track of what it had already written converges rather
+ * than creating a second instance for the same LAN.
+ *
+ * The order below is the whole of the method and none of it is arbitrary.
+ *
+ *   1. the name, before anything is read - a name that cannot be a section, or
+ *      is already a binding, is refused before this touches the file
+ *   2. the merge, absent meaning unchanged and, on a create, allocated
+ *   3. the findings; one error and nothing at all is written
+ *   4. the flush, if anything the rules were written against is moving. This is
+ *      before the write and not after it, because after it the section no
+ *      longer describes the rules that are on the router
+ *   5. the write, then the read-back through the daemon's own reader. A section
+ *      it refuses is put back exactly as it was
+ *   6. the running process, rebuilt for this one id without a restart
+ *   7. the two things on the router a rule is no use without
+ *   8. a pass now, and then what the kernel is actually holding
+ */
+export function instanceSet(args) {
+	let id = trim(text(args.id));
+	let refusal = refuseInstanceId(id);
+
+	if (refusal) {
+		return {
+			ok: false,
+			reason: refusal,
+			findings: [ finding('error', 'id', refusal) ],
+			instance: null,
+			flushed: 0,
+			prepared: null,
+			pass: null,
+			verified: 0,
+			unverified: 0
+		};
+	}
+
+	let settings = settingsRead();
+	let configured = cfg.configured();
+	let list = wans.dump(state.bus);
+	let view = (list === null)
+		? { byName: {}, list: [], stated: false }
+		: layout.classify(list, layout.statements());
+
+	let previous = configuredInstance(id);
+	let raw = previous ? rawSection(id) : null;
+
+	let merged = mergeInstance(id, args, {
+		previous: previous,
+		previousName: raw ? text(raw.name) : '',
+		settings: settings,
+		configured: configured,
+		list: list
+	});
+
+	let spec = merged.spec;
+
+	let findings = instanceFindings(spec, previous, {
+		list: list,
+		view: view,
+		settings: settings,
+		configured: configured
+	});
+
+	if (hasError(findings)) {
+		return {
+			ok: false,
+			reason: 'the spec did not pass validation',
+			findings: findings,
+			instance: previous,
+			flushed: 0,
+			prepared: null,
+			pass: null,
+			verified: 0,
+			unverified: 0
+		};
+	}
+
+	// --- 4. Take the rules off before the file stops describing them.
+	let moves = instanceMoves(spec, previous);
+	let flushed = 0;
+
+	if (previous && length(moves) && previous.usable) {
+		let held = netlink.rules();
+
+		// A dump that failed is no information about anything, and writing the
+		// new numbers on top of rules that are still there would leave a second
+		// complete set on the router with nothing left that knew whose the
+		// first one was. Refusing the whole call is the only honest answer.
+		if (held === null) {
+			return {
+				ok: false,
+				reason: sprintf('%s was left exactly as it is: the router\'s ip rules could not be read, so the rules written against its old numbers could not be taken off first. Try again, or run `bmwan flush --instance %s` and then make the change',
+					id, id),
+				findings: findings,
+				instance: previous,
+				flushed: 0,
+				prepared: null,
+				pass: null,
+				verified: 0,
+				unverified: 0
+			};
+		}
+
+		// By the numbers the *previous* section carries, which are what the
+		// rules on the router were written against. That is the entire reason
+		// this happens here and not after the write.
+		flushed = ruleset.flush(previous, held, (list !== null) ? wans.lanCidr(list, previous.lan) : null);
+
+		let was = state.instances[id];
+		if (was)
+			was.ready = false;
+	}
+	else if (previous && length(moves)) {
+		// A section the reader already refuses is one this daemon never ran, so
+		// there is nothing of its to flush - and flushing by a priority range
+		// that does not add up is how somebody else's rules come off. Said out
+		// loud rather than done quietly, because it may have had rules from
+		// before it was broken.
+		notice(sprintf('instance %s: its numbers were already refused (%s), so nothing was taken off the router before this edit. If it had rules from before it broke, `ip -4 rule show` will still show them',
+			id, previous.reason));
+	}
+
+	// --- 5. The section.
+	let uci = openConfig();
+
+	if (!uci) {
+		return {
+			ok: false,
+			reason: 'nothing was written: /etc/config could not be opened, so /etc/config/bm_wanbind is exactly as it was. Check that the overlay is mounted and writable',
+			findings: findings,
+			instance: previous,
+			flushed: flushed,
+			prepared: null,
+			pass: null,
+			verified: 0,
+			unverified: 0
+		};
+	}
+
+	uci.set(PACKAGE, id, 'instance');
+	uci.set(PACKAGE, id, 'enabled', spec.enabled ? '1' : '0');
+
+	// The label every surface shows. `bm.wanbind.config` has no use for it - an
+	// instance is known by its section name everywhere this daemon speaks - so
+	// it is the one field here that is written and never read back, and the one
+	// with no refusal attached to it.
+	if (length(spec.name) && spec.name != id)
+		uci.set(PACKAGE, id, 'name', spec.name);
+	else
+		uci.delete(PACKAGE, id, 'name');
+
+	uci.set(PACKAGE, id, 'lan', spec.lan);
+	uci.set(PACKAGE, id, 'carrier', spec.carrier);
+	uci.set(PACKAGE, id, 'sticky', spec.sticky ? '1' : '0');
+	uci.set(PACKAGE, id, 'remap', spec.remap ? '1' : '0');
+	uci.set(PACKAGE, id, 'clients_per_wan', sprintf('%d', spec.clientsPerWan));
+
+	// Both or neither, always. One end without the other reads as a whole-LAN
+	// instance and binds every address the operator meant to leave alone; it is
+	// refused above, but an edit that cleared only one of them would write
+	// exactly that section, so the two are set and removed as a pair.
+	if (length(spec.rangeFrom) && length(spec.rangeTo)) {
+		uci.set(PACKAGE, id, 'range_from', spec.rangeFrom);
+		uci.set(PACKAGE, id, 'range_to', spec.rangeTo);
+	}
+	else {
+		uci.delete(PACKAGE, id, 'range_from');
+		uci.delete(PACKAGE, id, 'range_to');
+	}
+
+	// Stamped, every one of them, including the three that are only ever the
+	// main section's defaults today. That is what makes those defaults safe to
+	// change on a running router: an instance carries its own copy and reads
+	// that copy for ever, so moving a default decides what the next instance
+	// gets and says nothing about this one.
+	uci.set(PACKAGE, id, 'rule_pref_base', sprintf('%d', spec.rulePrefBase));
+	uci.set(PACKAGE, id, 'catch_all_pref', sprintf('%d', spec.catchAllPref));
+	uci.set(PACKAGE, id, 'catch_all_table', sprintf('%d', spec.catchAllTable));
+	uci.set(PACKAGE, id, 'wan_warn_uptime', sprintf('%d', spec.wanWarnUptime));
+	uci.set(PACKAGE, id, 'wan_error_grace', sprintf('%d', spec.wanErrorGrace));
+	uci.set(PACKAGE, id, 'release_grace', sprintf('%d', spec.releaseGrace));
+
+	if (uci.commit(PACKAGE) === null) {
+		restoreSection(id, 'instance', raw);
+		return {
+			ok: false,
+			reason: 'the instance would not commit to /etc/config/bm_wanbind; the file may be read-only or the overlay full',
+			findings: findings,
+			instance: previous,
+			flushed: flushed,
+			prepared: null,
+			pass: null,
+			verified: 0,
+			unverified: 0
+		};
+	}
+
+	// Read back rather than trusted. Everything above is a field going into a
+	// file; whether those fields are an instance this router can act on is one
+	// question with one answer, and it is `bm.wanbind.config`'s.
+	let written = configuredInstance(id);
+
+	if (!written || written.reason) {
+		restoreSection(id, 'instance', raw);
+		return {
+			ok: false,
+			reason: written ? written.reason : 'the instance was written but cannot be read back out of /etc/config/bm_wanbind',
+			findings: findings,
+			instance: previous,
+			flushed: flushed,
+			prepared: null,
+			pass: null,
+			verified: 0,
+			unverified: 0
+		};
+	}
+
+	// --- 6. The running process, without restarting it.
+	//
+	// The state for this one id is thrown away and rebuilt, and the order is
+	// re-read from the file so that a new instance takes its place in it. What
+	// survives is what `engine.create` reads back out of /etc/bm/state - the
+	// sticky choices and the holds - because those are the two decisions no
+	// rule on the router records.
+	delete state.instances[id];
+
+	if (written.usable && written.enabled)
+		state.instances[id] = engine.create(written);
+
+	state.order = [];
+	for (let one in cfg.configured()) {
+		if (state.instances[one.id])
+			push(state.order, one.id);
+	}
+
+	// --- 7. The two things on the router a rule is no use without.
+	let prepared = { tables: [], forwardings: 0, catchAll: [], dhcp: null };
+	let pool = (list !== null) ? wans.pool(list, written) : [];
+
+	if (written.enabled) {
+		// `taken` seeded rather than left empty. `prepare` numbers a WAN with no
+		// table of its own from wan_table_base upwards and adds each number it
+		// hands out, but it has no way of knowing what the rest of the router is
+		// already routing through - and the first free-looking number on an
+		// unseeded run is the base itself, which is very often already another
+		// WAN's.
+		let done = prepare.prepareInstance(written, pool, view,
+			{ bus: state.bus, defer: false, taken: wanTablesTaken(list) });
+
+		// Logged rather than returned as a failure. The section is written and
+		// correct; what could not be done is a firewall forwarding or a routing
+		// table, and the next pass tries again - where a refusal here would
+		// leave the caller believing nothing had been written at all.
+		if (!done.ok)
+			err(sprintf('instance %s: %s', id, done.reason));
+
+		if (spec.raiseDhcpLimits) {
+			let lanCidr = (list !== null) ? wans.lanCidr(list, written.lan) : null;
+			let wanted = seatsFor(written, pool, ruleset.catchAllCidrs(written, lanCidr ? lanCidr : ''));
+
+			prepared.dhcp = prepare.raiseDhcpLimits(written.lan, wanted, { bus: state.bus });
+
+			if (!prepared.dhcp.ok)
+				err(sprintf('instance %s: %s', id, prepared.dhcp.reason));
+		}
+	}
+
+	// A fresh cursor: `prepare` committed /etc/config/network through one of its
+	// own, and the one opened above has its idea of that package from before.
+	let after = openConfig();
+
+	for (let one in pool) {
+		push(prepared.tables, {
+			wan: one.name,
+			table: after ? numberOr(after.get('network', one.name, 'ip4table'), 0) : 0
+		});
+	}
+
+	prepared.forwardings = length(prepare.instanceForwardings()[id] ?? []);
+
+	// --- 8. A pass now, rather than in up to `interval` seconds. Somebody who
+	// pressed this is watching the clients they just scoped, and a rule that
+	// appears half a minute later looks exactly like one that was never written.
+	let passes = pass();
+	let report = null;
+
+	if (state.main.enabled) {
+		// `pass()` reports in `state.order` order, and a pass that failed
+		// carries no instance name to match on - so the position in the list is
+		// what identifies this one's row.
+		for (let i = 0; i < length(state.order); i++) {
+			if (state.order[i] == id && i < length(passes))
+				report = passes[i];
+		}
+	}
+
+	let running = state.instances[id];
+	prepared.catchAll = (running && length(running.scope))
+		? running.scope
+		: ruleset.catchAllCidrs(written, (list !== null) ? (wans.lanCidr(list, written.lan) ?? '') : '');
+
+	// And what the kernel is actually holding, which is a different question
+	// from what the pass decided. A write the socket accepted and something else
+	// removed a moment later looks, from inside a pass, exactly like one that
+	// landed.
+	let checked = verifyRules(id);
+
+	notice(sprintf('instance %s: %s on %s over %s, %d client(s) per WAN, %s',
+		id, written.enabled ? 'running' : 'stopped', written.lan, written.carrier,
+		written.clientsPerWan,
+		(length(written.rangeFrom) && length(written.rangeTo))
+			? sprintf('%s-%s', written.rangeFrom, written.rangeTo) : 'the whole LAN'));
+
+	return {
+		ok: true,
+		reason: null,
+		findings: findings,
+		instance: written,
+		flushed: flushed,
+		prepared: prepared,
+		pass: report,
+		read: checked.read,
+		verified: checked.read ? checked.present : 0,
+		unverified: checked.read ? length(checked.missing) : 0
+	};
+};
+
+/**
+ * Take an instance off the router: its rules, its firewall path, its section
+ * and what it remembered.
+ *
+ * The order is the opposite of `unbind` next door, and the difference is worth
+ * being explicit about because getting it wrong strands rules. A binding's rule
+ * is found by sweeping a band the daemon owns outright, so deleting the section
+ * first is how the rule is described as unwanted. An instance's rules are found
+ * by the priority range written in its own section - delete that first and the
+ * only description of what to remove has gone with it.
+ *
+ * What could not be finished is reported rather than papered over, in the same
+ * shape `unbind` uses: `ok` stays true because the instance really is gone, and
+ * `reason` is the sentence saying what is still on the router.
+ */
+export function instanceDelete(args) {
+	let id = trim(text(args.id));
+
+	if (!length(id))
+		return { ok: false, id: '', removed: 0, forwardings: 0, reason: 'name the instance to remove' };
+
+	let one = configuredInstance(id);
+
+	if (!one) {
+		return {
+			ok: false,
+			id: id,
+			removed: 0,
+			forwardings: 0,
+			reason: sprintf('no instance called %s in /etc/config/bm_wanbind', id)
+		};
+	}
+
+	let notes = [];
+	let removed = 0;
+
+	if (one.usable) {
+		let held = netlink.rules();
+
+		if (held === null) {
+			return {
+				ok: false,
+				id: id,
+				removed: 0,
+				forwardings: 0,
+				reason: sprintf('%s was left alone: the router\'s ip rules could not be read, so nothing could be taken off - and deleting the section first would lose the only description of which rules were its. Try again, or run `bmwan flush --instance %s` first',
+					id, id)
+			};
+		}
+
+		let list = wans.dump(state.bus);
+		removed = ruleset.flush(one, held, (list !== null) ? wans.lanCidr(list, one.lan) : null);
+	}
+	else {
+		push(notes, sprintf('its numbers were refused (%s), so no rule was removed by them - deleting by a priority range that does not add up is how somebody else\'s rules come off. Check `ip -4 rule show` for anything it left from before it broke',
+			one.reason));
+	}
+
+	let forwardings = prepare.withdrawInstance(id, {});
+
+	let uci = openConfig();
+
+	if (!uci) {
+		return {
+			ok: false,
+			id: id,
+			removed: removed,
+			forwardings: forwardings,
+			reason: sprintf('%s had its rules taken off, but /etc/config could not be opened so the section is still in /etc/config/bm_wanbind - and the next pass will write every one of those rules again. Delete it by hand, or try again', id)
+		};
+	}
+
+	uci.delete(PACKAGE, id);
+
+	if (uci.commit(PACKAGE) === null) {
+		return {
+			ok: false,
+			id: id,
+			removed: removed,
+			forwardings: forwardings,
+			reason: sprintf('%s had its rules taken off and its section would not be removed from /etc/config/bm_wanbind, so the next pass will write them again', id)
+		};
+	}
+
+	delete state.instances[id];
+
+	state.order = [];
+	for (let row in cfg.configured()) {
+		if (state.instances[row.id])
+			push(state.order, row.id);
+	}
+
+	// The one thing here that is not in the config and not on the wire: the
+	// sticky map and the holds, which is the only state on this router that no
+	// rule records. Left behind, it is a file naming an instance that no longer
+	// exists - and, if the name is ever reused, one that would hand the new
+	// instance's clients the WAN choices of the old one's.
+	let saved = engine.stateName(one);
+
+	if (readState(saved) !== null && !removeState(saved)) {
+		push(notes, sprintf('what it remembered is still in /etc/bm/state/%s.json; an instance created with this name again would start from those sticky choices and those holds', saved));
+	}
+
+	notice(sprintf('instance %s removed, %d rule(s) and %d firewall forwarding(s) with it', id, removed, forwardings));
+
+	return {
+		ok: true,
+		id: id,
+		removed: removed,
+		forwardings: forwardings,
+		reason: length(notes) ? join('; ', notes) : null
+	};
+};
+
+// ---------------------------------------------------------------------------
+// The settings, the router's interfaces, and the two questions that only read.
+
+/**
+ * Change `config wanbind 'main'`.
+ *
+ * Absent means unchanged, as everywhere else here. Two of the ten do something
+ * beyond being written:
+ *
+ * `interval` re-arms the timer through `schedule()`, so a router told to
+ * reconcile every ten seconds does not wait out the old interval first.
+ *
+ * `enabled` going false takes every instance's rules off *before* the section
+ * says so, and that ordering is the whole of why this method exists rather than
+ * a `uci set`. The daemon decides what to look at by reading its config, so a
+ * switched-off pool is one it never reads again - and its rules would stay on
+ * the router with nothing left that knew whose they were, the catch-all
+ * included, which is a LAN pointed at an unreachable table by nobody. The
+ * hand-placed bindings are untouched: `enabled` is the instance half's switch
+ * and says nothing about them.
+ *
+ * A band that is not usable afterwards is put back and refused. It is the one
+ * setting whose being wrong is silent - every future `bind` is refused by a
+ * sentence about a number nobody remembers changing.
+ */
+export function settingsSet(args) {
+	let previous = settingsRead();
+
+	let want = {
+		enabled: pickFlag(args, 'enabled', previous.enabled),
+		interval: pickNumber(args, 'interval', previous.interval),
+		direct_pref_base: pickNumber(args, 'direct_pref_base', previous.direct_pref_base),
+		rule_pref_base: pickNumber(args, 'rule_pref_base', previous.rule_pref_base),
+		catch_all_pref_base: pickNumber(args, 'catch_all_pref_base', previous.catch_all_pref_base),
+		catch_all_table: pickNumber(args, 'catch_all_table', previous.catch_all_table),
+		wan_table_base: pickNumber(args, 'wan_table_base', previous.wan_table_base),
+		wan_warn_uptime: pickNumber(args, 'wan_warn_uptime', previous.wan_warn_uptime),
+		wan_error_grace: pickNumber(args, 'wan_error_grace', previous.wan_error_grace),
+		release_grace: pickNumber(args, 'release_grace', previous.release_grace)
+	};
+
+	let refuse = function(reason) {
+		return { ok: false, reason: reason, settings: previous };
+	};
+
+	if (want.interval < MIN_INTERVAL || want.interval > MAX_INTERVAL) {
+		return refuse(sprintf('interval %d is outside %d-%d. Below %d a full pass on a large LAN would overlap the one before it, and nothing here changes that fast',
+			want.interval, MIN_INTERVAL, MAX_INTERVAL, MIN_INTERVAL));
+	}
+
+	if (want.direct_pref_base < 1 || want.direct_pref_base + previous.band.span - 1 > MAX_PREF) {
+		return refuse(sprintf('direct_pref_base %d cannot hold the %d ip rule priorities a binding band is',
+			want.direct_pref_base, previous.band.span));
+	}
+
+	if (want.rule_pref_base < 1 || want.rule_pref_base > MAX_PREF)
+		return refuse(sprintf('rule_pref_base %d is not an ip rule priority', want.rule_pref_base));
+
+	if (want.direct_pref_base + previous.band.span > want.rule_pref_base) {
+		return refuse(sprintf('direct_pref_base %d opens a band of %d that reaches %d, which is not below rule_pref_base %d. A binding numbered up there is adopted by an instance as one of its own client assignments, found to have no lease behind it, and deleted on the next pass',
+			want.direct_pref_base, previous.band.span,
+			want.direct_pref_base + previous.band.span - 1, want.rule_pref_base));
+	}
+
+	if (want.catch_all_pref_base - want.rule_pref_base < MIN_PREF_SPAN) {
+		return refuse(sprintf('only %d ip rule priorities between rule_pref_base %d and catch_all_pref_base %d; at least %d are needed, and that number is also the most clients one instance could seat',
+			want.catch_all_pref_base - want.rule_pref_base, want.rule_pref_base,
+			want.catch_all_pref_base, MIN_PREF_SPAN));
+	}
+
+	if (want.catch_all_table < 1 || want.catch_all_table > MAX_TABLE)
+		return refuse(sprintf('catch_all_table %d is not a routing table number', want.catch_all_table));
+
+	if (want.catch_all_table == 254 || want.catch_all_table == 255) {
+		return refuse(sprintf('catch_all_table %d is the router\'s own main or local table; putting an `unreachable default` in it would take the router off the network',
+			want.catch_all_table));
+	}
+
+	if (want.wan_table_base < 1 || want.wan_table_base + 999 > MAX_TABLE) {
+		return refuse(sprintf('wan_table_base %d cannot hold the thousand routing table numbers a WAN is given one out of; the highest is %d',
+			want.wan_table_base, MAX_TABLE));
+	}
+
+	for (let one in [ [ 'wan_warn_uptime', want.wan_warn_uptime ], [ 'wan_error_grace', want.wan_error_grace ], [ 'release_grace', want.release_grace ] ]) {
+		if (one[1] < 0 || one[1] > MAX_GRACE)
+			return refuse(sprintf('%s %d is not a number of seconds; 0 to %d', one[0], one[1], MAX_GRACE));
+	}
+
+	// The rules come off before the config stops describing them. Every usable
+	// instance, one at a time and by its own numbers, and the whole call is
+	// refused if any of them cannot be done - which is what packages/README.md
+	// says Stop does, said here in the one place that can do it.
+	if (previous.enabled && !want.enabled) {
+		for (let one in cfg.configured()) {
+			if (!one.usable)
+				continue;
+
+			let out = flush({ instance: one.id });
+
+			if (!out.ok) {
+				return refuse(sprintf('the pools were left switched on: %s\'s rules could not be taken off (%s), and switching off while they are still on the router leaves a LAN pointed at an unreachable table with nothing left maintaining it. Try again, or run `bmwan flush --instance %s` first',
+					one.id, out.reason, one.id));
+			}
+		}
+	}
+
+	let raw = rawSection('main');
+	let uci = openConfig();
+
+	if (!uci) {
+		return refuse('nothing was written: /etc/config could not be opened, so /etc/config/bm_wanbind is exactly as it was. Check that the overlay is mounted and writable');
+	}
+
+	uci.set(PACKAGE, 'main', 'wanbind');
+	uci.set(PACKAGE, 'main', 'enabled', want.enabled ? '1' : '0');
+	uci.set(PACKAGE, 'main', 'interval', sprintf('%d', want.interval));
+	uci.set(PACKAGE, 'main', 'direct_pref_base', sprintf('%d', want.direct_pref_base));
+	uci.set(PACKAGE, 'main', 'rule_pref_base', sprintf('%d', want.rule_pref_base));
+	uci.set(PACKAGE, 'main', 'catch_all_pref_base', sprintf('%d', want.catch_all_pref_base));
+	uci.set(PACKAGE, 'main', 'catch_all_table', sprintf('%d', want.catch_all_table));
+	uci.set(PACKAGE, 'main', 'wan_table_base', sprintf('%d', want.wan_table_base));
+	uci.set(PACKAGE, 'main', 'wan_warn_uptime', sprintf('%d', want.wan_warn_uptime));
+	uci.set(PACKAGE, 'main', 'wan_error_grace', sprintf('%d', want.wan_error_grace));
+	uci.set(PACKAGE, 'main', 'release_grace', sprintf('%d', want.release_grace));
+
+	if (uci.commit(PACKAGE) === null)
+		return refuse('the settings would not commit to /etc/config/bm_wanbind; the file may be read-only or the overlay full');
+
+	// Read back through the daemon's own readers rather than trusted, exactly
+	// as a section is. The band is the one that can fail here: it is worked out
+	// from where the instances have put their priority ranges, so a
+	// direct_pref_base that is fine on its own may still reach one of them.
+	let after = settingsRead();
+
+	if (!after.band.usable) {
+		restoreSection('main', 'settings', raw);
+		return refuse(after.band.reason);
+	}
+
+	// The two that are not only a value in a file.
+	state.main = cfg.main();
+	schedule();
+
+	// Switched back on: a pass now rather than in up to `interval` seconds,
+	// for the reason `bind` runs one - somebody who pressed this is watching a
+	// LAN full of clients that are not bound yet.
+	if (!previous.enabled && after.enabled)
+		pass();
+
+	notice(sprintf('settings: pools are %s, reconciling every %ds', after.enabled ? 'on' : 'off', after.interval));
+
+	return { ok: true, reason: null, settings: after };
+};
+
+/**
+ * Every interface this router could bind through, and the devices they sit on.
+ *
+ * One netifd dump and one classification for the whole answer, which is what
+ * makes this cheap enough for a form to open on. It is the union of three
+ * questions a surface used to ask separately and then have to reconcile: what
+ * netifd says, what this router reads each interface as, and what this daemon
+ * is currently doing with it.
+ *
+ * `carriers` is the same list grouped by the device underneath, because a
+ * carrier is what an instance names and a VLAN is not something anybody wants
+ * to type out of `ip link`. A trailing `.101` is the VLAN tag, so `eth1.101`
+ * and `eth1.102` are two WANs on the carrier `eth1` - which is exactly the
+ * grouping `wans.pool` matches on.
+ */
+export function wanList() {
+	let list = wans.dump(state.bus);
+
+	if (list === null) {
+		return {
+			ok: false,
+			reason: 'netifd did not answer, so nothing can be said about this router\'s interfaces. Try again, and if it keeps happening check that netifd is running - `ubus call network.interface dump`',
+			wans: [],
+			carriers: []
+		};
+	}
+
+	let view = layout.classify(list, layout.statements());
+	let verdicts = (type(view.byName) == 'object') ? view.byName : {};
+	let settings = settingsRead();
+
+	// Which instance owns which interface, and who is on it. Built from the
+	// pool the same way the pass builds it, so a surface and a pass cannot
+	// disagree about what is in a carrier.
+	let owner = {};
+	let holders = {};
+	let warnUptime = {};
+
+	for (let st in each()) {
+		for (let one in wans.pool(list, st.instance)) {
+			owner[one.name] = st.instance.id;
+			warnUptime[one.name] = st.instance.wanWarnUptime;
+
+			let who = [];
+			for (let mac in engine.wanHolders(st, one.name))
+				push(who, mac);
+
+			holders[one.name] = who;
+		}
+	}
+
+	let out = [];
+	let byCarrier = {};
+	let order = [];
+
+	for (let one in list) {
+		let verdict = verdicts[one.name];
+		let device = length(one.device) ? one.device : one.l3Device;
+
+		// The carrier is the device with its VLAN tag taken off, which is the
+		// name an instance is configured with.
+		let tagged = match(device, /^(.+)\.[0-9]+$/);
+		let carrier = tagged ? tagged[1] : device;
+
+		push(out, {
+			name: one.name,
+			proto: one.proto,
+			device: one.device,
+			l3Device: one.l3Device,
+			carrier: carrier,
+			up: one.up,
+			pending: one.pending,
+			uptime: one.uptime,
+			errorCode: one.errorCode,
+			ipv4: one.ipv4,
+			table: (type(one.table) == 'int') ? one.table : 0,
+			zone: verdict ? text(verdict.zone) : '',
+			role: verdict ? verdict.role : 'unclear',
+
+			// The classifier's own words, so that a refusal about this
+			// interface can be checked against the router rather than argued
+			// with. Whichever side it came down on is the side quoted.
+			//
+			// A list rather than the joined phrase `layout.clauses` builds: a
+			// caller can always join a list, and cannot reliably take one apart.
+			// The pickers show these under an option, where one clause per line
+			// reads better than a sentence anyway.
+			evidence: verdict
+				? ((verdict.role == 'lan') ? verdict.lanEvidence : verdict.uplinkEvidence)
+				: [],
+
+			instance: text(owner[one.name]),
+			holders: (type(holders[one.name]) == 'array') ? holders[one.name] : [],
+
+			// The same word `assignments` and the LuCI table use. `dialing` is
+			// deliberately not an error: a pool of five thousand PPPoE sessions
+			// has some of them dialling at any moment, and a page that painted
+			// those red would be red permanently.
+			state: wans.state(one, numberOr(warnUptime[one.name], settings.wan_warn_uptime))
+		});
+
+		if (!length(carrier))
+			continue;
+
+		if (!(carrier in byCarrier)) {
+			byCarrier[carrier] = { device: carrier, up: false, wans: [] };
+			push(order, carrier);
+		}
+
+		push(byCarrier[carrier].wans, one.name);
+
+		// Up when anything on it is up. A carrier is a piece of cable rather
+		// than an interface, and the only thing anybody wants to know about it
+		// here is whether choosing it would give an instance a pool at all.
+		if (one.up)
+			byCarrier[carrier].up = true;
+	}
+
+	let carriers = [];
+	for (let name in order)
+		push(carriers, byCarrier[name]);
+
+	return { ok: true, reason: null, wans: out, carriers: carriers };
+};
+
+/**
+ * What would be refused, or worth a second look, about a binding not yet made.
+ *
+ * The same shape `instance_check` has, for the same reason: a surface puts Save
+ * behind this answer, so it has to be the answer `bind` would give. What it
+ * cannot do is be exhaustive - `bind` writes the section and asks
+ * `bm.wanbind.config` to read it back, and that reader is the only thing that
+ * decides. This is everything that can be known before the write, which is all
+ * of what a person can act on and none of what only the file can settle.
+ */
+export function bindCheck(args) {
+	let out = [];
+	let id = trim(text(args.id));
+
+	if (!length(id)) {
+		push(out, finding('error', 'id', 'name the binding: the section name is its identity here, in the app, and in every log line about it'));
+	}
+	else if (!match(id, SECTION_NAME)) {
+		push(out, finding('error', 'id', sprintf('%s is not a name a UCI section can have; letters, digits and underscores, up to 32 of them', id)));
+	}
+	else if (id == 'main') {
+		push(out, finding('error', 'id', 'main is this package\'s own settings section and is not a binding'));
+	}
+	else {
+		for (let one in cfg.configured()) {
+			if (one.id == id) {
+				push(out, finding('error', 'id', sprintf('%s is already an instance in /etc/config/bm_wanbind - a whole LAN sharing a pool of WANs. Give the binding another name', id)));
+				break;
+			}
+		}
+	}
+
+	let ip = trim(text(args.ip));
+	let mac = trim(text(args.mac));
+	let wan = trim(text(args.wan));
+	let lan = trim(text(args.lan));
+
+	if (length(ip) && length(mac)) {
+		push(out, finding('error', 'target', 'send ip or mac, not both: a binding follows one thing, an address or a device wherever its lease puts it'));
+	}
+	else if (!length(ip) && !length(mac)) {
+		push(out, finding('error', 'target', 'send ip or mac - there is nothing for this binding to follow'));
+	}
+
+	let whenDown = lc(trim(text(args.when_down)));
+
+	if (length(whenDown) && !(whenDown in [ 'hold', 'fallback' ])) {
+		push(out, finding('error', 'when_down', sprintf('when_down %s is neither hold nor fallback. hold parks the address on the unreachable table, so while its WAN is down it has no way out at all; fallback re-points it at the main table, so it leaves over whatever connection the router would have used anyway. There is no third answer - taking the rule away is fallback with nothing to say so',
+			whenDown)));
+	}
+
+	let list = wans.dump(state.bus);
+	let verdicts = {};
+
+	if (list === null) {
+		push(out, finding('warning', 'router', 'netifd did not answer, so the WAN and the LAN have not been weighed against this router\'s own interfaces - only the numbers were checked'));
+	}
+	else {
+		let view = layout.classify(list, layout.statements());
+		verdicts = (type(view.byName) == 'object') ? view.byName : {};
+	}
+
+	if (!length(wan)) {
+		push(out, finding('error', 'wan', 'name the WAN this binding leaves through'));
+	}
+	else if (list !== null) {
+		let verdict = verdicts[wan];
+
+		if (!verdict) {
+			push(out, finding('error', 'wan', sprintf('netifd knows no interface called %s. This wants the name of the section in /etc/config/network - wan, wan2 - and not the device underneath it, which is what eth1.101 and pppoe-wan2 are', wan)));
+		}
+		else if (verdict.role == 'lan') {
+			push(out, finding('error', 'wan', sprintf('%s is one of this router\'s own LANs, because %s. A binding that left by the network it is already on would send nothing anywhere',
+				wan, layout.clauses(verdict.lanEvidence))));
+		}
+		else if (verdict.role == 'unclear') {
+			push(out, finding('warning', 'wan', sprintf('this router cannot tell which side %s is on. It reads as a way out because %s, and as a LAN because %s',
+				wan, layout.clauses(verdict.uplinkEvidence), layout.clauses(verdict.lanEvidence))));
+		}
+	}
+
+	// The table. Read from netifd rather than from /etc/config/network, because
+	// the number in UCI is what netifd will use after the next reload and a rule
+	// pointing at that one sends the address nowhere until then.
+	let table = count(args.table);
+
+	if (!table && length(wan) && list !== null) {
+		for (let one in list) {
+			if (one.name == wan)
+				table = count(one.table);
+		}
+
+		if (!table) {
+			push(out, finding('info', 'table', sprintf('%s has no routing table of its own, so it is given one from %d upwards - written into /etc/config/network as `option ip4table`, with one netifd reload. Nothing else on that interface is touched',
+				wan, WAN_TABLE_BASE)));
+		}
+	}
+
+	for (let one in cfg.instances()) {
+		if (table && table == one.catchAllTable) {
+			push(out, finding('error', 'table', sprintf('table %d is instance %s\'s catch_all_table, which holds nothing but `unreachable default`. The rule would be written, the row would read bound, and every packet from this address would be dropped',
+				table, one.id)));
+			break;
+		}
+	}
+
+	// The band, which is the whole of how a hand-placed binding beats a pool.
+	let band = cfg.directBand();
+	let pref = count(args.pref);
+
+	if (!band.usable) {
+		push(out, finding('error', 'pref', band.reason));
+	}
+	else if (pref) {
+		if (pref < band.base || pref > band.top) {
+			push(out, finding('warning', 'pref', sprintf('pref %d is outside the %d-%d band this daemon sweeps. The rule is still written and still maintained - a binding keeps the number it was stamped with for ever - but nothing will ever tidy it up if the section is deleted while the daemon is not running',
+				pref, band.base, band.top)));
+		}
+
+		for (let one in cfg.instances()) {
+			if (pref >= one.rulePrefBase) {
+				push(out, finding('error', 'pref', sprintf('pref %d is not below instance %s\'s rule_pref_base %d. The lowest matching ip rule decides, so up there this binding no longer outranks the WAN that instance would assign - and worse, that instance adopts this rule as one of its own assignments, finds no lease behind it and removes it. Move it into %d-%d',
+					pref, one.id, one.rulePrefBase, band.base, band.top)));
+				break;
+			}
+		}
+
+		for (let one in cfg.directConfigured()) {
+			if (one.id != id && one.enabled && one.pref == pref) {
+				push(out, finding('error', 'pref', sprintf('pref %d is already binding %s\'s, and two ip rules at one priority is not an order anything can rely on',
+					pref, one.id)));
+				break;
+			}
+		}
+	}
+	else {
+		let taken = {};
+
+		for (let one in cfg.directConfigured()) {
+			if (one.id != id && one.pref >= 1)
+				taken[sprintf('%d', one.pref)] = true;
+		}
+
+		let free = 0;
+		for (let candidate = band.base; candidate <= band.top; candidate++) {
+			if (!(sprintf('%d', candidate) in taken)) {
+				free = candidate;
+				break;
+			}
+		}
+
+		if (!free) {
+			push(out, finding('error', 'pref', sprintf('every ip rule priority from %d to %d is already claimed by a binding. Widen the band with `option direct_pref_base` on the main section, or remove a binding that is no longer wanted',
+				band.base, band.top)));
+		}
+		else {
+			push(out, finding('info', 'pref', sprintf('this binding is stamped with ip rule priority %d, and keeps it for as long as the section exists', free)));
+		}
+	}
+
+	// The LAN, which is only the firewall half - a binding without one still
+	// gets its rule, and its traffic is then dropped by fw4 with nothing on any
+	// surface saying so, which is why this is said rather than left out.
+	if (!length(lan)) {
+		push(out, finding('warning', 'lan', 'no lan is set, so no firewall forwarding is written for this binding. Its rule selects the address into the WAN\'s table and fw4 decides separately whether that traffic may pass; set the interface the address sits behind and the forwarding is written with it'));
+	}
+	else if (list !== null && !verdicts[lan]) {
+		push(out, finding('warning', 'lan', sprintf('netifd knows no interface called %s. This wants the section in /etc/config/network the address sits behind - lan, lan_guest - and not the bridge device, which is what br-lan is', lan)));
+	}
+
+	// And what the router knows about the device itself, which is the one thing
+	// here that is neither a refusal nor a warning: a MAC with no lease is
+	// perfectly legal and simply has no rule until the device appears.
+	if (length(mac)) {
+		let normalized = leases.normalizeMac(replace(mac, /-/g, ':'));
+
+		if (!length(normalized)) {
+			push(out, finding('error', 'mac', sprintf('mac %s is not a MAC address; six hex pairs, separated by colons', mac)));
+		}
+		else {
+			let current = leases.fromFile();
+			let found = (type(current) == 'object') ? current[normalized] : null;
+
+			if (found) {
+				push(out, finding('info', 'mac', sprintf('%s is on %s right now, so that is the address the rule is written for. It is re-read on every pass, so the binding follows the device if it comes back on a different one',
+					normalized, found.ip)));
+			}
+			else {
+				push(out, finding('info', 'mac', sprintf('no lease on this router is %s at the moment, so no rule is written until one is. The binding is still created and still in force - it is following a device rather than an address',
+					normalized)));
+			}
+		}
+	}
+
+	return { ok: !hasError(out), findings: out };
+};
+
+/**
+ * The router's whole ip rule table, and the routes behind it.
+ *
+ * `bm.wanbind.monitor` reads it and labels every row with who wrote it: this
+ * daemon's bands and sections, the kernel's own three, and everything else as
+ * foreign. Answering that here rather than leaving a surface to shell out for
+ * `ip -4 rule show` is the point of the method - a table parsed out of a
+ * command's output is a table that means whatever that command's formatting
+ * meant on the day it was parsed.
+ *
+ * It reads and never writes. A rule it names as somebody else's stays exactly
+ * where it is, including one that outranks everything this daemon does;
+ * removing it is a decision for whoever put it there.
+ */
+export function rulesReport(args) {
+	let limit = count(args.limit);
+
+	if (limit < 1)
+		limit = RULES_LIMIT;
+
+	if (limit > RULES_LIMIT_MAX)
+		limit = RULES_LIMIT_MAX;
+
+	// Everything the monitor cannot read for itself: the sections, the band, and
+	// this process's own memory of who is seated where. The two dumps it needs -
+	// every rule and every route - it takes straight off netlink, so the answer
+	// is the kernel's rather than a second-hand copy of it.
+	//
+	// `bindings` is the *pass's* rows and not the sections, because ownership is
+	// what is being decided: a row carries the table its rule actually points at
+	// right now, where a section carries the number it was stamped with, and a
+	// held binding is exactly the case where those two differ.
+	return monitor.report({
+		limit: limit,
+		band: cfg.directBand(),
+		instances: cfg.configured(),
+		bindings: direct.bindings(),
+		assignments: assignments('').assignments,
+
+		// What netifd is routing, so the three rules it writes per interface
+		// with an `ip4table` are read as the router routing itself rather than
+		// as ninety-six strangers on a box dialling thirty-two sessions.
+		interfaces: wans.dump(state.bus) ?? []
+	});
+};
+
+/** What the last pass decided, against what the kernel is holding. Writes nothing. */
+export function verify(args) {
+	let out = verifyRules(text(args.instance));
+
+	return {
+		ok: out.ok,
+		read: out.read,
+		checked: out.checked,
+		present: out.present,
+		missing: out.missing,
+		extra: out.extra,
+		reason: out.reason
+	};
+};
+
 function method(args, fn) {
 	// Accepted on every method because LuCI's dispatcher appends the session id
 	// to whatever a page sends, and ucode's publish refuses any named argument
@@ -1399,7 +3957,13 @@ export const methods = {
 	// and rejects the whole call when it disagrees. A number is what a caller
 	// carrying its own stamped numbers has - `count()` still accepts the string
 	// a shell would send, for the day one of these is reached another way.
-	bindings: method({ id: '' }, (args) => bindings(text(args.id))),
+	// `source` narrows to the hand-placed ones or to one instance's seats. It is
+	// declared even though this daemon only has hand-placed bindings, and that
+	// is not decoration: ubus checks a call against this template and refuses
+	// the *whole call* on a key it does not carry, so a page that sends a filter
+	// this daemon has not declared does not get an unfiltered list, it gets an
+	// error that reads exactly like the daemon being broken.
+	bindings: method({ id: '', source: '' }, (args) => bindings(text(args.id), text(args.source))),
 	bind: method({
 		id: '',
 		name: '',
@@ -1414,12 +3978,106 @@ export const methods = {
 	}, (args) => bind(args)),
 	unbind: method({ id: '' }, (args) => unbind(args)),
 
+	// The other half of `bind`: everything that can be known about a binding
+	// before the section exists. A surface puts Save behind this, so it is the
+	// same weighing `bind` would do rather than a second opinion.
+	bind_check: method({
+		id: '',
+		name: '',
+		ip: '',
+		mac: '',
+		wan: '',
+		lan: '',
+		when_down: '',
+		pref: 0,
+		table: 0,
+		enabled: true
+	}, (args) => bindCheck(args)),
+
 	// What this router reads each of its interfaces as, with the evidence. The
 	// module asks before it offers an address to bind, and asks the router
 	// rather than deciding for itself, so that the two halves cannot come to
 	// different conclusions about which side of the router an interface is on.
 	layout: method({}, () => interfaces()),
 
+	// The same dump read the other way round: what each interface is doing,
+	// which instance has it, and who is on it. `layout` answers "which side of
+	// the router is this on"; this answers "may I hand it to somebody".
+	wans: method({}, () => wanList()),
+
+	// The whole `config wanbind 'main'` section. The seven numbers on it are
+	// defaults for instances created afterwards and nothing else - a section
+	// already stamped keeps what it carries - which is what makes them safe to
+	// change while the router is binding.
+	settings_get: method({}, () => settingsRead()),
+	settings_set: method({
+		enabled: false,
+		interval: 0,
+		direct_pref_base: 0,
+		rule_pref_base: 0,
+		catch_all_pref_base: 0,
+		catch_all_table: 0,
+		wan_table_base: 0,
+		wan_warn_uptime: 0,
+		wan_error_grace: 0,
+		release_grace: 0
+	}, (args) => settingsSet(args)),
+
+	// One instance, created or edited. The template is declared once here and
+	// spelled the same in LuCI's api.js and in the module, because ubus checks
+	// every argument's type against it and rejects the whole call when one
+	// disagrees - a priority sent as the string somebody typed does not arrive
+	// as a number this daemon then reads leniently, it does not arrive at all.
+	//
+	// A key that is absent means "leave it as it is", which is why there is no
+	// sentinel value for any of them: 0 is a real `clients_per_wan` and an
+	// empty `range_from` is a real whole-LAN instance.
+	instance_check: method({
+		id: '',
+		name: '',
+		enabled: true,
+		lan: '',
+		carrier: '',
+		sticky: true,
+		remap: true,
+		clients_per_wan: 0,
+		range_from: '',
+		range_to: '',
+		rule_pref_base: 0,
+		catch_all_pref: 0,
+		catch_all_table: 0,
+		wan_warn_uptime: 0,
+		wan_error_grace: 0,
+		release_grace: 0,
+		raise_dhcp_limits: false
+	}, (args) => instanceCheck(args)),
+	instance_set: method({
+		id: '',
+		name: '',
+		enabled: true,
+		lan: '',
+		carrier: '',
+		sticky: true,
+		remap: true,
+		clients_per_wan: 0,
+		range_from: '',
+		range_to: '',
+		rule_pref_base: 0,
+		catch_all_pref: 0,
+		catch_all_table: 0,
+		wan_warn_uptime: 0,
+		wan_error_grace: 0,
+		release_grace: 0,
+		raise_dhcp_limits: false
+	}, (args) => instanceSet(args)),
+	instance_delete: method({ id: '' }, (args) => instanceDelete(args)),
+
 	reconcile: method({ instance: '' }, (args) => reconcileNow(args)),
-	flush: method({ instance: '' }, (args) => flush(args))
+	flush: method({ instance: '' }, (args) => flush(args)),
+
+	// The two that only read. `rules` is the monitor - every rule on the router
+	// and who wrote it - and `verify` is the narrower question this daemon can
+	// answer about itself: of the rules it decided on, which are actually there.
+	rules: method({ limit: 0 }, (args) => rulesReport(args)),
+	verify: method({ instance: '' }, (args) => verify(args))
 };

@@ -20,11 +20,13 @@
 
 import { seed } from 'fs';
 import { cursor } from 'uci';
+import * as rtnl from 'rtnl';
 
 import * as cfg from 'bm.wanbind.config';
 import * as direct from 'bm.wanbind.direct';
 import * as layout from 'bm.wanbind.layout';
 import * as leases from 'bm.wanbind.leases';
+import * as prepare from 'bm.wanbind.prepare';
 import * as ruleset from 'bm.wanbind.rules';
 import * as wans from 'bm.wanbind.wans';
 
@@ -652,29 +654,29 @@ check('and nothing else is', ruleAt(ruleset.directOwned(mixed, 19000, 19999, {})
 // ------------------------------------------------------ the two writes that
 // are not ip rules.
 
-check('a forwarding is named after the binding', direct.forwardingName('desk'), 'bmd_desk');
-check('and an id that could not be one is refused', direct.forwardingName('desk;reboot'), '');
+check('a forwarding is named after the binding', prepare.forwardingName('desk'), 'bmd_desk');
+check('and an id that could not be one is refused', prepare.forwardingName('desk;reboot'), '');
 
-let ready = direct.prepare(cfg.directBinding('desk'), view, { defer: true });
+let ready = prepare.prepare(cfg.directBinding('desk'), view, { defer: true });
 check('preparing an already-tabled WAN writes only the forwarding', ready.ok, true);
 check('so netifd is not disturbed', ready.network, false);
 check('and fw4 is owed a reload', ready.firewall, true);
 check('the forwarding runs from the LAN\'s zone', uci.get('firewall', 'bmd_desk', 'src'), 'lan');
 check('to the WAN\'s', uci.get('firewall', 'bmd_desk', 'dest'), 'wan');
-check('and the pass can see it', direct.forwardings().desk.dest, 'wan');
+check('and the pass can see it', prepare.forwardings().desk.dest, 'wan');
 
-check('a second preparation writes nothing', direct.prepare(cfg.directBinding('desk'), view, { defer: true }).firewall, false);
+check('a second preparation writes nothing', prepare.prepare(cfg.directBinding('desk'), view, { defer: true }).firewall, false);
 
 // The WAN with no ip4table: this is where the number the section is stamped
 // with is finally used for something.
 binding('shed', { ip: '12.10.1.90', wan: 'WAN3', lan: 'lan', pref: '19009', table: '10003', when_down: 'hold' });
-let shed = direct.prepare(cfg.directBinding('shed'), view, { defer: true });
+let shed = prepare.prepare(cfg.directBinding('shed'), view, { defer: true });
 check('a WAN with no table of its own is given the stamped one', uci.get('network', 'WAN3', 'ip4table'), '10003');
 check('and netifd is owed a reload', shed.network, true);
 
 // And the number nobody may overwrite.
 binding('clash', { ip: '12.10.1.91', wan: 'WAN1', lan: 'lan', pref: '19010', table: '10099' });
-let clash = direct.prepare(cfg.directBinding('clash'), view, { defer: true });
+let clash = prepare.prepare(cfg.directBinding('clash'), view, { defer: true });
 check('a WAN already using another table is not quietly moved', clash.ok, false);
 says('and the refusal says whose decision that is',
 	clash.reason, /already puts its routes in table 10001 and this binding is stamped with 10099/);
@@ -682,7 +684,7 @@ check('so nothing was written', uci.get('network', 'WAN1', 'ip4table'), '10001')
 
 // Binding an address to one of the router's own LANs writes nothing at all.
 binding('inward', { ip: '12.10.1.92', wan: 'lan', lan: 'lan', pref: '19011', table: '10098' });
-let inward = direct.prepare(cfg.directBinding('inward'), view, { defer: true });
+let inward = prepare.prepare(cfg.directBinding('inward'), view, { defer: true });
 check('nothing is prepared for a binding that leaves by its own LAN', inward.ok, false);
 check('and its network section is untouched', uci.get('network', 'lan', 'ip4table'), null);
 
@@ -705,22 +707,61 @@ for (let one in cfg.directConfigured())
 
 // Two, because preparing `shed` above wrote one for a section that has since
 // been deleted - which is exactly the shape a sweep exists for.
-check('the orphans are swept', direct.sweep(keep), 2);
+check('the orphans are swept', prepare.sweep(keep), 2);
 check('and they are gone', uci.get('firewall', 'bmd_ghost'), null);
 check('both of them', uci.get('firewall', 'bmd_shed'), null);
 check('while a refused binding keeps its path', uci.get('firewall', 'bmd_bad', 'dest'), 'wan');
 
+// --------------------------------------------------- and then a real pass
+//
+// Everything above is `plan()`, which is pure. This is `run()`, which is the
+// same plan carried out against a kernel that stores what it is given - so the
+// question here is not what was decided but what the router holds afterwards,
+// which is the only question that matters to somebody whose traffic is going
+// the wrong way.
+
+rtnl.setRules([]);
+rtnl.setRulesReadable(true);
+
+let live = direct.run({ bus: busFor(router(10000, false)), now: 1500 });
+check('a pass over a readable router works', live.ok, true);
+check('and writes the rules it planned', live.added > 0, true);
+
+let landed = rtnl.kernelRules();
+check('which the kernel is holding afterwards', length(landed) == live.added, true);
+
+// The one thing a real kernel will not be asked to do, and the whole reason
+// the read-back exists: accept every write, report nothing wrong, and hold
+// none of it. On a router that is an older module sweeping this band every two
+// seconds, and from inside one pass it is indistinguishable from a socket that
+// never carried the message.
+rtnl.setRules([]);
+rtnl.setDropAdds(true);
+let unheld = direct.run({ bus: busFor(router(10000, false)), now: 1600 });
+check('a pass whose writes are accepted and dropped still reports ok', unheld.ok, true);
+check('but says how many of them the kernel is not holding', unheld.unverified, unheld.added);
+check('and the router really is not holding them', length(rtnl.kernelRules()), 0);
+rtnl.setDropAdds(false);
+
 // ------------------------------------------------- no answer means change nothing
 //
-// The stub rtnl answers nothing, which is what a router with a busy or missing
-// netlink socket looks like. A pass that treated that as "this router has no
-// rules" would write every binding again on every tick.
+// A busy or missing netlink socket. A pass that treated that as "this router
+// has no rules" would write every binding again on every tick - and, worse,
+// would first read every rule already there as a stray and remove it.
 
-let refused = direct.run({ bus: busFor(router(10000, false)), now: 1500 });
+rtnl.setRules(landed);
+rtnl.setRulesReadable(false);
+
+let refused = direct.run({ bus: busFor(router(10000, false)), now: 1700 });
 check('a pass that could not read the rules changes nothing', refused.ok, false);
 says('and says which read failed', refused.reason, /ip rules could not be read/);
 
-check('and a pass with no netifd changes nothing either', direct.run({ bus: null, now: 1500 }).ok, false);
-check('nothing is reported as bound after either', direct.summary().bindings, 0);
+rtnl.setRulesReadable(true);
+check('so the rules already on the router are untouched', length(rtnl.kernelRules()), length(landed));
+
+rtnl.setRulesReadable(false);
+check('and a pass with no netifd changes nothing either', direct.run({ bus: null, now: 1700 }).ok, false);
+rtnl.setRulesReadable(true);
+check('nothing was removed by either', length(rtnl.kernelRules()), length(landed));
 
 report();

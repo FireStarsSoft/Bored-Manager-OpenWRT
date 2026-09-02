@@ -26,6 +26,12 @@ import { debug, err } from 'bm.log';
 // binding that is accepted here, never resolves, and never says why.
 import { normalizeMac, validIp } from 'bm.wanbind.leases';
 
+// The range arithmetic lives with the other address arithmetic rather than
+// here, because the catch-all writer needs the same decomposition and two
+// copies of it would be two chances to disagree about which addresses an
+// instance owns.
+import { ipToInt, rangeCidrs } from 'bm.wanbind.wans';
+
 const PACKAGE = 'bm_wanbind';
 
 // Below this a full pass on a large LAN would overlap the previous one.
@@ -36,6 +42,12 @@ const MAX_INTERVAL = 3600;
 // which is also the largest number of clients it can seat. A range narrower
 // than this is a configuration that would run out during an ordinary evening.
 const MIN_PREF_SPAN = 64;
+
+// How many clients one WAN may be asked to carry. Not a kernel limit - the
+// kernel does not care - but a number above this in a config file is a typo
+// rather than an intention, and an instance that seated four thousand devices
+// on one line because somebody meant 8 is worth refusing.
+const MAX_CLIENTS_PER_WAN = 4096;
 
 // Linux reserves 253, 254 and 255 (default, main, local). The catch-all table
 // deliberately may be 253: OpenWrt leaves `default` empty and a router that has
@@ -100,6 +112,28 @@ export function main() {
 };
 
 /**
+ * The addresses one instance is willing to bind, as a range of numbers.
+ *
+ * A whole-LAN instance has no range of its own - it takes whatever its LAN
+ * holds - and is reported as the whole address space here, which is exactly
+ * what makes the overlap test below read the right way: a whole-LAN instance
+ * overlaps every other instance on the same LAN, and that is the truth about
+ * it.
+ */
+function scopeBounds(one) {
+	if (!length(one.rangeFrom) || !length(one.rangeTo))
+		return { low: 0, high: 4294967295, whole: true };
+
+	let low = ipToInt(one.rangeFrom);
+	let high = ipToInt(one.rangeTo);
+
+	if (low === null || high === null || low > high)
+		return { low: 0, high: 4294967295, whole: true };
+
+	return { low: low, high: high, whole: false };
+}
+
+/**
  * Why this section cannot be used, or null.
  *
  * Written as one function returning a sentence because that sentence is what
@@ -135,6 +169,42 @@ function refuse(one) {
 			one.catchAllTable);
 	}
 
+	if (one.clientsPerWan < 0 || one.clientsPerWan > MAX_CLIENTS_PER_WAN) {
+		return sprintf('clients_per_wan %d is not a number of clients; 1 gives each WAN to one device, a larger number is how many may share one, and 0 means no limit',
+			one.clientsPerWan);
+	}
+
+	// One end without the other is the one range mistake that would otherwise
+	// pass silently: the section reads as a whole-LAN instance, and the operator
+	// who wrote a start address watches it bind the addresses they meant to
+	// leave alone.
+	if (length(one.rangeFrom) && !length(one.rangeTo))
+		return 'range_from is set without range_to, so there is no range - set both, or neither for the whole LAN';
+
+	if (length(one.rangeTo) && !length(one.rangeFrom))
+		return 'range_to is set without range_from, so there is no range - set both, or neither for the whole LAN';
+
+	if (length(one.rangeFrom)) {
+		if (ipToInt(one.rangeFrom) === null)
+			return sprintf('range_from %s is not an IPv4 address', one.rangeFrom);
+
+		if (ipToInt(one.rangeTo) === null)
+			return sprintf('range_to %s is not an IPv4 address', one.rangeTo);
+
+		if (ipToInt(one.rangeFrom) > ipToInt(one.rangeTo)) {
+			return sprintf('range_from %s is above range_to %s; a range runs upwards',
+				one.rangeFrom, one.rangeTo);
+		}
+
+		// The blocks are what the catch-all is written as, so a range that
+		// cannot be expressed as blocks is a range this daemon cannot fence.
+		// Refusing beats writing a fence with a hole in it.
+		if (!length(rangeCidrs(one.rangeFrom, one.rangeTo))) {
+			return sprintf('range %s-%s cannot be written as a set of address blocks, so there is no catch-all that would cover exactly it',
+				one.rangeFrom, one.rangeTo);
+		}
+	}
+
 	return null;
 }
 
@@ -159,11 +229,28 @@ export function configured() {
 		cursor().foreach(PACKAGE, 'instance', (section) => {
 			let one = {
 				id: text(section['.name']),
+				// What somebody called it, which is not its section name. The
+				// section name is the identity every surface and every log line
+				// uses; this is the label an editor prefills and a table shows,
+				// and a reader with no way to tell them apart cannot offer to
+				// rename one without appearing to rename the other.
+				name: text(section.name),
 				enabled: flag(section.enabled, true),
 				lan: text(section.lan),
 				carrier: text(section.carrier),
 				sticky: flag(section.sticky, true),
 				remap: flag(section.remap, true),
+				// Absent means one client per WAN, which is what every instance
+				// written before 2.4.0 meant and what most people want. 0 is
+				// "no limit", which with a single-WAN pool is the other thing
+				// people ask a multi-WAN router for: everybody out of that line.
+				clientsPerWan: number(section.clients_per_wan, 1),
+				// Absent - either of them - means the whole of the LAN. Both are
+				// kept as written rather than normalised, because the refusal
+				// below quotes them back and an address somebody typed wrongly
+				// is easier to find in the shape they typed it.
+				rangeFrom: text(section.range_from),
+				rangeTo: text(section.range_to),
 				rulePrefBase: number(section.rule_pref_base, 20000),
 				catchAllPref: number(section.catch_all_pref, 30000),
 				catchAllTable: number(section.catch_all_table, 253),
@@ -180,6 +267,70 @@ export function configured() {
 	}
 	catch (e) {
 		debug('cannot list instances in ' + PACKAGE + ': ' + e);
+	}
+
+	// What no section can see on its own: the other sections.
+	//
+	// Two instances that would bind the same address on the same LAN is not a
+	// division of labour, it is two planners handing that device two different
+	// WANs on two timers and each reading the other's rule as a stray to be
+	// removed. The device spends its life on whichever one wrote last.
+	//
+	// A range is what makes two instances on one LAN legal at all - two
+	// disjoint ranges are two pools of clients and two pools of WANs, which is
+	// a thing people genuinely want - so the test is on the scopes rather than
+	// on the LAN. A whole-LAN instance covers everything, so it still collides
+	// with every other instance there, which is the old rule said properly.
+	//
+	// First in file order keeps what it claimed. A disabled instance neither
+	// claims nor is checked: it binds nobody, so it collides with nobody, and
+	// refusing it would make deleting a section the only way to free a scope.
+	let claimedPrefBase = {};
+	let scopes = [];
+
+	for (let one in out) {
+		if (one.reason || !one.enabled)
+			continue;
+
+		let mine = scopeBounds(one);
+
+		for (let other in scopes) {
+			if (other.lan != one.lan)
+				continue;
+
+			if (mine.low > other.high || mine.high < other.low)
+				continue;
+
+			one.reason = sprintf('instance %s already binds %s on %s, and two instances cannot decide the same address - give this one an address range that does not overlap, or a different LAN',
+				other.id, other.whole ? 'the whole of it' : sprintf('%s-%s', other.from, other.to), one.lan);
+			one.usable = false;
+			break;
+		}
+
+		if (one.reason)
+			continue;
+
+		// Two instances sharing a catch-all priority is the same fault one step
+		// along: the pass that repairs the group would find the other one's
+		// rules in it and rewrite them on every tick, for ever.
+		let prefKey = sprintf('%d', one.catchAllPref);
+		if (prefKey in claimedPrefBase) {
+			one.reason = sprintf('catch_all_pref %d is already taken by instance %s, and two catch-alls at one priority would each keep rewriting the other',
+				one.catchAllPref, claimedPrefBase[prefKey]);
+			one.usable = false;
+			continue;
+		}
+		claimedPrefBase[prefKey] = one.id;
+
+		push(scopes, {
+			id: one.id,
+			lan: one.lan,
+			low: mine.low,
+			high: mine.high,
+			whole: mine.whole,
+			from: one.rangeFrom,
+			to: one.rangeTo
+		});
 	}
 
 	return out;

@@ -65,7 +65,7 @@ function sparkline(values) {
 }
 
 /** One daemon, whether or not it is there. */
-function daemonCard(title, what, info, stats, missingText) {
+function daemonCard(title, what, info, stats, missingText, extra) {
 	if (!info) {
 		return bmui.card({
 			title: title,
@@ -78,17 +78,86 @@ function daemonCard(title, what, info, stats, missingText) {
 	const now = api.routerNow(info);
 	const off = info.enabled === false;
 
+	// `enabled` does not mean the same thing on all three daemons, and on one of
+	// them it is only half a switch. A card whose daemon has a truer sentence
+	// about itself supplies the pill; this one speaks only for the daemons that
+	// have nothing to add.
+	const pill = (extra && extra.pill)
+		? extra.pill
+		: (off ? bmui.pill('warn', _('switched off')) : bmui.pill('ok', _('running')));
+
 	return bmui.card({
 		title: title,
-		pill: off ? bmui.pill('warn', _('switched off')) : bmui.pill('ok', _('running')),
+		pill: pill,
 		sub: what,
-		body: bmui.kv([
-			[_('Version'), _('%s, ubus API %d').format(info.release ?? '?', info.apiVersion | 0)],
-			[_('Uptime'), api.duration(info.uptime)],
-			[_('Memory'), stats && (stats.rssKb | 0) >= 0 ? api.size((stats.rssKb | 0) * 1024) : _('not reported')],
-			[_('Router clock'), now ? api.when(now) : '-']
+		body: E('div', {}, [
+			bmui.kv(((extra && extra.rows) ? extra.rows : []).concat([
+				[_('Version'), _('%s, ubus API %d').format(info.release ?? '?', info.apiVersion | 0)],
+				[_('Uptime'), api.duration(info.uptime)],
+				[_('Memory'), stats && (stats.rssKb | 0) >= 0 ? api.size((stats.rssKb | 0) * 1024) : _('not reported')],
+				[_('Router clock'), now ? api.when(now) : '-']
+			])),
+			(extra && extra.note) ? E('p', { 'class': 'bm-small' }, extra.note) : '',
+			(extra && extra.warning) ? E('p', { 'class': 'bm-small' }, extra.warning) : ''
 		])
 	});
+}
+
+/**
+ * What the binding card says beyond the version and the uptime.
+ *
+ * `unverified` is the count of rules the kernel accepted and then did not
+ * have. Nothing else on this router reports it, and it is the one number that
+ * names a second writer rather than a fault - so it gets a sentence on the
+ * front page rather than a place in a table three clicks away.
+ */
+function bindingExtra(info) {
+	if (!info)
+		return null;
+
+	// Both are absent on a daemon older than 2.4.0, and absent is not zero:
+	// "0 bound by hand" on a router holding six of them would be a lie told by
+	// a missing key.
+	//
+	// Two numbers rather than one, because they answer different halves of the
+	// question: `bindings` is how many somebody wrote into the file, `bound` is
+	// how many of those the router has actually put a rule in for. A card
+	// showing only the second reads as "there are four" on a router where two
+	// more are sitting there held, refused or waiting for a lease.
+	const core = info.core;
+	const netlink = info.netlink;
+	const unverified = netlink ? (netlink.unverified | 0) : 0;
+
+	// `enabled` on this daemon is the instance half's switch alone: it says no
+	// client on any LAN is handed a WAN out of a pool, and it says nothing about
+	// the addresses somebody bound by hand, which are reconciled either way.
+	// `bindingsMaintained` is the daemon stating that itself rather than leaving
+	// this card to infer it and get it backwards - which is what "switched off"
+	// was doing, in warning amber, on a router that was at that moment holding
+	// every hand-placed binding on the page below in force.
+	//
+	// Absent on a daemon older than 2.4.0, and absent is not false: nothing is
+	// claimed about the other half there, and the plain switch stands.
+	const halved = info.enabled === false && info.bindingsMaintained === true;
+
+	return {
+		pill: halved ? bmui.pill('warn', _('pools stopped')) : null,
+		note: halved
+			? _('The instance half is switched off, so no pool hands a client a WAN of its own. Bindings placed by hand are not an instance and are still being kept in force.')
+			: null,
+		rows: [[_('Bound by hand'), core
+			? ((core.bindings | 0)
+				? _('%d of %d').format(core.bound | 0, core.bindings | 0)
+				: _('none'))
+			: '-']],
+		warning: unverified > 0
+			? E('span', {}, [
+				bmui.pill('bad', _('unverified writes')),
+				' ',
+				_('%d rule(s) this router wrote are not in the kernel a moment later. Something else here is removing them - a Bored Manager module older than 3.4.0 does exactly that while the app is connected. The WAN Binding page names them.').format(unverified)
+			])
+			: null
+	};
 }
 
 /**
@@ -159,7 +228,14 @@ return view.extend({
 					const wanbindStats = (answers[2] && answers[2].ok) ? answers[2].data : null;
 					const pool = (answers[3] && answers[3].ok) ? answers[3].data : null;
 					const poolStats = (answers[4] && answers[4].ok) ? answers[4].data : null;
-					const snapshots = answers[5].ok ? (answers[5].data.snapshots ?? []) : [];
+					// Null when the call failed, a list when it worked. Both used
+					// to become an empty array, and the block below then said
+					// "no snapshot has been taken on this router yet" about a
+					// router whose snapshots it had simply not managed to read -
+					// which is the one sentence that would send somebody to take
+					// a baseline they already have.
+					const snapshots = answers[5].ok ? (answers[5].data.snapshots ?? []) : null;
+					const snapshotError = answers[5].ok ? null : answers[5].error;
 
 					dom.content(cards, [
 						daemonCard(_('Agent'), _('Snapshots, the countdown, and the updater'),
@@ -168,7 +244,8 @@ return view.extend({
 							binding ? wanbind : null, wanbindStats,
 							binding
 								? _('bm-wanbind is installed but is not answering. Check "logread -e bm-wanbind".')
-								: _('bm-wanbind is not installed. Without it, binding is done by the app over SSH: it works, and a client waits up to one sweep for its WAN instead of a few milliseconds.')),
+								: _('bm-wanbind is not installed. Without it there is no WAN Binding on this router: nothing hands a client its own WAN, and nothing keeps a hand-placed binding in force. Install it from Router packages in the app, or with "apk add bm-wanbind".'),
+							bindingExtra(binding ? wanbind : null)),
 						daemonCard(_('PPPoE Dialer'), _('Many sessions over one carrier'),
 							pppoe ? pool : null, poolStats,
 							pppoe
@@ -186,27 +263,81 @@ return view.extend({
 						tx += (one.rate && one.rate.txBps) | 0;
 					}
 
-					// Clients.
-					let bound = 0, waiting = 0, held = 0;
+					// Clients, from both halves of the daemon. `instances` is the
+					// pools and `core` is the addresses somebody bound by hand,
+					// and they are separate lists of separate things: a router
+					// with six hand-placed bindings and no instance would read
+					// "0 bound" off the pools alone, which is the front page
+					// disagreeing with the WAN Binding page about the same
+					// router. Both are off the one reply, so both are the same
+					// tick of the router's clock.
+					//
+					// `fallback` and `stranded` are in neither number on
+					// purpose. Those addresses have a route - the router's own
+					// default one - so counting them as waiting would put a
+					// client that is online in the tile people read as "not
+					// online". The WAN Binding page is where that difference is
+					// drawn, per binding, with the router's sentence beside it.
+					//
+					// `held` is out of it for the same reason and used not to
+					// be: it was added to `waiting`, and it is not a client
+					// waiting for anything. It is two things, neither of them a
+					// queue - an instance's held is a client somebody
+					// deliberately took out of the pool, and `core.held` is a
+					// hand-placed binding parked because the WAN it names is
+					// down. Nothing frees either of them; a WAN coming back does
+					// not, and an operator has to. Counting them here put
+					// clients in a tile that reads "the pool has not got to them
+					// yet" and had somebody waiting for a queue to drain that
+					// nothing was ever going to drain.
+					//
+					// Dropped rather than given a tile of its own, because a
+					// second "Held" on this page would be a *different* number
+					// from the WAN Binding page's tile of that name - that one
+					// also counts stranded, fallback and shadowed - and this
+					// page's whole job is not to disagree with that one about
+					// the same router. The front page counts the two ends,
+					// clients with a WAN and clients queued for one; every state
+					// in between is a sentence per binding, which is a page and
+					// not a tile.
+					const core = (wanbind && wanbind.core) ? wanbind.core : null;
+
+					let bound = core ? (core.bound | 0) : 0;
+					let waiting = core ? (core.waiting | 0) : 0;
+
 					for (const one of (wanbind && wanbind.instances) ? wanbind.instances : []) {
 						bound += one.bound | 0;
 						waiting += one.waiting | 0;
-						held += one.held | 0;
 					}
 
+					// Every one of these is gated on the reply and not on the
+					// package being installed, because those are two different
+					// questions and only the reply carries a number. An
+					// installed daemon that is not answering leaves the sums
+					// above at nought, and a tile reading a confident 0 beside a
+					// card that says "not answering" is this page contradicting
+					// itself about the same router in the same glance. A dash is
+					// the whole of what is known.
 					dom.content(figures, bmui.tiles([
-						[_('PPPoE sessions up'), pppoe ? '%d'.format(up) : '-'],
-						[_('Dialing'), pppoe ? '%d'.format(dialing) : '-'],
-						[_('In error'), pppoe ? '%d'.format(broken) : '-'],
-						[_('Clients bound'), binding ? '%d'.format(bound) : '-'],
-						[_('Clients waiting'), binding ? '%d'.format(waiting + held) : '-'],
-						[_('Throughput'), pppoe ? api.rate(rx + tx) : '-']
+						[_('PPPoE sessions up'), pool ? '%d'.format(up) : '-'],
+						[_('Dialing'), pool ? '%d'.format(dialing) : '-'],
+						[_('In error'), pool ? '%d'.format(broken) : '-'],
+						[_('Clients bound'), wanbind ? '%d'.format(bound) : '-'],
+						[_('Clients waiting'), wanbind ? '%d'.format(waiting) : '-'],
+						[_('Throughput'), pool ? api.rate(rx + tx) : '-']
 					]));
 
 					if (pppoe) {
-						history.push(rx + tx);
-						while (history.length > SAMPLES)
-							history.shift();
+						// A poll the daemon did not answer contributes no
+						// sample. Pushing the nought the sums above are still
+						// sitting at would draw the line to the floor, which
+						// reads as this router's traffic having stopped rather
+						// than as one call having failed.
+						if (pool) {
+							history.push(rx + tx);
+							while (history.length > SAMPLES)
+								history.shift();
+						}
 
 						dom.content(graph, bmui.section(
 							_('Throughput, last five minutes'),
@@ -220,14 +351,17 @@ return view.extend({
 					dom.content(activity, bmui.section(
 						_('Recent activity'),
 						_('Built from the snapshot history, which is the router\'s own record of what changed it. The full log is "logread -e bm-" at a console.'),
-						snapshots.length
-							? E('ul', {}, snapshots.slice(0, 20).map(entry => E('li', {}, [
-								E('span', {}, api.when(entry.at)),
-								' - ',
-								E('span', {}, activityText(entry)),
-								entry.baseline ? E('em', {}, _(' (baseline)')) : ''
-							])))
-							: E('p', {}, _('No snapshot has been taken on this router yet.'))));
+						(snapshots === null)
+							? E('p', { 'class': 'alert-message warning' },
+								_('The router did not answer with its snapshot list, so nothing is listed here. This is not a router with no history: %s').format(snapshotError))
+							: (snapshots.length
+								? E('ul', {}, snapshots.slice(0, 20).map(entry => E('li', {}, [
+									E('span', {}, api.when(entry.at)),
+									' - ',
+									E('span', {}, activityText(entry)),
+									entry.baseline ? E('em', {}, _(' (baseline)')) : ''
+								])))
+								: E('p', {}, _('No snapshot has been taken on this router yet.')))));
 
 					return null;
 				});

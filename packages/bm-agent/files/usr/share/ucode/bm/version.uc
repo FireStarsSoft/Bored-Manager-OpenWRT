@@ -9,7 +9,7 @@
 // RELEASE has to match PKG_VERSION in the Makefile and packages/version.json.
 // `npm run packages:check` fails the build when they disagree.
 
-export const RELEASE = '2.3.0';
+export const RELEASE = '2.4.0';
 export const API_VERSION = 3;
 
 // The shape of the data on disk - configuration and the agent's own state.
@@ -23,7 +23,16 @@ export const API_VERSION = 3;
 // and per-VLAN member sections instead of a sequence range. Old pool sections
 // are left in place for delete-only handling; the step to 2 stamps and moves
 // nothing, but it has to exist so the chain is unbroken.
-export const CONFIG_SCHEMA = 2;
+//
+// 3 is the scoped instance in /etc/config/bm_wanbind: `config instance` may
+// carry `range_from`/`range_to` and `clients_per_wan`. Nothing is moved by the
+// step - every section written before it means the whole LAN and one client per
+// WAN, which is what an absent option already reads as. It moves because the
+// gate has to run the other way: a 2.3.0 build reading a section with a range
+// would bind the whole LAN behind a whole-LAN catch-all and blackhole every
+// address outside the range, silently, on a router somebody had deliberately
+// scoped. Refusing to start is the only honest answer to that.
+export const CONFIG_SCHEMA = 3;
 
 // `1.2.10` -> [1, 2, 10]. Anything that is not three dotted numbers - a build
 // somebody hand-edited, an empty string from a file that was not there - comes

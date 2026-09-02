@@ -1,1731 +1,3059 @@
 msgid ""
 msgstr "Content-Type: text/plain; charset=UTF-8"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:238
-msgid " (baseline)"
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:80
+msgid "\"%s\" is not a VLAN or a range like 101-150"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:362
-msgid "%d account(s)"
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:85
+msgid "\"%s\" is outside 0-4094"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:361
-msgid "%d account(s), %d line(s) that cannot be read"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:256
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:288
 msgid "%d configuration line(s) will change, across: %s."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:512
-msgid "%d is not a routing table number."
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:252
+msgid ""
+"%d line(s) differ. A line marked + comes back when this is restored; a line "
+"marked - goes away."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:503
-msgid "%d is not an ip rule priority."
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:150
+msgid "%d of %d"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:541
-msgid "%d line(s) cannot be read, so nothing was added:"
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:239
+msgid "%d of no limit"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:442
-msgid "%d line(s) cannot be read, so nothing was created:"
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1914
+msgid ""
+"%d rule(s) the router wrote are not in the kernel, and %d it did not write "
+"are."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:215
-msgid "%d line(s) differ. A line marked + comes back when this is restored; a line marked - goes away."
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:157
+msgid ""
+"%d rule(s) this router wrote are not in the kernel a moment later. Something "
+"else here is removing them - a Bored Manager module older than 3.4.0 does "
+"exactly that while the app is connected. The WAN Binding page names them."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:646
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:647
-msgid "%d s"
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:372
+msgid "%d up, %d error, %d stopped of %d"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:406
-msgid "%d session(s) were written and then the router stopped: %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:402
-msgid "%d session(s) written to pool %s. They are dialling now."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:713
-msgid "%d ticked"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:193
-msgid "%s %s, %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:217
-msgid "%s ago"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:189
-msgid "%s is available"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:718
-msgid "%s is back in the pool."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:632
-msgid "%s is held out of the pool."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:439
-msgid "%s is not in /etc/config/bm_wanbind as this login can read it, so it cannot be edited from here."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:680
-msgid "%s is pinned to %s."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:445
-msgid "...and %d more."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:507
-msgid "0 for none. A VLAN device is created for it if one is needed."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:505
-msgid "1 to 4 characters, starting with a letter. Sessions are named prefix00001 upwards."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:360
-msgid "A change is waiting to be confirmed"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:31
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:119
-msgid "A change was armed with the countdown"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:115
-msgid "A restore was about to run, so the state it would replace was kept"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:473
-msgid "A table base of %d plus session %d is past 65535, which is the highest routing table there is."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:510
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:577
-msgid "Accounts"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:293
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:556
-msgid "Add an instance"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:580
-msgid "Add it"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:632
-msgid "Add sessions"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:574
-msgid "Add sessions to %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:571
-msgid "Add them"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:576
-msgid "Adding here rather than creating a second pool with the same prefix is the point: a second pool whose numbering overlaps would quietly rewrite this one's credentials, and the router refuses it for that reason."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:175
-msgid "Agent"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:25
-msgid "Arm the countdown and take a snapshot"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:29
-msgid "Asked for by hand"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:290
-msgid "Asked the router to %s %d session(s)."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:617
-msgid "Asked the router to move %s off %s."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:132
-msgid "Asking the release server..."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:236
-msgid "Asking the router what this would change..."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:589
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:638
-msgid "Assignments"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:112
-msgid "At %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:283
-msgid "At most %d sessions in one call; %d are ticked."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:62
-#: packages/luci-app-bm/root/usr/share/luci/menu.d/luci-app-bm.json:admin/services/bm/backup
-msgid "Backup and Restore"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:25
-msgid "Before any of this touched the router"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:252
-#: packages/luci-app-bm/root/usr/share/luci/menu.d/luci-app-bm.json:admin/services/bm
-msgid "Bored Manager"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:210
-msgid "Bound"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:232
-msgid "Built from the snapshot history, which is the router's own record of what changed it. The full log is \"logread -e bm-\" at a console."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:260
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:494
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:566
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:671
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:370
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:575
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:665
-msgid "Cancel"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:598
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:210
-msgid "Carrier"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:506
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:561
-msgid "Carrier device"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:565
-msgid "Catch-all priority"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:566
-msgid "Catch-all table"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:189
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:195
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:214
-msgid "Changes since %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:571
-msgid "Changing the LAN or either priority takes this instance's rules off before the change and lets the daemon write them again. Bound clients lose their route for a few seconds."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:85
-msgid "Check for updates"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:317
-msgid "Clear"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:598
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:700
-msgid "Client"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:564
-msgid "Client rule priority"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:564
-msgid "Client rules are written from here upwards. At least %d below the catch-all, which is also the most clients this instance can seat."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:211
-msgid "Clients bound"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:211
-msgid "Clients seen"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:212
-msgid "Clients waiting"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:726
-msgid "Clients with no WAN, in the order they asked. A client the pool cannot seat is blocked rather than quietly sent out of whichever WAN the router would have used."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:197
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:219
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:246
-msgid "Close"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:109
-msgid "Compare"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:646
-msgid "Counter interval"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:502
-msgid "Create a PPPoE pool"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:338
-msgid "Create a pool"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:499
-msgid "Create it"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:648
-msgid "Daemon up"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:65
-msgid "Data schema"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:136
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:639
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:273
-msgid "Delete"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:364
-msgid "Delete instance %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:684
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:406
-msgid "Delete it"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:665
-msgid "Delete pool %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:130
-msgid "Delete the snapshot taken at %s? There is no way back to it afterwards."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:134
-msgid "Deleted."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:209
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:598
-msgid "Dialing"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:599
-msgid "Down"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:123
-msgid "Download"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:27
-msgid "Download each archive and check its sha256 against the manifest"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:509
-msgid "Each session gets its own table, counting up from here."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:100
-msgid "Each step is written to the system log as it happens. At a console: \"logread -e bm-agent\", or \"bmctl version\" for what this router answers now."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:259
-msgid "Edit"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:556
-msgid "Edit instance %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:599
-msgid "Error"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:194
-msgid "Every client on the LAN gets a WAN of its own, decided here on the router the moment its lease arrives."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:365
-msgid "Every client this instance was binding goes back to being routed the way the rest of the router routes, and its fail-closed catch-all goes with it."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:500
-msgid "Every number on this form has to be a whole number."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:764
-msgid "Every session is up."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:97
-msgid "Every step in order. A step that fails stops the ones after it, and the countdown puts the router back if nobody confirms."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:48
-msgid "Everything"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:568
-msgid "Failure grace"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:26
-msgid "Fetch the signed manifest and check its signature"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:508
-msgid "First session number"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:211
-msgid "Free WANs"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:113
-msgid "From %s to %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:562
-msgid "Give a client the same WAN back when it returns, if that WAN is free."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:211
-msgid "Held"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:135
-msgid "Held out of the pool by hand"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:634
-msgid "Hold"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:598
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:700
-msgid "Hostname"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:598
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:700
-msgid "IP"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:718
-msgid "IPv4"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:296
-msgid "If the Bored Manager app is connected to this router it owns this list, and it will put its own value back on its next pass. Writing instances from here is meant for a router the app is not managing."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:210
-msgid "In error"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:718
-msgid "In this state"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:210
-msgid "Install %s now? The services being replaced include the one that maintains this router's routing rules."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:138
-msgid "Install bm-agent from the Bored Manager app, or check it with \"/etc/init.d/bm-agent status\" at a console."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:215
-msgid "Install it from Router packages in the app, or with \"apk add bm-pppoe-pool\" on this router."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:163
-msgid "Install it from Router packages in the app, or with \"apk add bm-wanbind\" on this router."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:28
-msgid "Install them with apk, in one command"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:63
-msgid "Installed"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:256
-msgid "Installed %s, but the router's own version could not be read back, so this is unverified."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:260
-msgid "Installed %s. The countdown at the top of the page is still running: keep the change once you are sure this router is still reachable."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:210
-msgid "Instance"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:397
-msgid "Instance %s is gone."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:505
-msgid "Interface prefix"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:366
-msgid "Its ip rules are taken off before the section is removed. After the section is gone nothing knows they were its."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:386
-msgid "Keep these changes"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:27
-msgid "Kept before restoring %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:383
-msgid "Kept. The countdown has been cancelled."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:210
-msgid "LAN"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:560
-msgid "LAN interface"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:599
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:211
-msgid "Last pass"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:64
-msgid "Latest"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:569
-msgid "Lease grace"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:720
-msgid "Let back in"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:559
-msgid "Letters, digits and underscores."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:504
-msgid "Lower case letters, digits and underscores. This is what you delete it by."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:182
-msgid "Many sessions over one carrier"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:86
-msgid "Memory %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:87
-msgid "Memory not reported"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:619
-msgid "Move"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:563
-msgid "Move a client off a failing WAN"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:639
-msgid "Move puts a client on a different WAN and forgets its sticky choice; Pin keeps it on one; Hold takes it out of the pool until it is let back in."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:558
-msgid "Name"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:673
-msgid "Name a WAN first."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:486
-msgid "Name the LAN interface. Without it there is no subnet to bind clients from."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:661
-msgid "Name the WAN interface to keep this client on. It is on %s now."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:489
-msgid "Name the carrier device. Without it there are no WANs to hand out."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:45
-msgid "Needs attention"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:137
-msgid "No priority left in this instance's range - it has to be widened"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:762
-msgid "No session is up."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:240
-msgid "No snapshot has been taken on this router yet."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:108
-msgid "No update has been applied on this router. A first install done from the Bored Manager app does not count as one."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:602
-msgid "Nobody is bound. Either no client has taken a lease yet, or every WAN is down - the Waiting table below says which."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:704
-msgid "Nobody is waiting: every client the router has seen has a WAN."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:33
-msgid "Not recorded"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:46
-msgid "Not up"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:718
-msgid "Note"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:479
-msgid "Note: %d username(s) appear more than once. That is allowed and the pool is being created anyway."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:212
-msgid "Nothing has changed since this snapshot was taken."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:760
-msgid "Nothing needs attention: every session in view is up or dialing."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:351
-msgid "Nothing pasted yet."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:97
-msgid "Nothing was changed, because %s could not have its rules taken off first: %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:246
-msgid "Nothing was installed. It would have fetched: %s."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:257
-msgid "Nothing would change: the router already matches this snapshot."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:563
-msgid "Off means it waits for its own WAN to come back."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:177
-msgid "One DHCP client, one WAN"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:557
-msgid "One instance is one LAN and one pool of WANs on one carrier device. A router with two independent pools has two of these; most have one."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:503
-msgid "One interface per account, dialled by netifd and watched by this router. The pool record is what makes deleting it later mean these interfaces and no others."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:578
-msgid "One per line: username, password, and optionally a VLAN."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:511
-msgid "One per line: username, password, and optionally a VLAN. Separate them with a tab, a comma, a semicolon, a pipe or a space. Lines starting with # are ignored."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:509
-msgid "Only %d priorities between the two, and at least %d are needed. That number is also the most clients this instance can seat."
-msgstr ""
-
-#: packages/luci-app-bm/root/usr/share/luci/menu.d/luci-app-bm.json:admin/services/bm/overview
-msgid "Overview"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:182
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:247
-#: packages/luci-app-bm/root/usr/share/luci/menu.d/luci-app-bm.json:admin/services/bm/pppoe
-msgid "PPPoE Dialer"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:208
-msgid "PPPoE sessions up"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:114
-msgid "Packages: %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:535
-msgid "Paste at least one account."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:436
-msgid "Paste at least one account. One line each: username, then password, separated by a tab, a comma, a semicolon, a pipe or a space."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:626
-msgid "Pin"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:660
-msgid "Pin %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:682
-msgid "Pin it"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:700
-msgid "Place"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:598
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:718
-msgid "Pool"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:682
-msgid "Pool %s is gone."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:504
-msgid "Pool name"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:645
-msgid "Pools"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:249
-msgid "Pools this router dials by itself. Sessions are watched through netifd events, so a line that drops is noticed when it drops."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:598
-msgid "Prefix"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:375
-msgid "Put back. The router is reloading now."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:273
-msgid "Put the previous set of packages back? They are the ones this router installed last time, kept on the router, so nothing is downloaded."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:196
-msgid "Put the router back if nobody confirms"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:30
-msgid "Read the router back and report what it now answers"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:190
-msgid "Reading the snapshot..."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:370
-msgid "Reason given: %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:121
-msgid "Reason not recorded"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:231
-msgid "Recent activity"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:323
-msgid "Redial"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:323
-msgid "Redial %d session(s)? Each one drops and dials again."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:647
-msgid "Redial after"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:599
-msgid "Redials"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:331
-msgid "Refresh from netifd"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:88
-msgid "Release"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:562
-msgid "Remember each client's WAN"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:740
-msgid "Remove every ip rule this package wrote? Every bound client loses its route until the next pass puts it back, and the fail-closed catch-all goes too."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:746
-msgid "Remove every rule"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:116
-msgid "Restore"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:273
-msgid "Restore it"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:235
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:240
-msgid "Restore the snapshot from %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:291
-msgid "Restored %s and reloaded what needed it."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:285
-msgid "Restored %s, but these did not reload: %s. Check \"logread -e bm-agent\"."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:258
-msgid "Restoring reloads the services behind those packages - network, firewall and dnsmasq as needed. It is a reload rather than a restart, so interfaces are not dropped on the way through, but the connection you are reading this on goes through one of them."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:92
-msgid "Roll back to the previous set"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:281
-msgid "Rolled back. The countdown at the top of the page is still running."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:88
-msgid "Router clock: %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:509
-msgid "Routing table base"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:598
-msgid "Rule"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:98
-msgid "Rules left behind by an instance the daemon has stopped reading stay on the router with nothing to remove them. Run \"bmwan flush --instance %s\" at a console and try again."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:735
-msgid "Run a pass now"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:29
-msgid "Run the schema migration"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:580
-msgid "Save"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:88
-msgid "Schema"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:568
-msgid "Seconds a WAN has to have been failing before a client is moved off it."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:567
-msgid "Seconds a WAN has to have been up before it is handed to a client. Freshly dialled PPPoE sessions come up before they carry traffic."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:569
-msgid "Seconds a client keeps its WAN after its lease disappears. Covers a reboot, a cable pulled for a minute, and dnsmasq restarting."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:718
-msgid "Session"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:598
-msgid "Sessions"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:252
-msgid "Show all"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:625
-msgid "Show all pools"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:625
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:252
-msgid "Show only this"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:205
-msgid "Show what would happen"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:299
-msgid "Show:"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:170
-msgid "Signed by key %s."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:598
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:700
-msgid "Since"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:88
-msgid "Size"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:47
-msgid "Snapshots are bm-agent's, and it did not answer: %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:175
-msgid "Snapshots, the countdown, and the updater"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:117
-msgid "Somebody asked for a snapshot"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:319
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:266
-msgid "Start"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:467
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:549
-msgid "Starting at %d, %d accounts would run past session number 99999, and a session is named with five digits."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:718
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:210
-msgid "State"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:321
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:266
-msgid "Stop"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:321
-msgid "Stop %d session(s)? Anybody using them loses their connection."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:718
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:598
-msgid "Table"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:515
-msgid "Table %d is the router's own main or local table. Putting an unreachable default in it would take the router off the network."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:72
-msgid "Take a snapshot now"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:88
-msgid "Taken"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:70
-msgid "Taken."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:377
-msgid "That is not the instance name; nothing was deleted."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:677
-msgid "That is not the pool name; nothing was deleted."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:560
-msgid "The UCI interface name of the LAN whose clients are bound. Its subnet is read from the router."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:667
-msgid "The accounts themselves are not touched; they live wherever the list came from."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:281
-msgid "The bm-wanbind service is not answering, so the numbers below are missing: %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:125
-msgid "The call failed and the router did not say why."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:329
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:402
-msgid "The change could not be applied: %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:506
-msgid "The client rule priority has to be below the catch-all priority, or there is no range to write client rules in."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:361
-msgid "The countdown has run out"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:561
-msgid "The device the WAN pool sits on. Every interface on it or on a VLAN of it is in the pool."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:457
-msgid "The first session number has to be 1 or more, the table base 1 to 65535, and the VLAN 0 to 4094. The VLAN may be 0, meaning none."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:113
-msgid "The first snapshot, taken before any of this touched the router"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:107
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:111
-msgid "The last update"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:480
-msgid "The name has to be 1 to 32 letters, digits or underscores."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:512
-msgid "The passwords go to the router over this login's connection and are written straight into the network configuration. They are never an argument to any command, on this router or anywhere else."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:506
-msgid "The physical device the sessions dial over, such as eth1."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:162
-msgid "The release server offers %s and this router answers %s, and the two cannot be compared. Nothing will be installed on a guess."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:169
-msgid "The release server offers %s; this router is on %s."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:123
-msgid "The router did not answer. The connection may have gone."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:116
-msgid "The router failed that call without saying why, and the daemon may have stopped. Run \"logread -e bm-\" on the router."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:172
-msgid "The router had nothing to send for that snapshot."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:100
-msgid "The router has no such service listening. It may have stopped, or the package may have just been removed."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:328
-msgid "The router has re-read netifd and the counters."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:733
-msgid "The router has run a full pass."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:64
-msgid "The router keeps a copy of its own configuration before every change it makes, and can put one back without anybody being able to reach it."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:109
-msgid "The router rejected the arguments of that call."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:752
-msgid "The router stopped at %d rows. Narrow this down with the filter above, or look at one pool at a time."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:111
-msgid "The router took too long to answer."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:245
-msgid "The router would not do it."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:167
-msgid "The router would not do that, and did not say why."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:157
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:391
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:144
-msgid "The router would not say why."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:566
-msgid "The routing table holding \"unreachable default\". A client with no WAN lands here and is blocked, rather than leaking out of whichever WAN the router would have picked."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:744
-msgid "The rules are off the router."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:265
-msgid "The schema migration did not finish. Run \"bmctl schema\" at a console to see why."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:116
-msgid "The schema migration did not finish. Run \"bmctl schema\" to see why."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:117
-msgid "The schema migration finished."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:559
-msgid "The section name, which every other surface calls this instance by. It cannot be changed."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:223
-msgid "The sum of every pool on this router, sampled each time this page refreshes."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:143
-msgid "The ten most recent are kept, and the baseline on top of those, which is never deleted by anything."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:49
-msgid "The updater is bm-agent's, and it did not answer: %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:46
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:136
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:207
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:48
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:155
-msgid "There is no agent on this router"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:215
-msgid "There is no instance yet. Add one with the button below; \"bmwan check\" reads them back from a console."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:217
-msgid "These are configuration lines exactly as the router exports them, so some of them carry keys and passwords."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:575
-msgid "These go on the end of the pool, numbered from %s%05d. Everything else - the prefix, the carrier, the VLAN, the table base - is what the pool was created with."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:137
-msgid "These pages are drawn from what bm-agent reports, and it did not answer: %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:102
-msgid "This login is not allowed to make that call. The ACL that grants it is luci-app-bm."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:121
-msgid "This login is older than the ACL that allows these calls. Log out of LuCI and back in; if that is not enough, run \"/etc/init.d/rpcd reload\" on the router."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:208
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:156
-msgid "This page is drawn from what the router reports, and bm-agent did not answer: %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:555
-msgid "This pool's table base plus session %d is past 65535, which is the highest routing table there is."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:666
-msgid "This removes all %d sessions in the pool and the interfaces behind them. Anybody dialling through one of them loses their connection."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:483
-msgid "This router already has an instance called %s."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:77
-msgid "This router checks for a new release only when somebody asks it to, and installs one only under the countdown."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:155
-msgid "This router has no CA bundle, so it cannot verify the release server's certificate. Install ca-bundle before updating over the network."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:603
-msgid "This router has no pools yet. Create one with the button below, from the Bored Manager app, or with \"bmpppoe create\" at a console."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:92
-msgid "This router has taken no snapshot yet. One is taken automatically before the next change; the button above takes one now."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:190
-msgid "This router is on %s. Signed by key %s, fetched from %s."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:365
-msgid "This router is putting its configuration back now. It will be a moment."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:765
-msgid "This router knows of no sessions at all."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:364
-msgid "This router will put its configuration back in %s unless somebody keeps the change."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:213
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:599
-msgid "Throughput"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:222
-msgid "Throughput, last five minutes"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:309
-msgid "Tick all shown"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:278
-msgid "Tick the sessions to act on first."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:367
-msgid "Type the instance name to confirm:"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:668
-msgid "Type the pool name to confirm:"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:378
-msgid "Undo now"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:47
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:598
-msgid "Up"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:84
-msgid "Up %s"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:168
-msgid "Up to date"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:215
-msgid "Update now"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:66
-msgid "Update source"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:75
-#: packages/luci-app-bm/root/usr/share/luci/menu.d/luci-app-bm.json:admin/services/bm/updates
-msgid "Updates"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:507
-msgid "VLAN"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:83
-msgid "Version %s, ubus API %d"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:598
-msgid "WAN"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:177
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:192
-#: packages/luci-app-bm/root/usr/share/luci/menu.d/luci-app-bm.json:admin/services/bm/wanbind
-msgid "WAN Binding"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:567
-msgid "WAN settle time"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:210
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:691
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:725
-msgid "Waiting"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:138
-msgid "Waiting for a WAN to come free"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:96
-msgid "What an update does"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:283
-msgid "What is configured is still shown. Start it with \"/etc/init.d/bm-wanbind start\"."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:254
-msgid "What the three router daemons are doing. The app drives the same calls; nothing here is a second opinion."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:565
-msgid "Where the fail-closed rule sits. Nothing outside this range is ever touched."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:99
-msgid "Where the log is"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:508
-msgid "Where this pool's numbering starts, from 1. Two pools sharing a prefix must not overlap."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:662
-msgid "Whoever is on that WAN loses it and goes back in the queue."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:88
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:700
-msgid "Why"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:162
-msgid "Without it this router binds nobody by itself. The Bored Manager app can still do it over SSH: it works, and it reconciles on a poll rather than on the lease, so a client waits up to one sweep for its WAN instead of a few milliseconds."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:214
-msgid "Without it this router has no pools of its own. The Bored Manager app can still dial a pool here over SSH - it writes the sections a chunk at a time, so a pool of thousands takes proportionally longer to create, and sessions are noticed at the next poll rather than the moment netifd reports them."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:379
-msgid "Written %d of %d..."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:197
-msgid "after"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:252
-msgid "apk reported success but this router still answers %s. Check \"logread -e bm-agent\"."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:97
-msgid "baseline"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:232
-msgid "binding"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:185
-msgid "bm-pppoe-pool is installed but is not answering. Check \"logread -e bm-pppoe\"."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:213
-msgid "bm-pppoe-pool is not installed"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:186
-msgid "bm-pppoe-pool is not installed. Without it, pools are written by the app over SSH, a chunk per round trip."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:180
-msgid "bm-wanbind is installed but is not answering. Check \"logread -e bm-wanbind\"."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:161
-msgid "bm-wanbind is not installed"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:181
-msgid "bm-wanbind is not installed. Without it, binding is done by the app over SSH: it works, and a client waits up to one sweep for its WAN instead of a few milliseconds."
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:66
-msgid "configured"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:228
-msgid "configured, but the daemon has no state for it"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:60
-msgid "dialing"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:62
-msgid "down"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:61
-msgid "error"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/backup.js:126
-msgid "kept forever"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:100
-msgid "line %d: expected a username and a password, with an optional VLAN"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:122
-msgid "line %d: the VLAN has to be a whole number from 1 to 4094"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:113
-msgid "line %d: the password has to be 1 to 64 characters"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:109
-msgid "line %d: the username has to be 1 to 64 characters"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:64
-msgid "not asked"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:230
-msgid "not ready"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:63
-msgid "not seen yet"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:66
-msgid "not set"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:714
-msgid "nothing ticked"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:81
-msgid "running"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:81
-msgid "running, but switched off in its config"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/updates.js:197
-msgid "seconds"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:226
-msgid "switched off"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:90
-msgid "the router would not say why"
-msgstr ""
-
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:59
-msgid "up"
-msgstr ""
-
-# ---- 2.1.0: shared components, the Overview requirements/updates cards,
-# ---- and the Maintenance tab with its Scaling section.
-
-msgid "Type %s to confirm:"
-msgstr ""
-
-msgid "That does not match; nothing was done."
-msgstr ""
-
-msgid "The bm-agent on this router does not have that call yet. Update the router packages to 2.1.0 or newer."
-msgstr ""
-
-msgid "not answering"
-msgstr ""
-
-msgid "Version"
-msgstr ""
-
-msgid "%s, ubus API %d"
-msgstr ""
-
-msgid "Uptime"
-msgstr ""
-
-msgid "Memory"
-msgstr ""
-
-msgid "not reported"
-msgstr ""
-
-msgid "Router clock"
-msgstr ""
-
-msgid "bm-pppoe-pool is not installed. Without it this router dials no pools."
-msgstr ""
-
-msgid "What the three router daemons are doing, what every feature needs, and where updates come from. The app drives the same calls; nothing here is a second opinion."
-msgstr ""
-
-msgid "Requirements"
-msgstr ""
-
-msgid "What every feature needs from this router, asked live. A missing piece is a feature that breaks - this row is where it says so first."
-msgstr ""
-
-msgid "Asking the router..."
-msgstr ""
-
-msgid "The agent could not ask the shell, so nothing here is known. Check \"logread -e bm-agent\"."
-msgstr ""
-
-msgid "Re-check"
-msgstr ""
-
-msgid "ok"
-msgstr ""
-
-msgid "missing"
-msgstr ""
-
-msgid "unknown"
-msgstr ""
-
-msgid "Install"
-msgstr ""
-
-msgid "Install %s with apk now? This runs \"apk update\" first and can take a minute."
-msgstr ""
-
-msgid "Installed. Re-checking what the router has now."
-msgstr ""
-
-msgid "This router asks the release server only when somebody presses the button; nothing here runs on its own. The full flow, including rollback, is on the Maintenance tab."
-msgstr ""
-
-msgid "not asked yet"
-msgstr ""
-
-msgid "Last update: %s, %s to %s."
-msgstr ""
-
-msgid "update available"
-msgstr ""
-
-msgid "%s is published and signed by key %s."
-msgstr ""
-
-msgid "Install %s now, under the countdown? The services being replaced include the ones binding clients and dialling pools."
-msgstr ""
-
-msgid "Installing. The countdown at the top of the page is running: keep the change once this router is still reachable."
-msgstr ""
-
-msgid "The check failed and the router did not say why."
-msgstr ""
-
-msgid "Up to date."
-msgstr ""
-
-msgid "Maintenance"
-msgstr ""
-
-msgid "The router's own safety net and upkeep: the snapshots it can put back without anybody being able to reach it, the updater it runs only when asked, and the kernel limits that decide how far it scales."
-msgstr ""
-
-msgid "Snapshots"
-msgstr ""
-
-msgid "Snapshots, updates and tuning are bm-agent's, and it did not answer: %s"
-msgstr ""
-
-msgid "What an update does, step by step"
-msgstr ""
-
-msgid "Last update: %s, %s to %s. Packages: %s."
-msgstr ""
-
-msgid "Scaling"
-msgstr ""
-
-msgid "The two kernel tables that overflow first at thousands of sessions or clients, and the fw4 flow offload that keeps rule lookups off the CPU. Values apply immediately and persist across reboots."
-msgstr ""
-
-msgid "Up to 1,000 clients"
-msgstr ""
-
-msgid "Up to 4,000 clients"
-msgstr ""
-
-msgid "Connection tracking: %s of %s entries in use."
-msgstr ""
-
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:599
 msgid "%d%% full"
 msgstr ""
 
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:600
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:601
 msgid "%d%% used"
 msgstr ""
 
-msgid "The conntrack table is nearly full. When it fills, the kernel drops new connections with only a dmesg line to show for it - raise the limit below."
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:458
+msgid "%s %s, %s"
 msgstr ""
 
-msgid "conntrack max"
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:951
+msgid "%s - %d WAN(s), %s"
 msgstr ""
 
-msgid "Entries the connection-tracking table can hold. Roughly 300 bytes of kernel memory each; 262144 suits a few thousand busy clients."
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:399
+msgid "%s - this router reads it as a LAN%s"
 msgstr ""
 
-msgid "Neighbour thresholds"
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:317
+msgid "%s ago"
 msgstr ""
 
-msgid "gc_thresh1/2/3 of the ARP cache. The kernel refuses new neighbours at the third; keep it above twice the expected client count, and the three in order."
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1082
+msgid "%s becomes %s"
 msgstr ""
 
-msgid "Software flow offload"
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1378
+msgid ""
+"%s goes back to being routed the way the rest of the router routes it, and "
+"the section is removed."
 msgstr ""
 
-msgid "fw4 fastpath for established flows. Cuts per-packet rule lookups at thousands of linear fib rules; committed to the firewall config and reloaded."
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:454
+msgid "%s is available"
 msgstr ""
 
-msgid "conntrack max is 16384 to 4194304 and each threshold 128 to 1048576, whole numbers only."
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1669
+msgid "%s is back in the pool."
 msgstr ""
 
-msgid "Apply and persist"
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1349
+msgid "%s is held out of the pool."
 msgstr ""
 
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1583
+msgid "%s is pinned to %s."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:494
+msgid "%s is published and signed by key %s."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:95
+msgid "%s, ubus API %d"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:448
+msgid "%s: asked the router to %s."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:362
+msgid "(baseline)"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:498
+msgid "(down)"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:879
+msgid ""
+"0 to 86400. How long a session may stay down before the watchdog redials it."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1126
+msgid ""
+"1 gives every client a WAN of its own. A larger number is how many may share "
+"one. 0 is no limit, which is how everybody leaves by the same line when only "
+"one is up."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:878
+msgid "1 to 300. How often /proc/net/dev is read and the dump corrected."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:880
+msgid "1 to 500. The most redials one watchdog pass starts."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:794
+msgid ""
+"1-4 characters. Interface names derive from it: prefix fpt, member 101 dials "
+"as fpt101 on pppoe-fpt101."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1268
+msgid ""
+"A binding is one address, or one device, and the WAN it leaves by. The ones "
+"placed by hand are written into the router's own configuration and outlive "
+"the daemon, the app and the reboot; the ones an instance grew live as long "
+"as the lease behind them."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:248
+msgid "A binding placed by hand already decides this address"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:397
+msgid "A change is waiting to be confirmed"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:46
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:176
+msgid "A change was armed with the countdown"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:35
+msgid "A device, wherever its lease puts it"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:224
+msgid ""
+"A pool is one carrier and a list of members, each dialling its own PPPoE "
+"session with its own routing table. Members are VLANs, or plain slots when "
+"the pool dials the carrier itself. Everything about it - interfaces, "
+"devices, MAC addresses, the firewall zone - is derived from the pool by the "
+"router itself."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:172
+msgid "A restore was about to run, so the state it would replace was kept"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:806
+msgid "AC MAC address"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:805
+msgid "Access concentrator"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1261
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1524
+msgid "Add a binding"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:838
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1117
+msgid "Add an instance"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1506
+msgid "Add it"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1208
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1532
+msgid "Address"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1127
+msgid "Address range from"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1128
+msgid "Address range to"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:808
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1132
+msgid "Advanced"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:241
+msgid "Agent"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1243
+msgid "All"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1909
+msgid ""
+"All %d rule(s) the router meant to write are in the kernel, and it holds "
+"nothing extra in these priorities."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:826
+msgid "Allow LAN to reach this zone"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:34
+msgid "An address"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1531
+msgid ""
+"An address binds whatever holds it. A device binds one MAC and follows it to "
+"whichever address its lease gives it."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:643
 msgid "Applied, and pinned under /etc/sysctl.d/ so it survives a reboot."
 msgstr ""
 
-msgid "Persisted in %s. The guard's snapshots deliberately do not cover this file, so a restore never quietly shrinks a capacity fix. At a console: \"bmctl tune\"."
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:646
+msgid "Apply and persist"
 msgstr ""
 
-msgid "Shared account"
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:758
+msgid "Apply to the whole pool"
 msgstr ""
 
-msgid "One account per VLAN"
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:54
+msgid "Arm the countdown and take a snapshot"
 msgstr ""
 
-msgid "VLAN - one 802.1Q tag per member"
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:44
+msgid "Asked for by hand"
 msgstr ""
 
-msgid "Direct - dial the carrier itself, untagged"
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:388
+msgid "Asked the router to %s %d interface(s)."
 msgstr ""
 
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1334
+msgid "Asked the router to move %s off %s."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:397
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:530
+msgid "Asking the release server..."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:726
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1043
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1474
+msgid "Asking the router to check it..."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:266
+msgid "Asking the router what this would change..."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:548
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:398
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:430
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:233
+msgid "Asking the router..."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:546
+msgid "Automatic"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:40
+msgid "Before any of this touched the router"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1208
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1737
+msgid "Binding"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1385
+msgid "Binding %s is gone."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1370
+msgid "Binding %s is in force."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1371
+msgid "Binding %s is switched off and its rule is off the router."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1500
+msgid "Binding %s saved."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1499
+msgid "Binding %s written. The router has put its rule in."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2003
+msgid "Binding priority base"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1267
+msgid "Bindings"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:378
+#: packages/luci-app-bm/root/usr/share/luci/menu.d/luci-app-bm.json:3
+msgid "Bored Manager"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1128
+msgid "Both ends or neither, both inside the LAN's own subnet."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:700
+msgid "Bound"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:148
+msgid "Bound by hand"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:353
+msgid ""
+"Built from the snapshot history, which is the router's own record of what "
+"changed it. The full log is \"logread -e bm-\" at a console."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:703
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1244
+msgid "By hand"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/ui.js:208
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:292
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:768
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1109
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1516
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1568
+msgid "Cancel"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:321
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:796
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:732
+msgid "Carrier"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1125
+msgid "Carrier device"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:784
 msgid "Carrier mode"
 msgstr ""
 
-msgid "Mode"
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1136
+msgid "Catch-all priority"
 msgstr ""
 
-msgid "Pool id"
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2005
+msgid "Catch-all priority base"
 msgstr ""
 
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1137
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2006
+msgid "Catch-all table"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:779
+msgid ""
+"Changes apply to every interface in the pool in one pass. Nothing is written "
+"until the check passes and you apply."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:226
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:232
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:251
+msgid "Changes since %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:773
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1114
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1521
+msgid "Check"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:358
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:539
+msgid "Check for updates"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1651
+msgid "Client"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2004
+msgid "Client priority base"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1135
+msgid "Client rule priority"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1135
+msgid ""
+"Client rules are written from here upwards. The distance to the catch-all is "
+"also the most clients this instance can seat."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:325
+msgid "Clients bound"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1126
+msgid "Clients per WAN"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1008
+msgid ""
+"Clients per WAN is a whole number: 1 for one client per WAN, a larger number "
+"for how many may share one, 0 for no limit."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:733
+msgid "Clients seen"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:326
+msgid "Clients waiting"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1676
+msgid ""
+"Clients with no WAN, in the order they asked. A client the pool cannot seat "
+"is blocked rather than quietly sent out of whichever WAN the router would "
+"have used."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:234
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:256
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:278
+msgid "Close"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:161
+msgid "Compare"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:605
+msgid "Connection tracking: %s of %s entries in use."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:878
+msgid "Counter interval (s)"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:892
+msgid "Counter interval is 1-300, redial after 0-86400, batch 1-500."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:776
+msgid "Create a PPPoE pool"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:305
+msgid "Create a pool"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:758
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1099
+msgid "Create it"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:280
+msgid ""
+"Create one with the button above, from the Bored Manager app, or with "
+"\"bmpppoe create\" at a console."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:823
+msgid ""
+"Created and owned by the router's pool daemon; pools may share one. Changing "
+"it later moves every membership."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:814
+msgid "DNS servers"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:875
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1938
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1991
+msgid "Daemon settings"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:896
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1985
+msgid "Daemon settings applied."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:340
+msgid "Data schema"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:815
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1771
+msgid "Default route"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:188
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:334
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:409
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:800
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1320
+msgid "Delete"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1376
+msgid "Delete binding %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:854
+msgid "Delete even while a binder instance uses this carrier."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:867
+msgid "Delete instance %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:857
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:873
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1382
+msgid "Delete it"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:849
+msgid "Delete pool %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:182
+msgid "Delete the snapshot taken at %s? There is no way back to it afterwards."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:186
+msgid "Deleted."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:708
+msgid "Demand and the PADI numbers have to be whole numbers."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:413
+msgid "Device"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:953
+msgid "Devices this router carries WANs on"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:323
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:263
+msgid "Dialing"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:36
+msgid "Direct - dial the carrier itself, untagged"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:669
+msgid "Direct mode numbers its sessions 1-4094. There is no VLAN 0."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:456
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1313
+msgid "Disable"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:456
+msgid "Disable %s? It stops now and stays stopped across reboots."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:546
+msgid "Disabled"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:460
+msgid "Down"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:175
+msgid "Download"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:56
+msgid "Download each archive and check its sha256 against the manifest"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:798
+msgid ""
+"Each member routes in table base + member number. Changing it later strands "
+"binding rules until bm-wanbind's next pass."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:815
+msgid "Each session installs its default route into its own table."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:372
+msgid ""
+"Each step is written to the system log as it happens. At a console: "
+"\"logread -e bm-agent\", or \"bmctl version\" for what this router answers "
+"now."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:403
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:786
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1306
+msgid "Edit"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1524
+msgid "Edit binding %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1117
+msgid "Edit instance %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:776
+msgid "Edit pool %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:804
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:805
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:806
+msgid "Empty means autodetect."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:809
+msgid ""
+"Empty uses the pppd default of 1492. Above 1492 needs an ISP that supports "
+"RFC 4638."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:455
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1313
+msgid "Enable"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:615
+msgid ""
+"Entries the connection-tracking table can hold. Roughly 300 bytes of kernel "
+"memory each; 262144 suits a few thousand busy clients."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:264
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:414
+msgid "Error"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:869
+msgid ""
+"Every client this instance was binding goes back to being routed the way the "
+"rest of the router routes, and its fail-closed catch-all goes with it."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:778
+msgid ""
+"Every field below can also be changed later, except the id, the mode and the "
+"prefix."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1134
+msgid ""
+"Every number here may be left empty, and empty is the right answer unless "
+"something on this router already owns the numbers. The router allocates a "
+"range nothing else is using and stamps it on the section, where it stays for "
+"the life of the instance."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1031
+msgid ""
+"Every number under Advanced is either empty, which lets the router pick, or "
+"a whole number in range: priorities 1 to 2147483647, tables 1 to 65535, "
+"timers 0 to 86400 seconds."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:820
+msgid "Extra pppd options"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1139
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2011
+msgid "Failure grace"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:40
+msgid "Fall back - leave by whichever route the router would have used"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:55
+msgid "Fetch the signed manifest and check its signature"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:822
+msgid "Firewall"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:760
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1101
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1508
+msgid "Fix the errors above and check again; nothing has been written."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:791
+msgid "Fixed for the life of the pool."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:795
+msgid "Fixed: every interface is named by it."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1531
+msgid "Follow"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:854
+msgid "Force"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:733
+msgid "Free WANs"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:803
+msgid "General"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1129
+msgid "Give a client the same WAN back when it returns, if that WAN is free."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1446
+msgid ""
+"Give it an address or a MAC. There is nothing for this binding to follow "
+"otherwise."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1999
+msgid "Hand out WANs to clients"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1274
+msgid "Hand-placed bindings have nowhere to sit: %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1997
+msgid ""
+"Hand-placed bindings live in priorities %d to %d. Nothing outside the ranges "
+"below is ever read or written by this package."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:701
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:733
+msgid "Held"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:250
+msgid "Held out of the pool by hand"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1351
+msgid "Hold"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:39
+msgid "Hold - nothing leaves until that WAN is back"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1535
+msgid ""
+"Hold is fail-closed: nothing leaves rather than leaving by a line this "
+"binding exists to avoid."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1208
+msgid "Host"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:816
+msgid "Host-Uniq"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1651
+msgid "Hostname"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2000
+msgid ""
+"How often the router re-reads its leases and its rules. A lease arriving is "
+"acted on immediately whatever this says."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1651
+msgid "IP"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:413
+msgid "IPv4"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:812
+msgid "IPv6"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:324
+msgid "In error"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1536
+msgid "In force"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:817
+msgid "Inactivity timeout"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:460
+msgid "Install"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:499
+msgid ""
+"Install %s now, under the countdown? The services being replaced include the "
+"ones binding clients and dialling pools."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:474
+msgid ""
+"Install %s now? The services being replaced include the one that maintains "
+"this router's routing rules."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:454
+msgid ""
+"Install %s with apk now? This runs \"apk update\" first and can take a "
+"minute."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:195
+msgid ""
+"Install bm-agent from the Bored Manager app, or check it with \"/etc/init.d/"
+"bm-agent status\" at a console."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:517
+msgid ""
+"Install it from Router packages in the Bored Manager app, or with \"apk add "
+"bm-wanbind\" on this router."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:57
+msgid "Install them with apk, in one command"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:338
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:477
+msgid "Installed"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:508
+msgid ""
+"Installed %s, but the router's own version could not be read back, so this "
+"is unverified."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:512
+msgid ""
+"Installed %s. The countdown at the top of the page is still running: keep "
+"the change once you are sure this router is still reachable."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:458
+msgid "Installed. Re-checking what the router has now."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:503
+msgid ""
+"Installing. The countdown at the top of the page is running: keep the change "
+"once this router is still reachable."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:732
+msgid "Instance"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1092
+msgid "Instance %s created. The router has prepared it and run a pass."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:876
+msgid "Instance %s is gone."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:860
+msgid "Instance %s is running."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:859
+msgid "Instance %s is stopped and its rules are off the router."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1093
+msgid "Instance %s saved."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:704
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:820
+msgid "Instances"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:261
+msgid "Interfaces"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:946
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1416
+msgid "Interfaces this router reads as a LAN"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:628
+msgid ""
+"It reports version %s, ubus API %d. Instances, one-to-one bindings and the "
+"daemon's own numbers cannot be edited from here against that version - the "
+"calls that do it are not in it."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:423
+msgid "Keep these changes"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:42
+msgid "Kept before restoring %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:420
+msgid "Kept. The countdown has been cancelled."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:732
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1208
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1534
+msgid "LAN"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1124
+msgid "LAN interface"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:810
+msgid "LCP echo failure / interval"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:792
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1123
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1530
+msgid "Label"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:733
+msgid "Last pass"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:488
+msgid "Last update: %s, %s to %s."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:384
+msgid "Last update: %s, %s to %s. Packages: %s."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:339
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:478
+msgid "Latest"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1140
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2012
+msgid "Lease grace"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1127
+msgid ""
+"Leave both ends empty to bind the whole LAN. A range lets a second instance "
+"take the rest of it."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:576
+msgid "Leave empty to keep the stored password."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1671
+msgid "Let back in"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1121
+msgid ""
+"Letters, digits and underscores, up to 32. This is the section name, and "
+"what every other surface calls this instance by."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1528
+msgid "Letters, digits and underscores, up to 32. This is the section name."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:790
+msgid ""
+"Lowercase letters, digits and underscores. This is what you delete it by."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:413
+msgid "MAC"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:797
+msgid "MAC mode"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:809
+msgid "MTU"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:825
+msgid "MTU fix (MSS clamping)"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:681
+msgid "MTU has to be 576 to 9200, or empty for the default."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:92
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:526
+#: packages/luci-app-bm/root/usr/share/luci/menu.d/luci-app-bm.json:28
+msgid "Maintenance"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:546
+msgid "Manual"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:249
+msgid "Many sessions over one carrier"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:824
+msgid "Masquerade"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1737
+msgid "Matches"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:570
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:603
 msgid "Members"
 msgstr ""
 
-msgid "VLANs"
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:97
+msgid "Memory"
 msgstr ""
 
-msgid "Slots"
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1916
+msgid "Missing: %s"
 msgstr ""
 
-msgid "direct"
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:781
+msgid "Mode"
 msgstr ""
 
-msgid "VLAN"
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1336
+msgid "Move"
 msgstr ""
 
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1130
+msgid "Move a client off a failing WAN"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1120
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1527
+msgid "Name"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1576
+msgid "Name a WAN first."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1457
+msgid "Name the WAN this binding leaves through."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1564
+msgid "Name the WAN to keep this client on. It is on %s now."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1440
+msgid ""
+"Name the binding. The section name is its identity here, in the app and in "
+"every log line about it."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:988
+msgid ""
+"Name the instance. The section name is what every other surface calls it by."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:616
+msgid "Neighbour thresholds"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1645
+msgid ""
+"No instance is handing out WANs on this router, so nothing is queueing for "
+"one. Clients are routed the way the rest of the router routes them."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:252
+msgid "No priority left in this instance's range - it has to be widened"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:364
+msgid "No snapshot has been taken on this router yet."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:380
+msgid ""
+"No update has been applied on this router. A first install done from the "
+"Bored Manager app does not count as one."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1636
+msgid ""
+"Nobody is waiting in instance %s, and no other instance has a queue either."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1633
+msgid ""
+"Nobody is waiting in instance %s, but %d client(s) are waiting elsewhere on "
+"this router. \"All\" above the bindings table widens both lists."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1638
+msgid ""
+"Nobody is waiting in instance %s. This list is narrowed to it and says "
+"nothing about the others, which may have queues of their own: \"All\" above "
+"the bindings table widens both lists."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1647
+msgid "Nobody is waiting: every client the router has seen has a WAN."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:48
+msgid "Not recorded"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:249
+msgid "Nothing has changed since this snapshot was taken."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1277
+msgid ""
+"Nothing is keeping these in force. The rows below are intentions, not the "
+"state of the router."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1204
+msgid ""
+"Nothing matched %s. This is not a router with no bindings, it is a list "
+"narrowed to one filter - \"All\" above widens it."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1201
+msgid ""
+"Nothing matched %s. This is not a router with no bindings: it holds %d in "
+"all, and \"All\" above lists every one."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1897
+msgid "Nothing was compared: %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:498
+msgid "Nothing was installed. It would have fetched: %s."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:742
+msgid ""
+"Nothing was read: the daemon did not answer and /etc/config/bm_wanbind could "
+"not be read either. Whether this router has instances is unknown from here - "
+"it is not a router with none."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:289
+msgid "Nothing would change: the router already matches this snapshot."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2002
+msgid "Numbering"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1536
+msgid "Off keeps the section and takes its rule off the router."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1130
+msgid "Off means it waits for its own WAN to come back."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:813
+msgid "Off means the servers below are used instead."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1999
+msgid ""
+"Off stops every instance and takes their rules off. Bindings placed by hand "
+"are not an instance and stay in force."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:243
+msgid "One DHCP client, one WAN"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:31
+msgid "One account per VLAN"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1525
+msgid ""
+"One address, one WAN, written into the router's own configuration. The "
+"priority and the routing table are the router's to pick and to keep."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:604
+msgid ""
+"One client, one WAN - decided on this router the moment a lease arrives, or "
+"written by hand for an address that always leaves the same way. Everything "
+"on this page is the router's own: the sections, the ip rules, the routing "
+"tables and the firewall forwardings."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1118
+msgid ""
+"One instance is one LAN and one pool of WANs on one carrier device. Two "
+"instances may share a LAN when their address ranges do not overlap; a router "
+"with one pool has one of these."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:821
+msgid ""
+"One instance is one LAN, or one range of it, and one pool of WANs on one "
+"carrier. Everything an instance needs - the routing tables, the firewall "
+"forwardings, the fail-closed catch-all - is written by the router when the "
+"instance is saved."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:571
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:607
+msgid ""
+"One per line: VLAN, username, password - separated by a comma, a tab, a "
+"semicolon, a pipe or spaces. # starts a comment. On an edit, an empty "
+"password keeps the stored one."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:606
+msgid ""
+"One per line: slot, username, password. Slots are 1-4094. # starts a "
+"comment. On an edit, an empty password keeps the stored one."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1530
+msgid "Only for people; shown wherever the binding is."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1123
+msgid "Only for people; shown wherever the instance is."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:792
+msgid "Only for people; shown wherever the pool is."
+msgstr ""
+
+#: packages/luci-app-bm/root/usr/share/luci/menu.d/luci-app-bm.json:10
+msgid "Overview"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1737
+msgid "Owner"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:818
+msgid "PADI attempts"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:819
+msgid "PADI timeout"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:249
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:222
+#: packages/luci-app-bm/root/usr/share/luci/menu.d/luci-app-bm.json:16
+msgid "PPPoE Dialer"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:322
+msgid "PPPoE sessions up"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2000
+msgid "Pass interval (s)"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:820
+msgid ""
+"Passed to pppd verbatim. A wrong word here fails every session in the pool."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:575
+msgid "Password"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:732
+msgid "Per WAN"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:649
+msgid ""
+"Persisted in %s. The guard's snapshots deliberately do not cover this file, "
+"so a restore never quietly shrinks a capacity fix. At a console: \"bmctl "
+"tune\"."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1343
+msgid "Pin"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1563
+msgid "Pin %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1585
+msgid "Pin it"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1651
+msgid "Place"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:321
+msgid "Pool"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:751
+msgid "Pool %s created. Its interfaces are dialling now."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:860
+msgid "Pool %s is gone."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:752
+msgid "Pool %s updated across every interface."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:789
+msgid "Pool id"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:260
+msgid "Pools"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:338
+msgid "Pools from the old model"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:321
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:793
+msgid "Prefix"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:811
+msgid ""
+"Presume the peer dead after this many missed echoes sent this many seconds "
+"apart. Empty leaves pppd's default."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1737
+msgid "Priority"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:412
+msgid "Put back. The router is reloading now."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:525
+msgid ""
+"Put the previous set of packages back? They are the ones this router "
+"installed last time, kept on the router, so nothing is downloaded."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:461
+msgid "Put the router back if nobody confirms"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1141
+msgid "Raise dnsmasq lease limits"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:569
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:600
+msgid ""
+"Ranges and numbers: 101-150,200. VLAN 0 means untagged, straight over the "
+"carrier, at most once."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:816
+msgid ""
+"Raw hex bytes. Leave empty unless the ISP requires it. In Direct mode the "
+"daemon extends this per slot so concurrent sessions on one wire can be told "
+"apart."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:433
+msgid "Re-check"
+msgstr ""
+
+#: packages/luci-app-bm/root/usr/share/rpcd/acl.d/luci-app-bm.json:3
+msgid ""
+"Read and drive the Bored Manager daemons: snapshots, the commit-confirm "
+"guard, the updater, the PPPoE Dialer and the WAN bindings. Creating a pool "
+"sends account credentials over this connection, and a session with this "
+"grant can put any client on any WAN, so grant it to the same people who "
+"would be given the router's root password."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:59
+msgid "Read the router back and report what it now answers"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:227
+msgid "Reading the snapshot..."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1209
+msgid "Reason"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:407
+msgid "Reason given: %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:178
+msgid "Reason not recorded"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:352
+msgid "Recent activity"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:461
+msgid "Redial"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:461
+msgid "Redial %s? It drops and dials again."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:879
+msgid "Redial after (s)"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:397
+msgid "Redial all"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:397
+msgid "Redial all %d interface(s)? Each one drops and dials again."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:880
+msgid "Redial batch"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:312
+msgid "Refresh from netifd"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:140
+msgid "Release"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1129
+msgid "Remember each client's WAN"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1859
+msgid ""
+"Remove every ip rule this package wrote? Every bound client loses its route "
+"until the next pass puts it back, and the fail-closed catch-all goes too."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1865
+msgid "Remove every rule"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:424
+msgid "Requirements"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:168
+msgid "Restore"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:305
+msgid "Restore it"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:265
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:270
+msgid "Restore the snapshot from %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:324
+msgid "Restored %s and reloaded what needed it."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:318
+msgid ""
+"Restored %s, but these did not reload: %s. Check \"logread -e bm-agent\"."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:290
+msgid ""
+"Restoring reloads the services behind those packages - network, firewall and "
+"dnsmasq as needed. It is a reload rather than a restart, so interfaces are "
+"not dropped on the way through, but the connection you are reading this on "
+"goes through one of them."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1771
+msgid "Role"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:364
+msgid "Roll back to the previous set"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:533
+msgid "Rolled back. The countdown at the top of the page is still running."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:98
+msgid "Router clock"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1823
+msgid "Routing tables"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1209
+msgid "Rule"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1708
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1724
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1795
+msgid "Rules on this router"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:705
+msgid "Rules we wrote"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:705
+msgid "Rules we wrote, of the %d listed"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1844
+msgid "Run a pass now"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:58
+msgid "Run the schema migration"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:899
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1099
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1506
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2018
+msgid "Save"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:565
+msgid "Scaling"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:140
+msgid "Schema"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:732
+msgid "Scope"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:732
+msgid "Seats"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1139
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2011
+msgid "Seconds a WAN has to have been failing before a client is moved off it."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2010
+msgid "Seconds a WAN has to have been up before it is handed to a client."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1138
+msgid ""
+"Seconds a WAN has to have been up before it is handed to a client. Freshly "
+"dialled PPPoE sessions come up before they carry traffic."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2012
+msgid "Seconds a client keeps its WAN after its lease disappears."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1140
+msgid ""
+"Seconds a client keeps its WAN after its lease disappears. Covers a reboot, "
+"a cable pulled for a minute, and dnsmasq restarting."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:817
+msgid "Seconds of idle before hanging up; 0 keeps sessions up."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:413
+msgid "Section"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:804
+msgid "Service name"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:321
+msgid "Sessions"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:30
+msgid "Shared account"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:782
+msgid ""
+"Shared account: one login, many members. One account per VLAN: each line has "
+"its own login."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:776
+msgid "Show all"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:776
+msgid "Show only this"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:470
+msgid "Show what would happen"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:435
+msgid "Signed by key %s."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1209
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1651
+msgid "Since"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:140
+msgid "Size"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:413
 msgid "Slot"
 msgstr ""
 
-msgid "per-slot accounts"
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:599
+msgid ""
+"Slot numbers 1-4094: 1-32,40. Direct mode has no VLAN 0 - every member dials "
+"the carrier itself."
 msgstr ""
 
-msgid "per-slot MACs"
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:596
+msgid "Slots"
 msgstr ""
 
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:114
+msgid "Snapshots"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:241
+msgid "Snapshots, the countdown, and the updater"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:84
+msgid "Snapshots, updates and tuning are bm-agent's, and it did not answer: %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:618
+msgid "Software flow offload"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:174
+msgid "Somebody asked for a snapshot"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1921
+msgid ""
+"Something else on this router is writing into these priorities. A Bored "
+"Manager module older than 3.4.0 does exactly that, every two seconds, while "
+"the app is connected."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1208
+msgid "Source"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:814
+msgid "Space separated. Only used while ISP DNS is off."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:793
+msgid "Start"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:395
+msgid "Start all"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:414
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:733
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1209
+msgid "State"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:793
+msgid "Stop"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:396
+msgid "Stop all"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:396
+msgid "Stop all %d interface(s)? Anybody using them loses their connection."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:265
+msgid "Stopped"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1982
+msgid ""
+"Switching the instance half off takes every instance's rules away first. "
+"Hand-placed bindings stay in force. Go on?"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:414
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1209
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1737
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1771
+msgid "Table"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:798
+msgid "Table base"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:460
+msgid "Take %s down? Anybody using it loses their connection."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:124
+msgid "Take a snapshot now"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:140
+msgid "Taken"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:122
+msgid "Taken."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/ui.js:215
+msgid "That does not match; nothing was done."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1532
+msgid "The IPv4 address, or the MAC, this binding is about."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:459
+msgid ""
+"The UCI interface name of the LAN whose clients are bound. Its subnet is "
+"read from the router."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:462
+msgid ""
+"The UCI interface name of the LAN whose clients are bound. This router reads "
+"these as a LAN:"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:412
+msgid ""
+"The agent could not ask the shell, so nothing here is known. Check \"logread "
+"-e bm-agent\"."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:209
+msgid ""
+"The bm-agent on this router does not have that call yet. Update the router "
+"packages to 2.1.0 or newer."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:627
+msgid "The bm-wanbind on this router is older than 2.4.0"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:825
+msgid ""
+"The bm-wanbind service is not answering, so the numbers below are missing: %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:225
+msgid "The call failed and the router did not say why."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:788
+msgid ""
+"The carrier mode of a pool cannot change; delete it and create a new one."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:510
+msgid "The check failed and the router did not say why."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:612
+msgid ""
+"The conntrack table is nearly full. When it fills, the kernel drops new "
+"connections with only a dmesg line to show for it - raise the limit below."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:398
+msgid "The countdown has run out"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1125
+msgid ""
+"The device the WAN pool sits on. Every interface on it, or on a VLAN of it, "
+"is in the pool."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2006
+msgid "The first instance's \"unreachable default\" table."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:170
+msgid "The first snapshot, taken before any of this touched the router"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:146
+msgid ""
+"The instance half is switched off, so no pool hands a client a WAN of its "
+"own. Bindings placed by hand are not an instance and are still being kept in "
+"force."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1977
+msgid ""
+"The interval is 1-3600 seconds, priorities 1-2147483647, tables 1-65535 and "
+"the timers 0-86400 seconds."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:783
+msgid "The mode of a pool cannot change; delete it and create a new one."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1728
+msgid ""
+"The netlink dump failed inside the daemon. \"ip -4 rule show\" at a console "
+"reads the same table without going through it, and \"logread -e bm-wanbind\" "
+"says why this one did not."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:574
+msgid "The one account every member dials with."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1992
+msgid ""
+"The pass timer, and the numbers every instance written after this is cut "
+"from. An instance already on this router keeps the numbers stamped on its "
+"own section: changing these never moves a rule that exists."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:796
+msgid "The physical uplink. Changing it later redials the whole pool."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:427
+msgid ""
+"The release server offers %s and this router answers %s, and the two cannot "
+"be compared. Nothing will be installed on a guess."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:434
+msgid "The release server offers %s; this router is on %s."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1778
+msgid ""
+"The router answered and named no routing table at all, not even its own main "
+"one, which is worth a look at a console."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1743
+msgid ""
+"The router answered, and there is not one ip rule on it - not even the three "
+"the kernel writes for itself, which is worth a look at a console."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:288
+msgid ""
+"The router capped the row list at 500, so the largest pools are shown "
+"incomplete here. The Bored Manager app pages through them."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1726
+msgid ""
+"The router could not read its ip rules, so nothing is listed here. This is "
+"not a router with no rules on it - what is standing in the kernel is unknown "
+"from this page until the read works, and nothing should be concluded from "
+"the empty space."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1192
+msgid ""
+"The router did not answer with its bindings, so none are listed. This is not "
+"a router that holds none - what it holds is unknown from here until the call "
+"works."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1614
+msgid ""
+"The router did not answer with its queue, so nothing is listed. This is not "
+"a router where nobody is waiting - who is waiting is unknown from here until "
+"the call works."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:356
+msgid ""
+"The router did not answer with its snapshot list, so nothing is listed here. "
+"This is not a router with no history: %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:223
+msgid "The router did not answer. The connection may have gone."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:216
+msgid ""
+"The router failed that call without saying why, and the daemon may have "
+"stopped. Run \"logread -e bm-\" on the router."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:216
+msgid "The router had nothing to send for that snapshot."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:196
+msgid ""
+"The router has no such service listening. It may have stopped, or the "
+"package may have just been removed."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1779
+msgid "The router has not answered with its routing tables yet."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1744
+msgid "The router has not answered with its rule table yet."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:309
+msgid "The router has re-read netifd and the counters."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1842
+msgid "The router has run a full pass."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:115
+msgid ""
+"The router keeps a copy of its own configuration before every change it "
+"makes, and can put one back without anybody being able to reach it."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:853
+msgid ""
+"The router refuses while a bm-wanbind instance hands clients to this "
+"carrier, unless forced."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:205
+msgid "The router rejected the arguments of that call."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:870
+msgid ""
+"The router takes its ip rules off, removes the firewall forwardings it made "
+"and then removes the section. Nothing is left that only a name could have "
+"explained."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1379
+msgid ""
+"The router takes its rule off first. After the section is gone nothing knows "
+"the rule was its."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:211
+msgid "The router took too long to answer."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:277
+msgid "The router would not do it."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:267
+msgid "The router would not do that, and did not say why."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:409
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:736
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1054
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1485
+msgid "The router would not say why."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1073
+msgid ""
+"The router would stamp this instance with client priority %d, catch-all "
+"priority %d and catch-all table %d."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1814
+msgid ""
+"The router's main table has no default route. Every address this package "
+"does not claim - and every one it hands back when a WAN goes down - is "
+"looked up there and finds nothing."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1809
+msgid "The router's own default route leaves by %s%s."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:94
+msgid ""
+"The router's own safety net and upkeep: the snapshots it can put back "
+"without anybody reaching it, the updater it runs only when asked, and the "
+"kernel limits that decide how far it scales."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1137
+msgid ""
+"The routing table holding \"unreachable default\". A client with no WAN "
+"lands here and is blocked, rather than leaking out of whichever WAN the "
+"router would have picked."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:418
+msgid "The row list has not arrived yet."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1863
+msgid "The rules are off the router."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:517
+msgid ""
+"The schema migration did not finish. Run \"bmctl schema\" at a console to "
+"see why."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:388
+msgid "The schema migration did not finish. Run \"bmctl schema\" to see why."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:389
+msgid "The schema migration finished."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1122
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1529
+msgid "The section name. It cannot be changed."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:344
+msgid ""
+"The sum of every pool on this router, sampled each time this page refreshes."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:642
+msgid "The table base has to be 1 to 65535."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:195
+msgid ""
+"The ten most recent are kept, and the baseline on top of those, which is "
+"never deleted by anything."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:566
+msgid ""
+"The two kernel tables that overflow first at thousands of sessions or "
+"clients, and the fw4 flow offload that keeps rule lookups off the CPU. "
+"Values apply immediately and persist across reboots."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:876
+msgid ""
+"The watchdog redials sessions netifd has given up on. 0 seconds turns it off "
+"and leaves every retry to netifd."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:127
+msgid ""
+"The whole ip rule table as the kernel holds it, not as any configuration "
+"file describes it. LuCI's own Routing page reads /etc/config/network, where "
+"none of these are."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:83
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:193
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:180
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:509
+msgid "There is no agent on this router"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:741
+msgid ""
+"There is no instance yet. Add one with the button below; \"bmwan instances\" "
+"reads them back from a console."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:254
+msgid ""
+"These are configuration lines exactly as the router exports them, so some of "
+"them carry keys and passwords."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:194
+msgid ""
+"These pages are drawn from what bm-agent reports, and it did not answer: %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1995
+msgid "These priorities do not hold together: %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:339
+msgid ""
+"These were created by an earlier release as numbered session runs. This "
+"release neither edits nor watches them: delete each one and create it again "
+"as a pool of VLANs. Deleting removes its interfaces exactly as the old "
+"release would have."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1709
+msgid ""
+"This bm-wanbind cannot read its own rule table out to a page; that arrived "
+"with 2.4.0. \"ip -4 rule show\" at a console is the same list without the "
+"owners."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1078
+msgid ""
+"This change moves what the rules already on the router were written against, "
+"so the router takes those rules off before it writes and puts them back on "
+"the pass after. Bound clients lose their route for a few seconds. What moves:"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:852
+msgid ""
+"This is an old-model pool: its numbered sessions are removed exactly as the "
+"release that made them would have."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1899
+msgid ""
+"This is not a router whose rules are all in place. What the kernel is "
+"holding is unknown until the read works, and nothing should be concluded "
+"from the two empty lists. \"logread -e bm-wanbind\" says why it did not."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:198
+msgid ""
+"This login is not allowed to make that call. The ACL that grants it is luci-"
+"app-bm."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:221
+msgid ""
+"This login is older than the ACL that allows these calls. Log out of LuCI "
+"and back in; if that is not enough, run \"/etc/init.d/rpcd reload\" on the "
+"router."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:240
+msgid ""
+"This page drives the pool-of-VLANs model, which arrived with 2.0.0 (API 2). "
+"Update the router packages from the Bored Manager app, or with \"apk add bm-"
+"pppoe-pool\" against a 2.x feed."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:181
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:510
+msgid ""
+"This page is drawn from what the router reports, and bm-agent did not "
+"answer: %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:851
+msgid ""
+"This removes all %d interface(s), their devices, their routing tables and "
+"their firewall memberships. Anybody dialling through them loses their "
+"connection."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:523
+msgid ""
+"This router asks the release server only when somebody presses the button; "
+"nothing here runs on its own. The full flow, including rollback, is on the "
+"Maintenance tab."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:349
+msgid ""
+"This router checks for a new release only when somebody asks it to, and "
+"installs one only under the countdown."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1820
+msgid ""
+"This router has %d ip rules and the list below is the first %d of them, in "
+"the order the kernel walks them. Ask for the rest with \"bmwan rules --"
+"limit\" at a console."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:420
+msgid ""
+"This router has no CA bundle, so it cannot verify the release server's "
+"certificate. Install ca-bundle before updating over the network."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:279
+msgid "This router has no pools yet"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:144
+msgid ""
+"This router has taken no snapshot yet. One is taken automatically before the "
+"next change; the button above takes one now."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1198
+msgid ""
+"This router holds no binding. Add one below, or add an instance and let a "
+"lease grow them."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:455
+msgid "This router is on %s. Signed by key %s, fetched from %s."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:402
+msgid "This router is putting its configuration back now. It will be a moment."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:401
+msgid ""
+"This router will put its configuration back in %s unless somebody keeps the "
+"change."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:787
+msgid ""
+"This router's bm-pppoe-pool is older than 2.2.0, so only VLAN mode is "
+"available. Update the router packages to unlock Direct."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:327
+msgid "Throughput"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:343
+msgid "Throughput, last five minutes"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2009
+msgid "Timers"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/ui.js:205
+msgid "Type %s to confirm:"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/bm/api.js:415
+msgid "Undo now"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1919
+msgid "Unexpected: %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:707
+msgid "Unverified writes"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:266
+msgid "Unwritten"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:262
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:459
+msgid "Up"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:65
+msgid "Up to 1,000 clients"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:66
+msgid "Up to 4,000 clients"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:433
+msgid "Up to date"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:511
+msgid "Up to date."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:479
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:505
+msgid "Update now"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:341
+msgid "Update source"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:348
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:522
+msgid "Updates"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:96
+msgid "Uptime"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:813
+msgid "Use ISP DNS servers"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:413
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:574
+msgid "Username"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:367
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:413
+msgid "VLAN"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:91
+msgid "VLAN %d appears twice"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:35
+msgid "VLAN - one 802.1Q tag per member"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:829
+msgid ""
+"VLAN mode: VLAN 0 dials untagged; VLANs 1-4094 add an 802.1Q tag, and a "
+"wrong tag looks like a PADO timeout. Direct mode: every member dials the "
+"carrier itself. auto gives each slot its own macvlan and MAC (needs kmod-"
+"macvlan); inherit shares the carrier MAC and lets Host-Uniq tell the "
+"sessions apart. A shared account carries as many sessions as the ISP allows: "
+"try two or three members before pasting the full list."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:786
+msgid ""
+"VLAN tags each member. Direct dials the carrier itself, untagged - the flow "
+"for an ISP that answers PPPoE without 802.1Q. Fixed after create."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:568
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:596
+msgid "VLANs"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1853
+msgid "Verify"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:95
+msgid "Version"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1208
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1533
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1771
+msgid "WAN"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:243
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:602
+#: packages/luci-app-bm/root/usr/share/luci/menu.d/luci-app-bm.json:22
+msgid "WAN Binding"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1138
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2010
+msgid "WAN settle time"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2007
+msgid "WAN table base"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:702
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:733
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1675
+msgid "Waiting"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:253
+msgid "Waiting for a WAN to come free"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:369
+msgid "What an update does, step by step"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:425
+msgid ""
+"What every feature needs from this router, asked live. A missing piece is a "
+"feature that breaks - this row is where it says so first."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:827
+msgid ""
+"What is configured is still shown. Start it with \"/etc/init.d/bm-wanbind "
+"start\"."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:630
+msgid ""
+"What is running is shown below and keeps working. Update the router packages "
+"from the Bored Manager app, or with \"apk add bm-wanbind\" against a 2.4 "
+"feed."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:380
+msgid ""
+"What the three router daemons are doing, what every feature needs, and where "
+"updates come from. The app drives the same calls; nothing here is a second "
+"opinion."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2003
+msgid ""
+"Where hand-placed bindings are numbered from. They sit below every instance, "
+"so the kernel reads them first."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2007
+msgid "Where routing tables are handed out from for WANs that have none."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1136
+msgid ""
+"Where the fail-closed rule sits. Nothing outside this range is ever touched."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2004
+msgid "Where the first instance's client rules start."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2005
+msgid "Where the first instance's fail-closed rule sits."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1533
+msgid ""
+"Where this address leaves by. An interface this router reads as a LAN cannot "
+"be chosen, and says what made it think so."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1534
+msgid ""
+"Which side of the router this address is on. Empty lets the router work it "
+"out from its own subnets."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1535
+msgid "While its WAN is down"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1565
+msgid ""
+"Whoever is on that WAN loses it and goes back in the queue, newest holder "
+"first."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:223
+msgid "Whole LAN"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:140
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1651
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1737
+msgid "Why"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1141
+msgid ""
+"Widen this LAN's DHCP pool and lease limit if they are smaller than the pool "
+"of WANs. Off leaves /etc/config/dhcp exactly as it is."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:516
+msgid ""
+"Without it there is no WAN Binding on this router: nothing hands a client "
+"its own WAN, and nothing keeps a hand-placed binding in force."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:187
+msgid ""
+"Without it this router dials no pools. Install it from Router packages in "
+"the Bored Manager app, or with \"apk add bm-pppoe-pool\" on this router."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:826
+msgid "Writes one forwarding from the LAN zone."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:823
+msgid "Zone"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:116
+msgid "a WAN's own table"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:373
+msgid "a default route, on a device the router did not name"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:353
+msgid "account %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:462
+msgid "after"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:117
+msgid "an instance's fail-closed catch-all"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:64
+msgid "another binding already has this address"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:504
+msgid ""
+"apk reported success but this router still answers %s. Check \"logread -e bm-"
+"agent\"."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:536
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:537
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:538
+msgid "auto"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:507
+msgid "auto - one derived MAC per member"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:797
+msgid ""
+"auto derives 02:xx:xx:xx:NN:NN from the carrier MAC, the pool id and the "
+"member number - a tagged device in VLAN mode, a macvlan in Direct. inherit "
+"keeps the carrier MAC; Direct then derives a Host-Uniq per slot."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:149
+msgid "baseline"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:767
+msgid "binding"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:239
+msgid "bm-pppoe-pool %s is too old for this page"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:252
+msgid ""
+"bm-pppoe-pool is installed but is not answering. Check \"logread -e bm-"
+"pppoe\"."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:186
+msgid "bm-pppoe-pool is not installed"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:253
+msgid "bm-pppoe-pool is not installed. Without it this router dials no pools."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:246
+msgid ""
+"bm-wanbind is installed but is not answering. Check \"logread -e bm-"
+"wanbind\"."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:515
+msgid "bm-wanbind is not installed"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:247
+msgid ""
+"bm-wanbind is not installed. Without it there is no WAN Binding on this "
+"router: nothing hands a client its own WAN, and nothing keeps a hand-placed "
+"binding in force. Install it from Router packages in the app, or with \"apk "
+"add bm-wanbind\"."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:77
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:299
+msgid "by hand"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:358
+msgid "carrier MAC"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:79
+msgid "catch-all"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:78
+msgid "client"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:341
+msgid "configured"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:762
+msgid "configured, but the daemon has no state for it"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:614
+msgid "conntrack max"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:636
+msgid ""
+"conntrack max is 16384 to 4194304 and each threshold 128 to 1048576, whole "
+"numbers only."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:553
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:554
+msgid "default"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:48
+msgid "dialing"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:367
+msgid "direct"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:52
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:393
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:951
+msgid "down"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:551
+msgid "empty unless the ISP requires it"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:49
+msgid "error"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:619
+msgid ""
+"fw4 fastpath for established flows. Cuts per-packet rule lookups at "
+"thousands of linear fib rules; committed to the firewall config and reloaded."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:617
+msgid ""
+"gc_thresh1/2/3 of the ARP cache. The kernel refuses new neighbours at the "
+"third; keep it above twice the expected client count, and the three in order."
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:61
+msgid "held - its WAN is down"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:80
+msgid "hold"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:395
+msgid "in %s's pool"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:508
+msgid "inherit - every member keeps the carrier MAC"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:172
+msgid "instance %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:178
+msgid "kept forever"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:89
+msgid "kernel"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:138
+msgid "line %d: VLAN %d appears twice"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:128
+msgid "line %d: expected VLAN, username and password"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:134
+msgid "line %d: the VLAN has to be 0 to 4094"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:331
+msgid "looks up no table"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:440
+msgid "missing"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:63
+msgid "moved off its LAN"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:376
+msgid ""
+"no default route - a lookup here finds nothing and carries on down the rule "
+"list"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:65
+msgid "no lease answers to it yet"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:229
+msgid "no limit"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:277
+msgid "no pass yet"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:151
+msgid "none"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:72
+msgid "not answering"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:339
+msgid "not asked"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:478
+msgid "not asked yet"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:280
+msgid "not in the kernel"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:90
+msgid "not ours"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:765
+msgid "not ready"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:97
+msgid "not reported"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:341
+msgid "not set"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:763
+msgid "nothing was asked - the daemon is not answering"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:439
+msgid "ok"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:368
+msgid "on %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:60
+msgid "on its WAN"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:354
+msgid "one account per VLAN"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:354
 msgid "one account per slot"
 msgstr ""
 
-msgid "Direct mode numbers its sessions 1-4094. There is no VLAN 0."
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:495
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:941
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1403
+msgid "optional"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:371
+msgid "out of %s, with the link itself as the next hop"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:62
+msgid "out on the router's own connection"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:357
+msgid "per-VLAN MACs"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:364
+msgid "per-VLAN accounts"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:357
+msgid "per-slot MACs"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:364
+msgid "per-slot accounts"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:144
+msgid "pools stopped"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:67
+msgid "refused - the section has a mistake"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:87
+msgid "running"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:462
+msgid "seconds"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:364
+msgid "shared account"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:51
+msgid "stopped"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:87
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:66
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:753
+msgid "switched off"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:390
+msgid "table %d"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:171
+msgid "the \"By hand\" filter"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1274
+msgid "the priority band is not usable"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1898
+msgid "the router could not read its ip rules"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1995
+msgid "the router did not say why"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:88
+msgid "the router itself"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:971
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:972
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:973
+msgid "the router picks"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1414
+msgid "the router works it out"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:115
+msgid "the router's own"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:515
+msgid "unchanged if left empty"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:598
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:440
+msgid "unknown"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:364
+msgid "unreachable default - a client landing here is blocked"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:382
+msgid "unset"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:155
+msgid "unverified writes"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:50
+msgid "unwritten"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:47
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:393
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:951
+msgid "up"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:492
+msgid "update available"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1811
+msgid "via %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:368
+msgid "via %s on %s"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:118
+msgid "where a held binding is parked"
+msgstr ""
+
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:961
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:962
+msgid "whole LAN"
 msgstr ""

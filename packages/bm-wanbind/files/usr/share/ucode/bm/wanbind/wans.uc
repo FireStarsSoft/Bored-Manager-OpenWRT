@@ -162,6 +162,112 @@ export function network(addr, mask) {
 		(base / 16777216) % 256, (base / 65536) % 256, (base / 256) % 256, base % 256, mask);
 };
 
+/**
+ * An IPv4 address as a number, or null.
+ *
+ * Plain arithmetic rather than shifts, for the reason `network()` above gives:
+ * ucode's bitwise operators are signed 64-bit, so every address from 128.0.0.0
+ * up would compare as negative and a range starting there would decompose into
+ * one block covering the internet.
+ */
+export function ipToInt(addr) {
+	let parts = match(trim(text(addr)), /^([0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$/);
+	if (!parts)
+		return null;
+
+	let value = 0;
+	for (let i = 1; i <= 4; i++) {
+		let octet = int(parts[i]);
+		if (octet < 0 || octet > 255)
+			return null;
+		value = value * 256 + octet;
+	}
+
+	return value;
+};
+
+/** And back. */
+export function intToIp(value) {
+	if (type(value) != 'int' || value < 0 || value > 4294967295)
+		return '';
+
+	return sprintf('%d.%d.%d.%d',
+		(value / 16777216) % 256, (value / 65536) % 256, (value / 256) % 256, value % 256);
+};
+
+/** 2^n, by multiplication. See `ipToInt` for why not a shift. */
+function powerOfTwo(n) {
+	let size = 1;
+	for (let i = 0; i < n; i++)
+		size = size * 2;
+	return size;
+}
+
+/**
+ * The smallest set of CIDR blocks that covers exactly `from`-`to`.
+ *
+ * This is what an instance scoped to an address range writes its catch-all as,
+ * and "exactly" is the whole of why it is not simply the LAN. A range instance
+ * only ever hands a WAN to a lease inside its range, so a whole-LAN catch-all
+ * under one would blackhole every other device on that LAN - a fail-closed rule
+ * over addresses the operator scoped the instance to leave alone. Covering the
+ * range and nothing else is what makes the two halves agree.
+ *
+ * An empty list means the range cannot be expressed, and the caller refuses the
+ * instance rather than writing part of it. Sixty-two blocks is the worst any
+ * IPv4 range needs, so a loop still going at sixty-four is an arithmetic bug
+ * rather than an awkward range - and this feeds a rule set, where spinning is
+ * the one outcome worse than refusing.
+ */
+export function rangeCidrs(from, to) {
+	let low = ipToInt(from);
+	let high = ipToInt(to);
+
+	if (low === null || high === null || low > high)
+		return [];
+
+	let blocks = [];
+	let current = low;
+
+	for (let guard = 0; guard < 64; guard++) {
+		// Widen while the block still starts exactly here and still ends inside
+		// the range.
+		let prefix = 32;
+		while (prefix > 0) {
+			let wider = prefix - 1;
+			let size = powerOfTwo(32 - wider);
+			let base = current - (current % size);
+
+			if (base != current || base + size - 1 > high)
+				break;
+
+			prefix = wider;
+		}
+
+		push(blocks, sprintf('%s/%d', intToIp(current), prefix));
+
+		let next = current + powerOfTwo(32 - prefix);
+		if (next > high)
+			return blocks;
+
+		current = next;
+	}
+
+	return [];
+};
+
+/** Whether `ip` falls between `from` and `to`, both ends included. */
+export function inRange(from, to, ip) {
+	let low = ipToInt(from);
+	let high = ipToInt(to);
+	let value = ipToInt(ip);
+
+	if (low === null || high === null || value === null)
+		return false;
+
+	return value >= low && value <= high;
+};
+
 /** The LAN's own subnet, as `10.0.0.0/24`, or null. */
 export function lanCidr(list, name) {
 	if (type(list) != 'array')

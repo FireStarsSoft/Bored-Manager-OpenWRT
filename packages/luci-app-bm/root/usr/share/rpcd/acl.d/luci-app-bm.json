@@ -1,6 +1,6 @@
 {
 	"luci-app-bm": {
-		"description": "Read and drive the Bored Manager daemons: snapshots, the commit-confirm guard, the updater, the PPPoE Dialer and the WAN bindings. Creating a pool sends account credentials over this connection, so grant it to the same people who would be given the router's root password.",
+		"description": "Read and drive the Bored Manager daemons: snapshots, the commit-confirm guard, the updater, the PPPoE Dialer and the WAN bindings. Creating a pool sends account credentials over this connection, and a session with this grant can put any client on any WAN, so grant it to the same people who would be given the router's root password.",
 		"read": {
 			"ubus": {
 				"bm.agent": [
@@ -19,7 +19,13 @@
 					"info",
 					"stats",
 					"assignments",
-					"waiting"
+					"waiting",
+					"bindings",
+					"layout",
+					"wans",
+					"rules",
+					"settings_get",
+					"verify"
 				],
 				"bm.pppoe": [
 					"info",
@@ -56,7 +62,14 @@
 					"unassign",
 					"release",
 					"reconcile",
-					"flush"
+					"flush",
+					"bind",
+					"bind_check",
+					"unbind",
+					"instance_check",
+					"instance_set",
+					"instance_delete",
+					"settings_set"
 				],
 				"bm.pppoe": [
 					"action",
@@ -67,10 +80,7 @@
 					"pool_delete",
 					"settings_set"
 				]
-			},
-			"uci": [
-				"bm_wanbind"
-			]
+			}
 		}
 	}
 }

@@ -9,6 +9,213 @@ guessing, so it moves only when the shape of a call changes. `configSchema` is
 the shape of what is written to `/etc`, and it is what a downgrade is refused
 on. All three are in [`version.json`](version.json).
 
+## 2.4.0
+
+WAN Binding is the router's, outright. `apiVersion` moves to **2** and
+`configSchema` to **3**, and `provides` gains `direct` - so a module from 3.4.0
+drives this daemon for every part of binding and writes nothing to the router
+itself, the way PPPoE pools have worked since 2.0.0.
+
+### Why, in one paragraph
+
+Two writers of one ip rule priority band is not a slower arrangement than one.
+It is a wrong one. Until 3.4.0 the app wrote one-to-one bindings over SSH into
+19000-19999 without writing a `config direct` section, and this daemon owns that
+band and removes every rule in it that no section asks for - so the daemon
+deleted them every thirty seconds and the app wrote them back every two. The
+rules existed for most of a second at a time, LuCI showed nothing because it had
+no binding surface at all, and the *symptom* recorded against 2.3.0 - a rule
+reported added with no socket error and nothing at that priority a moment later -
+was the app's sweep, not a fault in netlink. Anything either half could have got
+wrong on its own would have been easier to find than that.
+
+### One address, or a whole LAN, through one core
+
+A binding is a target, a WAN, a `when_down` and a priority, and there is now one
+piece of code that turns a set of them into the rules a kernel is holding. A
+one-to-one binding is one placed by hand. An instance is a *generator* of them
+from DHCP leases, with a pool of WANs, sticky, remap, a queue, and the
+fail-closed catch-all underneath. Both go through the same diff, the same
+whole-priority-group comparison, and the same read-back.
+
+### `clients_per_wan`
+
+`option clients_per_wan` on an instance: **1** gives every client a WAN of its
+own, which is what every instance written before this release meant and what
+this option defaults to. **N** lets that many share a line, and the pool fills
+by least-loaded rather than front-first, so the last WAN is not idle while the
+first carries everybody. **0** is no limit - and with a one-WAN pool that is the
+other thing a multi-WAN router gets bought for: this whole LAN out of that line,
+with the catch-all still fencing everything the instance did not seat.
+
+A pin onto a full WAN evicts the newest holder and only that one, because taking
+a whole line off everybody to seat one person is a far larger act than the
+button describes. A WAN that fails moves every client on it, not the first.
+
+### An instance can be scoped to an address range
+
+`option range_from` and `option range_to`, both or neither, both inside the
+LAN's subnet. The planner admits only leases inside the range, and the catch-all
+is the minimal set of address blocks covering **exactly** it - not the whole LAN,
+because a whole-LAN fence under a scoped instance would fail-close every device
+the scope was chosen to leave alone. Those two halves have to agree exactly or
+the feature is worse than not having it, so the block arithmetic has a probe of
+its own.
+
+Two instances may now share a LAN when their ranges do not overlap - two pools
+of clients and two pools of WANs, which people ask for. Overlapping ones are
+refused by name, and a whole-LAN instance still overlaps everything on its LAN,
+which is the old one-instance-per-LAN rule said properly rather than removed.
+
+### Every write is read back
+
+After each pass the daemon asks the kernel whether it is holding the rules it
+just wrote, and counts the ones it is not. `bmwan status`, `bmwan verify`, the
+LuCI page and the app all carry that number. It is the answer to the only
+question a routing bug of this shape ever raises - *why is this address on the
+wrong WAN when every row reads bound* - and the log line names the most likely
+cause rather than shrugging.
+
+`rtnl.error()` is one-shot, so every write clears it before the request instead
+of reporting the last failure of whatever ran before it.
+
+### The daemon does the rest of what the app used to do over SSH
+
+`option ip4table` on every WAN in a pool, the firewall forwardings from a LAN's
+zone to every zone its pool sits in, the catch-all route and rule, and - opt-in -
+the dnsmasq lease ceilings. New verbs `instance_check`, `instance_set`,
+`instance_delete`, `settings_get`, `settings_set`, `wans`, `rules`, `verify` and
+`bind_check`, with `bmwan instance add/set/delete/check`, `bmwan wans`, `bmwan
+rules`, `bmwan verify` and `bmwan settings` at a console.
+
+`instance_set` is create-and-edit in one, an absent field keeps what the section
+has, and a change to anything the standing rules were written against - the LAN,
+either priority, the table, the range - flushes them first. It rebuilds the
+daemon's own state for that instance without a restart.
+
+The routes are written over netlink now rather than by forking `ip`. The BusyBox
+`ip` a stock OpenWrt ships refuses a numeric routing table, so the package that
+writes every rule over a socket was demanding `ip-full` for two lines.
+
+### LuCI
+
+Services -> Bored Manager -> WAN Binding is most of a new page: the bindings
+table with its state and its reason, an instance editor that checks before it
+saves, the address range and clients-per-WAN, and a read-only *Rules on this
+router* showing every ip rule with who wrote it and why that address is not on
+the default connection. The browser no longer writes raw UCI - the ACL drops
+`write uci bm_wanbind` - because the daemon is the thing that knows to flush
+first.
+
+### Upgrading, and what it costs
+
+- **Update the module to 3.4.0 in the same sitting.** A module older than that
+  keeps writing the direct band itself, and this daemon keeps clearing it.
+- Rules an older module wrote over SSH into 19000-19999 are removed on the first
+  pass, because no `config direct` section describes them. A 3.4.0 module hands
+  its records over as sections on its first connect and the rules come back at
+  the same priorities; on a router with no app, write them with `bmwan bind`.
+- Rules in an instance's own band are **adopted**, not lost: the section already
+  describes them and the pass recognises its own work.
+- The firewall sections an older module wrote - `bmf<slot>_<n>` and
+  `bmd<slot>_<n>` - are swept once the daemon has a forwarding of its own
+  carrying the same pair of zones, and not before.
+- **`configSchema` 3 is a one-way door.** A 2.3.0 build refuses to start against
+  a router stamped 3, and that refusal is correct: it has no idea what
+  `range_from` means, so it would bind the whole LAN behind a whole-LAN catch-all
+  and blackhole every address the scope was written to protect. Install the newer
+  packages again, or restore a snapshot taken before the upgrade.
+
+### After install
+
+1. `apk info -e bm-agent bm-wanbind bm-pppoe-pool luci-app-bm` all say 2.4.0.
+2. `bmwan status` shows `unverified 0`.
+3. `bmwan verify` reports nothing missing and nothing extra.
+4. `bmwan rules` shows no `foreign` owner inside 19000-30999.
+5. Log out of LuCI and back in, so the browser picks up the new ACL.
+
+## 2.3.0
+
+The router learns what a one-to-one binding is. `apiVersion` stays **1** and
+`configSchema` stays **2**: `config direct` is a section type nothing older
+reads, so an old daemon on a new file simply has no bindings rather than
+misreading one, and an old module on a new daemon never asks.
+
+### `config direct`: one address, one WAN port, kept by the router
+
+An instance is a whole LAN sharing a pool. A binding is the other thing people
+buy a multi-WAN router for - this machine leaves by that line, always, because
+somebody said so - and until now it existed only in the app, written over SSH,
+and lasted exactly as long as somebody kept the app open.
+
+The sections live in `/etc/config/bm_wanbind`. `bm.wanbind.direct` reconciles
+them on boot, on the daemon's timer and on a netifd event, with nothing
+attached: `option ip4table` on the WAN if it has none, a firewall forwarding
+from the address's own LAN zone under a `bmd_` section, and an `ip rule` at a
+priority from the band `option direct_pref_base` opens - 19000-19999 by
+default, deliberately below every instance's `rule_pref_base`, because the
+lowest matching rule decides and a binding has to beat the WAN a pool would
+have handed the same device.
+
+`when_down` is `hold` or `fallback` and there is no third answer, because
+removing the rule is fallback with nothing to say so. Both are a *re-point*: a
+rule whose table holds no matching route does not fail, the kernel's fib-rule
+walk carries on to the next rule and out of the main table, which is the
+default connection a binding is an exception to. So hold points at a table
+holding `unreachable default` and fallback points at 254.
+
+New ubus verbs `bindings`, `bind`, `unbind` and `layout`, and `bmwan
+bind`/`unbind`/`bindings`/`layout` at a console. `bind` is create-and-edit in
+one: a field you do not send keeps what the section has, so an edit that says
+only which WAN an address leaves by does not also wipe the name somebody gave
+it.
+
+### An interface classifier that reads the router rather than the device name
+
+`bm.wanbind.layout` weighs what the router itself states - the protocol netifd
+reports, whether `/etc/config/dhcp` holds a section actually serving the
+interface, whether its firewall zone masquerades, whether it delegates an IPv6
+prefix, and the kernel's own default route - and answers lan, uplink or
+**unclear**. Serving DHCP is decisive for a LAN; carrying the main table's
+default route is decisive for an uplink; both at once is `unclear`, said out
+loud rather than settled by arithmetic.
+
+It exists because the app's own version of this decision was a guess about a
+device name, and a LAN on a VLAN, a plain port or a radio was read as a WAN.
+Having the verdict on the router means the two halves cannot reach different
+conclusions about which side of the router an interface is on.
+
+### A rule this daemon wrote was recorded as a rule it could not write
+
+ucode's rtnl module answers a *dump* with an array and a *write* with `null` -
+on success as well as on failure - so `if (!ok)` read every successful write as
+a failed one. On a router with a binding that is an error line per pass saying
+the address "is not going where its binding says", while the rule sits in the
+kernel exactly where it belongs and the counters stay at zero for ever. The
+socket's own error is the only thing that tells the two apart, and it is what
+is asked now. This was in 2.2.0 as well.
+
+The classifier had the mirror of it: a route's device was read under `dev`,
+and rtnl answers with `oif`. The one reading in that file that is not an
+inference collected nothing at all, which is indistinguishable from a router
+with no default route.
+
+### `direct` is not advertised in this release
+
+`/usr/share/bm/features/bm-wanbind.json` lists `binding` and not `direct`, so a
+module reads this daemon as owning instances and not bindings, and goes on
+writing them itself. Everything above is installed and running; nothing drives
+it but `bmwan` and LuCI.
+
+The reason was a report that could not be explained at the time: on a real
+router the daemon reported a rule added, with no error from the socket, and
+`ip -4 rule show` had nothing at that priority - while the same call from a
+shell on the same router wrote the rule and read back. **2.4.0 has the answer,
+and it was never this daemon's fault**: the module was writing the same band
+over SSH and sweeping every rule in it that no record of its own described,
+every two seconds, which on a router the daemon was binding is all of them.
+The two halves deleted each other's work on two timers.
+
 ## 2.2.0
 
 The PPPoE Dialer grew a second carrier mode, the LuCI pages match the module

@@ -10,6 +10,18 @@
 # writing ip rules the moment it is installed. Add them from LuCI (Services ->
 # Bored Manager -> WAN Binding), from the app, or by hand below.
 #
+# Since 2.4.0 the daemon writes instances as well as bindings. LuCI, `bmwan
+# instance add|set|delete` and the app all arrive at the same method on the
+# router, which weighs the section against this router's own reading of its
+# interfaces before anything is committed, allocates the numbers below when
+# they are not given, and puts the result in force without restarting anything.
+# Editing this file by hand and running /sbin/reload_config still works and
+# always will - it is a conffile, and it is the path that needs nothing else on
+# the router to be alive - but it restarts the service: an instance's pool and
+# queue are the running process's own memory, so every client is re-adopted
+# from the rules on the router and, for the second or two in between, an
+# address that was being held falls back to ordinary routing.
+#
 # A section whose numbers do not make sense is refused and left out of every
 # list the daemon builds, which is a quiet way to fail. `bmwan check` prints
 # every section in this file with the reason it was refused, and the LuCI page
@@ -56,6 +68,59 @@ config wanbind 'main'
 	# instance it would collide with.
 	option direct_pref_base '19000'
 
+	# What an instance is given when it does not say for itself.
+	#
+	# The seven below are defaults and nothing else. Every instance carries its
+	# own copy of each of them, stamped into its section when it is created,
+	# and that copy is what the daemon reads from then on. So changing one of
+	# these decides what the *next* instance gets and changes nothing about the
+	# ones already in this file - which is deliberate, and is the same rule the
+	# per-instance comments give: the numbers are what the rules already on the
+	# router were written against, and quietly moving them under a running
+	# instance would make the next pass fail to recognise its own work and
+	# write a second copy of every rule. To move an existing instance, edit
+	# that instance - by hand, or from any of the three surfaces - and the
+	# daemon takes its rules off before it renumbers them.
+	#
+	# Every one of them is commented out here because the value shown is also
+	# the built-in default. Uncommenting one with the same number changes
+	# nothing; it only writes down what this router is already doing.
+	#
+	# Where an instance's client rules start. Its own priorities are counted
+	# upwards from here and have to stop before its catch_all_pref, so the gap
+	# between this and the next is the most clients one instance can seat.
+	#option rule_pref_base '20000'
+
+	# Where the first instance's catch-all sits. The second instance created on
+	# this router takes the lowest number above it that no instance is using,
+	# so a router with three instances ends up with 30000, 30001 and 30002
+	# unless somebody chose otherwise.
+	#option catch_all_pref_base '30000'
+
+	# The routing table a new instance parks its unassigned clients in. 253 is
+	# the kernel's `default` table and OpenWrt leaves it empty, which makes it
+	# the natural home for the `unreachable default` that fail-closed depends
+	# on. A router already using it is given the next free number down instead.
+	#option catch_all_table '253'
+
+	# Where a WAN that has no routing table of its own is given one. Only WANs
+	# with no `option ip4table` in /etc/config/network are touched, and a
+	# number an administrator chose is never overwritten.
+	#option wan_table_base '10000'
+
+	# How long a WAN must have been up before a new instance will hand it to a
+	# client. Freshly dialled PPPoE sessions come up before they carry traffic,
+	# and a client bound to one of those looks exactly like a broken binding to
+	# the person using it.
+	#option wan_warn_uptime '5'
+
+	# How long a WAN must have been failing before remap moves its client off.
+	#option wan_error_grace '20'
+
+	# How long a client keeps its WAN after its lease disappears. Covers a
+	# reboot, a cable pulled for a minute, and dnsmasq restarting.
+	#option release_grace '120'
+
 # One instance is one LAN and one WAN carrier. A router with two independent
 # pools has two of these; most have one.
 #
@@ -78,13 +143,51 @@ config wanbind 'main'
 #	# onto a free one. Off means it waits for its own WAN to come back.
 #	option remap '1'
 #
+#	# How many clients may share one WAN.
+#	#
+#	#   1   a line each. The default, and what every release before 2.4.0
+#	#       meant - a fourth client on a three-WAN pool waits in the queue.
+#	#   N   that many share one line before the next is opened.
+#	#   0   no limit. On a pool of one WAN that is the other thing people ask a
+#	#       multi-WAN router for: everybody out of that line, and the catch-all
+#	#       below is then only ever reached by a device with no lease.
+#	#
+#	# It is a policy rather than a number the rules are written against, so
+#	# changing it is safe at any time; the next pass seats or queues clients to
+#	# match. What it does change is how many ip rule priorities the instance
+#	# needs, which is the range between rule_pref_base and catch_all_pref.
+#	option clients_per_wan '1'
+#
+#	# The addresses this instance binds, when it is not the whole LAN.
+#	#
+#	# Both or neither, and both inside the LAN's own subnet. Absent - which is
+#	# the shipped state - means every lease on the LAN.
+#	#
+#	# A range is what lets two instances share one LAN: two disjoint ranges are
+#	# two pools of clients and two pools of WANs, and the daemon refuses two
+#	# instances whose ranges overlap because each would read the other's rules
+#	# as strays and delete them once a pass, for ever.
+#	#
+#	# The fail-closed catch-all follows the range exactly rather than fencing
+#	# the whole subnet - written as the smallest set of address blocks that
+#	# covers it and nothing else. That is the half worth reading twice: a
+#	# device outside the range keeps the router's ordinary routing and is
+#	# untouched, where a whole-LAN catch-all under a scoped instance would
+#	# blackhole every device the range was chosen to leave alone.
+#	option range_from '192.168.1.100'
+#	option range_to '192.168.1.199'
+#
 #	# The ip rule priority range this instance owns. Client rules are written
 #	# from rule_pref_base upwards and never reach catch_all_pref; a rule outside
 #	# the range belongs to somebody else and is never touched.
 #	#
-#	# Both are locked once the instance has written anything: moving them would
-#	# make the next pass fail to recognise its own rules and write a second copy
-#	# of every one of them.
+#	# Moving either of them by hand on a running instance writes a second copy
+#	# of every rule: the next pass looks for its own work at the new numbers,
+#	# finds none, and writes it all again while the old set stays where it is.
+#	# So edit them through the daemon - LuCI, `bmwan instance set`, the app -
+#	# which takes the instance's rules off the router first and then renumbers.
+#	# By hand, `bmwan flush --instance NAME` before the edit does the same two
+#	# steps in the same order.
 #	option rule_pref_base '20000'
 #	option catch_all_pref '30000'
 #

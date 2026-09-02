@@ -15,12 +15,14 @@
 // and a client that has a WAN of its own is matched by its higher-priority rule
 // first and never reaches it. Fail closed, in two lines.
 //
-// The route is written with `ip` rather than over netlink, which is a
-// deliberate exception to the rest of this package. It happens once per
-// instance rather than once per client, so there is nothing to gain; and it is
-// the single most consequential thing here, so it is worth being a line
-// somebody can read, type at a shell and compare against what the router says.
-// It is read back after writing for the same reason.
+// Both routes go over netlink, like everything else here. They used to be
+// `ip -4 route replace`, on the argument that a line somebody can type at a
+// shell is worth more than a socket message for the two most consequential
+// writes in the package - which was fair until the cost turned up: the BusyBox
+// `ip` every stock OpenWrt ships refuses a numeric routing table, so the one
+// package that writes every rule over netlink was refusing to run on routers
+// without `ip-full` for the sake of two lines. They are read back after writing
+// for the same reason they always were.
 //
 // The second half of this file is the same two questions asked for one-to-one
 // bindings: which rules on the router are theirs, and where an address that is
@@ -30,21 +32,77 @@
 // as the instance's: a rule pointing at an empty table does not fail, it falls
 // through to main.
 
-import { popen } from 'fs';
-
 import { err, notice } from 'bm.log';
 
 import * as netlink from 'bm.wanbind.netlink';
 import * as wans from 'bm.wanbind.wans';
 
-function shell(command) {
-	let handle = popen(command + ' 2>&1', 'r');
-	if (!handle)
-		return { ok: false, output: '' };
+// The two route kinds this file writes, spelled out rather than read from
+// `rtnl.const`: this module never imports rtnl - netlink.uc is the one place
+// that does - and these are kernel constants that have not moved since the
+// routing table gained types. RTN_UNREACHABLE answers a lookup with
+// EHOSTUNREACH, which is what makes a parked address parked; RT_SCOPE_LINK is
+// what marks a connected route as reachable without a gateway.
+const UNREACHABLE = 7;
+const LINK_SCOPE = 253;
 
-	let output = handle.read('all');
-	let status = handle.close();
-	return { ok: status === 0, output: type(output) == 'string' ? trim(output) : '' };
+/**
+ * Whether a table really holds `unreachable default`, asked of the kernel.
+ *
+ * Read back after every write, because this one route is what stands between
+ * an unassigned client and the router's own WAN. A write that was accepted and
+ * did something subtly different is not a risk worth taking here, and a table
+ * that quietly has no default at all is the failure that looks exactly like
+ * everything working.
+ */
+function holdsUnreachableDefault(table) {
+	let held = netlink.routes();
+
+	if (held === null)
+		return false;
+
+	for (let one in held) {
+		// An empty `dst` is a default route: the kernel answers a dump with the
+		// destination already in CIDR form and says nothing at all for the one
+		// that matches everything.
+		if (one.table != table || length(one.dst))
+			continue;
+
+		if (one.kind == UNREACHABLE)
+			return true;
+	}
+
+	return false;
+}
+
+/**
+ * Take every route this package put in one table back out.
+ *
+ * `ip route flush table N` in two lines, and deliberately only the two shapes
+ * written above: the unreachable default, and the connected routes beside it.
+ * A blanket flush would also take out anything else that happens to share the
+ * table - on a router where the catch-all table is 253 that is whatever
+ * `default` holds, which is not this package's to empty.
+ */
+function emptyTable(table) {
+	let held = netlink.routes();
+
+	if (held === null)
+		return;
+
+	for (let one in held) {
+		if (one.table != table)
+			continue;
+
+		if (one.kind != UNREACHABLE && one.scope != LINK_SCOPE)
+			continue;
+
+		netlink.routeRemove({
+			table: table,
+			dst: netlink.routeDestination(one),
+			oif: one.oif
+		});
+	}
 }
 
 /**
@@ -57,10 +115,9 @@ function shell(command) {
 export function unreachableDefault(instance, lanCidr, lanDevice) {
 	let table = instance.catchAllTable;
 
-	let written = shell(sprintf('ip -4 route replace unreachable default table %d', table));
-	if (!written.ok) {
-		err(sprintf('instance %s: cannot write the unreachable default in table %d: %s',
-			instance.id, table, written.output));
+	if (!netlink.routeReplace({ table: table, dst: '0.0.0.0/0', kind: UNREACHABLE })) {
+		err(sprintf('instance %s: cannot write the unreachable default in table %d',
+			instance.id, table));
 		return false;
 	}
 
@@ -79,11 +136,9 @@ export function unreachableDefault(instance, lanCidr, lanDevice) {
 	// restored is the traffic that never should have been in it - the router's
 	// own, and clients talking to each other.
 	if (lanCidr && lanDevice) {
-		let local = shell(sprintf('ip -4 route replace %s dev %s scope link table %d',
-			lanCidr, lanDevice, table));
-		if (!local.ok) {
-			err(sprintf('instance %s: cannot write the connected route for %s in table %d: %s - the router would stop answering on that LAN, so the catch-all is not being installed',
-				instance.id, lanCidr, table, local.output));
+		if (!netlink.routeReplace({ table: table, dst: lanCidr, oif: lanDevice, scope: LINK_SCOPE })) {
+			err(sprintf('instance %s: cannot write the connected route for %s in table %d - the router would stop answering on that LAN, so the catch-all is not being installed',
+				instance.id, lanCidr, table));
 			return false;
 		}
 	}
@@ -92,8 +147,7 @@ export function unreachableDefault(instance, lanCidr, lanDevice) {
 	// client and the router's own WAN, and `ip` returning zero having done
 	// something subtly different is not a risk worth taking on the one line
 	// that makes the whole feature true.
-	let found = shell(sprintf('ip -4 route show table %d', table));
-	if (!found.ok || !match(found.output, /unreachable[ \t]+default/)) {
+	if (!holdsUnreachableDefault(table)) {
 		err(sprintf('instance %s: table %d does not hold an unreachable default after writing it - unassigned clients would use the router\'s own WAN',
 			instance.id, table));
 		return false;
@@ -110,45 +164,91 @@ export function unreachableDefault(instance, lanCidr, lanDevice) {
  * nothing maintains any more.
  */
 export function removeUnreachableDefault(instance) {
-	shell(sprintf('ip -4 route flush table %d', instance.catchAllTable));
+	emptyTable(instance.catchAllTable);
 };
 
 /**
- * Install the catch-all rule, replacing anything else at its priority.
+ * The blocks one instance fences, which is its whole LAN or exactly its range.
+ *
+ * A whole-LAN instance is one block and always was. A scoped one is the minimal
+ * set of blocks covering exactly its range, and "exactly" is the load-bearing
+ * word: the planner only ever seats a lease inside the range, so a whole-LAN
+ * catch-all under a scoped instance would fail-close every other device on that
+ * LAN - blocked by an instance that is never going to give it a WAN, which is
+ * a device taken off the network by the option chosen to leave it alone.
+ */
+export function catchAllCidrs(instance, lanCidr) {
+	if (!length(instance.rangeFrom) || !length(instance.rangeTo))
+		return length(lanCidr) ? [ lanCidr ] : [];
+
+	return wans.rangeCidrs(instance.rangeFrom, instance.rangeTo);
+};
+
+/** The rules at one priority, as a sorted key set, for comparing groups. */
+function groupKeys(rules, pref) {
+	let keys = [];
+
+	for (let one in rules) {
+		if (one.pref == pref)
+			push(keys, sprintf('%s|%d', one.cidr, one.table));
+	}
+
+	return sort(keys);
+}
+
+/**
+ * Install the catch-all, replacing anything else at its priority.
+ *
+ * A whole *priority group* is compared rather than a single rule, because a
+ * scoped instance writes several blocks at one number and the kernel is content
+ * to hold any number of rules there. Comparing them as a set is also what stops
+ * a settled router rewriting the group on every pass: several blocks come back
+ * from a dump in whatever order the kernel walks them, and a comparison that
+ * cared about order would tear the group down and rebuild it every thirty
+ * seconds - with a window, each time, where the LAN is not fenced at all.
  *
  * All three fields are compared. A rule at the right priority pointing at the
  * wrong table is worse than no rule - it sends the whole LAN somewhere nobody
  * chose - so it is replaced rather than accepted.
  *
- * Returns true when the router ends up with it. False is reported by every
- * surface as the instance not being safe to run, because it is not.
+ * Returns true when the router ends up holding exactly the group. False is
+ * reported by every surface as the instance not being safe to run, because it
+ * is not.
  */
-export function installCatchAll(instance, lanCidr, rules) {
-	let strays = [];
+export function installCatchAll(instance, cidrs, rules) {
+	let blocks = (type(cidrs) == 'array') ? cidrs : [ cidrs ];
+
+	if (!length(blocks)) {
+		err(sprintf('instance %s: there are no address blocks to fence, so no catch-all was installed',
+			instance.id));
+		return false;
+	}
+
+	let wanted = [];
+	for (let cidr in blocks)
+		push(wanted, sprintf('%s|%d', cidr, instance.catchAllTable));
+
+	if (join(chr(10), sort(wanted)) == join(chr(10), groupKeys(rules, instance.catchAllPref)))
+		return true;
 
 	for (let one in rules) {
 		if (one.pref != instance.catchAllPref)
 			continue;
 
-		if (one.cidr == lanCidr && one.table == instance.catchAllTable)
-			return true;
-
-		push(strays, one);
-	}
-
-	for (let stray in strays) {
 		notice(sprintf('instance %s: replacing the rule at priority %d (was %s -> table %d)',
-			instance.id, stray.pref, stray.cidr, stray.table));
-		netlink.remove(stray.pref, stray.cidr, stray.table);
+			instance.id, one.pref, one.cidr, one.table));
+		netlink.remove(one.pref, one.cidr, one.table);
 	}
 
-	if (!netlink.add(instance.catchAllPref, lanCidr, instance.catchAllTable)) {
-		err(sprintf('instance %s: cannot install the catch-all rule for %s', instance.id, lanCidr));
-		return false;
+	for (let cidr in blocks) {
+		if (!netlink.add(instance.catchAllPref, cidr, instance.catchAllTable)) {
+			err(sprintf('instance %s: cannot install the catch-all rule for %s', instance.id, cidr));
+			return false;
+		}
 	}
 
 	notice(sprintf('instance %s: catch-all installed - %s falls through to table %d',
-		instance.id, lanCidr, instance.catchAllTable));
+		instance.id, join(', ', blocks), instance.catchAllTable));
 	return true;
 };
 
@@ -169,6 +269,12 @@ export function installCatchAll(instance, lanCidr, rules) {
  * never share a LAN interface - the app refuses it, and there is nothing
  * sensible for it to mean - so the subnets are what separate them.
  *
+ * Since 2.4.0 the same argument runs one level finer. Two instances may share
+ * a LAN when their address ranges are disjoint, so the subnet no longer tells
+ * them apart either - the *scope* does. A client rule is this instance's when
+ * its address is one this instance would ever seat, which for a whole-LAN
+ * instance is the subnet and for a scoped one is the range.
+ *
  * `lanCidr` may be null, and then the priority range is all there is to go on.
  * That is the console case: `bmwan flush` runs with the service stopped and
  * netifd may not be answering either, and taking too much off a router that is
@@ -177,6 +283,7 @@ export function installCatchAll(instance, lanCidr, rules) {
 export function ownedClientRules(rules, instance, lanCidr) {
 	let out = [];
 	let scoped = type(lanCidr) == 'string' && length(lanCidr);
+	let ranged = length(instance.rangeFrom) && length(instance.rangeTo);
 
 	for (let one in rules) {
 		if (one.pref < instance.rulePrefBase || one.pref >= instance.catchAllPref)
@@ -185,6 +292,13 @@ export function ownedClientRules(rules, instance, lanCidr) {
 		if (scoped) {
 			let ip = wans.hostAddress(one.cidr);
 			if (!ip || !wans.contains(lanCidr, ip))
+				continue;
+
+			// Inside the LAN but outside the range is another instance's client
+			// on the same LAN. Adopting it would have each of them delete the
+			// other's rules on its own timer, which is the fault this whole
+			// function exists to prevent, one level down.
+			if (ranged && !wans.inRange(instance.rangeFrom, instance.rangeTo, ip))
 				continue;
 		}
 
@@ -319,24 +433,19 @@ export function holdTable(instances, bindings, ifaces) {
  * is logged and the hold still goes in.
  */
 export function installHold(table, connected) {
-	let written = shell(sprintf('ip -4 route replace unreachable default table %d', table));
-	if (!written.ok) {
-		err(sprintf('cannot write the unreachable default in table %d: %s', table, written.output));
+	if (!netlink.routeReplace({ table: table, dst: '0.0.0.0/0', kind: UNREACHABLE })) {
+		err(sprintf('cannot write the unreachable default in table %d', table));
 		return false;
 	}
 
 	for (let one in (type(connected) == 'array' ? connected : [])) {
-		let local = shell(sprintf('ip -4 route replace %s dev %s scope link table %d',
-			one.cidr, one.device, table));
-
-		if (!local.ok) {
-			err(sprintf('cannot write the connected route for %s in table %d: %s - a held address on that LAN will not reach its neighbours either',
-				one.cidr, table, local.output));
+		if (!netlink.routeReplace({ table: table, dst: one.cidr, oif: one.device, scope: LINK_SCOPE })) {
+			err(sprintf('cannot write the connected route for %s in table %d - a held address on that LAN will not reach its neighbours either',
+				one.cidr, table));
 		}
 	}
 
-	let found = shell(sprintf('ip -4 route show table %d', table));
-	if (!found.ok || !match(found.output, /unreachable[ \t]+default/)) {
+	if (!holdsUnreachableDefault(table)) {
 		err(sprintf('table %d does not hold an unreachable default after writing it - a held address parked there would leave over the router\'s default connection',
 			table));
 		return false;
@@ -354,7 +463,7 @@ export function installHold(table, connected) {
  * which is precisely what the instance half exists to prevent.
  */
 export function removeHold(table) {
-	shell(sprintf('ip -4 route flush table %d', table));
+	emptyTable(table);
 };
 
 /**

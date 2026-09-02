@@ -39,7 +39,8 @@ resolves('wanbind engine.readdress', () => {
 				wan: 'wan1', pref: 20000, table: 101
 			}
 		},
-		wanOwner: { wan1: 'aa:bb:cc:dd:ee:ff' },
+		wanOwners: { wan1: { 'aa:bb:cc:dd:ee:ff': true } },
+		wanCount: { wan1: 1 },
 		freeWans: [], freePos: {},
 		waiting: {}, waitOrder: [], waitHead: 0, nextOrder: 1,
 		held: {}, sticky: {}, assignedAt: {},

@@ -61,7 +61,17 @@ things a router would otherwise have to teach you.
 Two shapes matter and are easy to get wrong. Close every `export function` with
 `};`: an `export` is a statement, and without its semicolon the error is
 reported against whatever line comes next, which is usually a comment. And a
-module whose real exports include a ucode keyword - `rtnl` exports `const` -
-simply omits it: every caller reaches it as `rtnl.const.X` through
-`import * as rtnl`, which is a property lookup at run time and not a name the
-compiler ever checks.
+module whose real exports include a ucode keyword - `rtnl` exports `const` - is
+written `export { CONSTANTS as 'const' };`: a string alias in an export list is
+legal where a variable of that name is not, and a wildcard import turns it into
+the `rtnl.const` property every caller already reads. The stub omitted it for a
+long time on the belief that it could not be spelled, which cost nothing until
+the day a probe needed real constant values to dispatch on.
+
+`stubs/rtnl.uc` is the one stub that is not inert, and the reason is in its own
+header: a rule the daemon reports as written and the kernel does not hold is
+indistinguishable, against a stub that stores nothing, from a rule that landed -
+and that is a failure this package has actually shipped. It keeps a rule table
+and a route table, answers a dump from them, and has one switch no real kernel
+offers: `setDropAdds(true)`, which accepts every write, reports nothing wrong,
+and holds none of it.

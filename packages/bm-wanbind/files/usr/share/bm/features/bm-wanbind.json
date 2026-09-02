@@ -1,10 +1,11 @@
 {
 	"name": "bm-wanbind",
-	"version": "2.3.0",
+	"version": "2.4.0",
 	"ubus": "bm.wanbind",
-	"apiVersion": 1,
+	"apiVersion": 2,
 	"provides": [
-		"binding"
+		"binding",
+		"direct"
 	],
 	"description": "One DHCP client, one WAN, decided on the router"
 }
