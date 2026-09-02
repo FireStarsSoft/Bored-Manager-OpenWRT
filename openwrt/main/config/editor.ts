@@ -36,27 +36,12 @@ import type { ConfigStore } from './store'
  */
 export type RulesTopology = 'none' | 'present' | 'unknown'
 
-const UNKNOWN_TOPOLOGY =
-  'Numbering and firewall-layout rules cannot change while no router is connected'
-
-/**
- * The values a binding instance's records depend on. PPPoE keys are gone from
- * this list with the pools themselves: a pool records its own numbering and
- * zone on the router, so no module rule describes where one lives any more.
- */
-const LOCKED_KEYS: ReadonlyArray<keyof OwrtRules> = [
-  'rulePrefBase',
-  'catchAllPrefBase',
-  'catchAllTable'
-]
-
 export class RulesEditor {
   private session = createCheckSession<Partial<OwrtRules>>()
 
   constructor(
     private ctx: ModuleContext,
-    private store: ConfigStore,
-    private topology: () => RulesTopology
+    private store: ConfigStore
   ) {}
 
   effective(): Record<string, string | number | boolean> {
@@ -133,7 +118,7 @@ export class RulesEditor {
     }
 
     const candidate: OwrtRules = { ...current, ...entered }
-    findings.push(...this.blockers(candidate, current))
+    findings.push(...this.blockers(candidate))
 
     const kept: Partial<OwrtRules> = {}
     for (const key of Object.keys(DEFAULT_RULES) as Array<keyof OwrtRules>) {
@@ -178,7 +163,7 @@ export class RulesEditor {
     // be saved, a batch can be created, or the connection can drop.
     const current = this.store.effectiveRules()
     const candidate: OwrtRules = { ...current, ...taken.payload }
-    const blocker = this.blockers(candidate, current)[0]
+    const blocker = this.blockers(candidate)[0]
     if (blocker) {
       return { ok: false, error: `${blocker.label.toLowerCase()} - check again` }
     }
@@ -205,29 +190,17 @@ export class RulesEditor {
    * router's records depend on, and they are the only ones held back.
    */
   reset(): OkResult {
-    const current = this.store.effectiveRules()
-    const topology = this.topology()
-    const held = topology === 'none'
-      ? []
-      : LOCKED_KEYS.filter((key) => current[key] !== DEFAULT_RULES[key])
-    const kept: Partial<OwrtRules> = {}
-    for (const key of held) {
-      ;(kept as Record<string, unknown>)[key] = current[key]
-    }
-    this.store.setRules(kept)
+    // Nothing is held back any more, and the reason is the whole of this
+    // release. Three numbers here used to be locked while an instance existed,
+    // because the rules standing on the router had been written against them -
+    // move one and the next pass failed to recognise its own work and wrote a
+    // second copy of everything. The router owns those numbers now: it stamps
+    // each section with the band it was created under and re-reads them itself,
+    // so there is nothing on any router this reset could contradict.
+    this.store.setRules({})
     this.session.clear()
-    this.ctx.log(
-      `openwrt: rule overrides cleared${held.length ? `, keeping ${held.join(', ')}` : ''}`
-    )
-    if (!held.length) return { ok: true }
-    return {
-      ok: true,
-      data:
-        `Every rule is back to its default except ${held.join(', ')}, kept because ` +
-        (topology === 'unknown'
-          ? 'no router is connected to say whether records exist that depend on them. Connect the router these rules apply to, then reset again.'
-          : 'binding instances describe where their rules live on the router. Delete those instances first, then reset again.')
-    }
+    this.ctx.log('openwrt: rule overrides cleared')
+    return { ok: true }
   }
 
   /**
@@ -235,7 +208,7 @@ export class RulesEditor {
    * `apply` cannot drift apart. `check` shows them; `apply` runs them again
    * against the values in force at that moment and refuses on the first.
    */
-  private blockers(candidate: OwrtRules, current: OwrtRules): ModuleCheckFinding[] {
+  private blockers(candidate: OwrtRules): ModuleCheckFinding[] {
     const findings: ModuleCheckFinding[] = []
     if (candidate.rulePrefBase >= candidate.catchAllPrefBase) {
       findings.push({
@@ -263,22 +236,11 @@ export class RulesEditor {
         detail: 'Raise the catch-all table or lower the table base.'
       })
     }
-    const changed = LOCKED_KEYS.filter((key) => candidate[key] !== current[key])
-    if (!changed.length) return findings
-    const topology = this.topology()
-    if (topology === 'unknown') {
-      findings.push({
-        level: 'error',
-        label: UNKNOWN_TOPOLOGY,
-        detail: `Connect the router that these rules will apply to, then change ${changed.join(', ')}.`
-      })
-    } else if (topology === 'present') {
-      findings.push({
-        level: 'error',
-        label: 'Numbering rules cannot change while binding instances exist',
-        detail: `Delete those instances first before changing ${changed.join(', ')}.`
-      })
-    }
+    // No refusal here any more either. What used to be refused - moving a
+    // priority band under a live instance - is not this editor's to refuse,
+    // because it is not this module's number: an instance is stamped by the
+    // router with the band it was created under and keeps it, and the defaults
+    // for the next one are edited on Connection, under WAN Binding.
     return findings
   }
 

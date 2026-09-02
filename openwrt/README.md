@@ -46,15 +46,18 @@ of it still has a working dashboard:
 | Dashboard, interfaces, history charts | nothing beyond the base system above | - |
 | DHCP device table, and device discovery generally | dnsmasq | Leases are where devices come from, so the table stays empty. |
 | PPPoE Dialer | fw4 + nft, plus `ppp`, `ppp-mod-pppoe` and kernel PPPoE, plus the router packages with `bm-pppoe-pool` 2.x (`kmod-macvlan` only for Direct + auto MAC) | The create check refuses and names the piece that is missing. Pools are owned end to end by the router's own daemon; there is no SSH path for them. |
-| WAN binding instances | fw4 + nft, `ip rule` support, dnsmasq | The create check refuses; each of the three has its own reason. |
-| Binding 1-1 - one address out one WAN port | fw4 + nft, `ip rule` support | The create check refuses, on those two and on nothing else. dnsmasq is deliberately not among them, because an address typed into the form needs nothing to be leasing for its rule to work; and a binding that names a MAC no lease can be found for is a **warning** on the check wherever the router leaves exactly one interface the forwarding could be written from - the binding is created and its rule appears the moment the device takes a lease. Where two or more interfaces are LAN candidates, that same binding is refused until the device has been seen once, because the forwarding is written from one LAN's firewall zone and with no address there is nothing that says which. dnsmasq is still not a requirement: the refusal is about how many LANs this router has, not about what is installed on it. |
-| The binding monitor | nothing beyond the base system: reading rules needs no `ip-full`, since even BusyBox's `ip` answers `ip rule show`. A router blocked on its firmware is not scanned, because the reason is already on screen | Nothing. It describes a router whose policy routing is not what somebody expected, so a capability gate in front of it would be a refusal aimed at the page written to explain refusals. |
+| WAN binding instances | fw4 + nft, dnsmasq, plus the router packages with `bm-wanbind` 2.4.0 | The create check refuses; each has its own reason. Binding is owned end to end by the router's own daemon, and there is no SSH path for it. |
+| Binding 1-1 - one address out one WAN port | fw4 + nft, plus the router packages with `bm-wanbind` 2.4.0 | The create check refuses, on those and on nothing else. dnsmasq is deliberately not among them, because an address typed into the form needs nothing to be leasing for its rule to work; and a binding that names a MAC no lease can be found for is a **warning** on the check wherever the router leaves exactly one interface the forwarding could be written from - the binding is created and its rule appears the moment the device takes a lease. Where two or more interfaces are LAN candidates, that same binding is refused until the device has been seen once, because the forwarding is written from one LAN's firewall zone and with no address there is nothing that says which. dnsmasq is still not a requirement: the refusal is about how many LANs this router has, not about what is installed on it. |
+| The binding monitor | `bm-wanbind`, which reads the rule table over netlink and needs no `ip` binary at all | Nothing. It describes a router whose policy routing is not what somebody expected, so a capability gate in front of it would be a refusal aimed at the page written to explain refusals. Without the daemon it has nothing to ask, and says so. |
 | PPPoE dial errors | `logread` | A failed session still shows as failed, with no reason for it. |
 
-Three of those are package groups the module installs for you from Module
-settings: PPPoE support (`ppp ppp-mod-pppoe kmod-pppoe`), policy routing
-(`ip-full`) for `ip rule`, and DHCP leases (`dnsmasq`). `logread` is part of the
-base system and is not installed from here. The router packages have a section
+Two of those are package groups the module installs for you from Module
+settings: PPPoE support (`ppp ppp-mod-pppoe kmod-pppoe`) and DHCP leases
+(`dnsmasq`). Policy routing (`ip-full`) is offered beside them and is no longer
+required by anything here: the daemon writes rules and routes over netlink and
+never calls the `ip` binary. It is worth having on a router somebody administers
+by hand, which is why it is still on the list. `logread` is part of the base
+system and is not installed from here. The router packages have a section
 of their own - **Router packages**, under Module settings - and the PPPoE tab
 points there whenever the pool daemon is what is missing.
 
@@ -165,18 +168,21 @@ installed"* and no path at all.
 
 The same install form appears on every tab that creates something, whenever the
 automation behind it is missing a package - **Create a pool**, ticked for `ppp`;
-**Binding 1-1** and **Create an instance**, both ticked for `ip-full` and
-`dnsmasq`. It is the same check, the same job and the same allowlist; putting it
-there is only about not answering "this needs ip-full" with directions to
-another page. The two binding tabs offer the same two packages because the
-verdict is about binding as a whole rather than about one form, and the field
-hints are where the difference is said out loud: on Binding 1-1, `ip-full` is
-the only thing a create is really gated on, and the hint beside dnsmasq says so.
+**Create an instance**, ticked for `dnsmasq`. It is the same check, the same job
+and the same allowlist; putting it there is only about not answering "this needs
+dnsmasq" with directions to another page.
 
-Which automation is held back is decided in the verdict (`missingFor`) rather
-than in the page, because binding is blocked by *either* a missing `ip rule` or
-a missing dnsmasq and a page spec cannot ask "either of these two" - the
-alternative was the same install section written out twice.
+**Binding 1-1** offers no package box any more, and the difference between the
+two binding tabs is the honest one: an instance follows DHCP leases, so it needs
+dnsmasq, while a binding on a typed address needs nothing to be leasing for its
+rule to work. What both need is `bm-wanbind`, and that is not on this form - it
+is a router package, and the banner at the top of every binding leaf points at
+**Router packages** under Module settings.
+
+Which automation is held back is still decided in the verdict (`missingFor`)
+rather than in the page, because an instance is blocked by *either* a missing
+daemon or a missing dnsmasq and a page spec cannot ask "either of these two" -
+the alternative was the same install section written out twice.
 
 Installing needs root, and the only package manager is `apk`: a router still on
 opkg is blocked well before this section, for the reasons under *Requirements*,
@@ -411,31 +417,45 @@ middle one into either end:
 
 | The router has | Binding is | PPPoE pools are | The safety net is |
 |---|---|---|---|
-| nothing | this module's, over SSH | not available | not available |
-| `bm-agent` only | this module's, over SSH | not available | there |
+| nothing | not available | not available | not available |
+| `bm-agent` only | not available | not available | there |
 | the feature packages too | the router's own | the router's own | there |
 
 The middle row is the one that used to have no name. It is not compatibility
 mode - snapshots and the commit-confirm guard are working - and it is not fully
-set up either, and a person looking at a router that binds a little slower than
-they expected deserves to be told which of the two they have.
+set up either, and a person looking at a router with no binding on it deserves
+to be told which of the two they have.
 
-The two automations sit differently in that table, and the difference is
-deliberate. Binding predates the packages and keeps its SSH half for ever: a
-router that loses `bm-wanbind` falls back at the capability verdict and every
-client keeps its WAN. Pools moved to the router entirely at 3.0.0 - the daemon
-owns the record, the sections, the firewall and the MACs, and this module is a
-client of it. A router without `bm-pppoe-pool` has no pool surface beyond the
-sentence saying what to install; the sessions of a pool created before the
-package went missing keep dialling regardless, because they are ordinary
-netifd configuration.
+Both automations sit the same way in that table from 3.4.0, and the first
+column of the first two rows is the change. Until 3.3.2 binding kept an SSH
+half here, and that half was the bug: `bm-wanbind` owns ip rule priorities
+19000-19999 and removes everything in that band no section asks for, this module
+wrote the rules there and never wrote the sections, and the two deleted and
+rewrote each other about once a second, for ever, with nothing on any surface
+saying so. Two writers of one priority band is not a slower arrangement than
+one, it is a wrong one. So binding moved to the router outright, the way pools
+did at 3.0.0: the daemon owns the sections, the routing tables, the firewall
+paths, the fail-closed catch-all and every ip rule, and this module asks, shows
+and sends changes back.
 
-When the router is binding, this module plans nothing and writes no ip rule at
-all. That is not a preference, it is the only safe arrangement: two writers in
-one priority range is worse than either being wrong alone. So a ubus call that
-fails means rows one tick stale, never a fall back to writing - the fall back
-lives at the capability verdict, where "no package" and "a stopped service" and
-"an API version this module does not know" all mean the same thing.
+A router without `bm-wanbind` therefore has no WAN Binding, and the pages say
+exactly that rather than quietly doing a worse job. The rules of a binding made
+before the package went missing stay in the kernel until something removes them,
+and nothing maintains them: a device that renews its lease onto a different
+address gets no rule, and a WAN that drops takes its clients down with it. That
+is the honest description of that router, and it is a state that lasts as long
+as it takes to press Install.
+
+There is no fall back to writing, and there must never be one. A ubus call that
+fails means rows one tick stale. The only fall back lives at the capability
+verdict, where "no package", "a stopped service" and "an API version this module
+does not drive" all mean the same thing.
+
+The same is true of pools, for the same reason and since 3.0.0. A router without
+`bm-pppoe-pool` has no pool surface beyond the sentence saying what to install;
+the sessions of a pool created before the package went missing keep dialling
+regardless, because they are ordinary netifd configuration and nothing has to
+maintain them.
 
 ## Connection 1: PPPoE Dialer
 
@@ -1115,79 +1135,93 @@ scoped to the whole LAN, because reaching the router is a destination question
 rather than a source one.
 
 The range is fixed for the instance's life, like its LAN and its carrier, and
-the refusal says to delete and recreate. And a range is **refused outright
-while `bm-wanbind` owns binding on the router**: the daemon reads its instances
-from `/etc/config/bm_wanbind`, whose sections carry a LAN and a carrier and
-nothing else, so it would bind the whole LAN while the range existed only in
-this module's records. The refusal names the package and both ways out - create
-a whole-LAN instance, or remove the daemon and let the module drive the router
-itself. Extending the daemon's schema is future work in its own repository.
+the refusal says to delete and recreate.
+
+Until 3.3.2 a range was refused outright on a router running `bm-wanbind`,
+because the daemon's sections carried a LAN and a carrier and nothing else: it
+would have bound the whole LAN while the range existed only in this module's
+records, and every device the scope was chosen to leave alone would have been
+fenced by the catch-all. Packages 2.4.0 carry `option range_from` and `option
+range_to`, the daemon learns the range itself, and the refusal is gone. Two
+instances may now share a LAN when their ranges do not overlap.
+
+The other number that arrived with it is **Clients per WAN**. `1` gives every
+device a line of its own, which is what every earlier release did and is still
+the default. A larger number lets that many share one, and the pool fills by
+least-loaded rather than front-first, so the last WAN is not left idle while the
+first carries everybody. `0` is no limit - and with a single-WAN pool that is
+the other thing a multi-WAN router gets bought for: this whole range out of that
+one line, with the catch-all still fencing everything the instance did not seat.
+It is fixed for the instance's life too, because the priorities were reserved
+against it.
+
+An address a hand-placed binding already follows is **left alone**, and listed
+with a reason rather than vanishing. An instance used to seat it anyway: the
+binding's rule sits below the whole client range, so the instance's rule steered
+nothing while the instance held one of its WANs open for traffic that left by
+the other one, with every table reporting the client as bound to a line it did
+not use.
 
 ## The binding monitor
 
-Everything above is about rules this module wrote. The monitor - **Connection →
-WAN Binding → Monitor** - is about every source-routed address on the router,
-and it exists because the module used to be structurally incapable of seeing
-most of them. The fast sweep filters `ip -4 rule show` down to the module's own
-preference window *on the router*, which is what keeps a sweep small on a
-router with a thousand bound clients and also means a rule below that window
-steers every packet while appearing nowhere: bindings read as applied, the
-dashboard is green, and the traffic leaves by another WAN.
+Everything above is about rules the router wrote because this module asked. The
+monitor - **Connection → WAN Binding → Monitor** - is about every source-routed
+address on the router, and it exists because the module used to be structurally
+incapable of seeing most of them. The fast sweep filters `ip -4 rule show` down
+to the binding preference window *on the router*, which is what keeps a sweep
+small on a router with a thousand bound clients and also means a rule below that
+window steers every packet while appearing nowhere: bindings read as applied,
+the dashboard is green, and the traffic leaves by another WAN.
 
-So the monitor reads the whole table instead, in one round trip:
+So the monitor asks the daemon for the whole table instead, in one ubus call -
+`bm.wanbind rules`, capped at 2000 rules - and gets back, for each one, who owns
+it and why, plus the main table's defaults and a line per routing table saying
+what its default route is and whether that default is an `unreachable` one.
 
-- the entire `ip -4 rule show`, capped at 500 lines;
-- the main table's default routes;
-- for each distinct lookup token those rules name, up to 8 route lines, over at
-  most 64 tables. The three built-in tokens - `local`, `main` and `default` -
-  are skipped: the main table's default already has a section of its own, and
-  the other two would spend slots on lines that steer nothing.
+The classification is the daemon's rather than this module's, and that is the
+part worth understanding. It is the half that knows which sections exist and
+which priority band each was stamped with; this side holding a second opinion
+meant two answers about one rule, and the answer this side gave was wrong
+whenever somebody had moved a band. What is left here is what the page does with
+the verdict.
 
-Three properties make that safe to run against a production router. The output
-is capped on the router, because a reply that overran the executor's output
-limit would lose its tail - the sentinel and the routes - and arrive looking
-like a clean read of a small rule table. `===SCANOK===` is a fail-closed
-sentinel: a router that could not read its own rule table reports a **failed
-scan**, and a truncated reply is discarded, because *"this router has no policy
-rules"* is the single most misleading sentence this feature could ever produce.
-And every table token is validated before it reaches a command line - a name in
-`/etc/iproute2/rt_tables` is written by whoever administers the router, so it
-is untrusted text arriving in the middle of a shell script.
+One owner is worth naming on its own: **netifd**. Every interface carrying
+`option ip4table` gets three rules from netifd without anybody asking, so a
+router dialling thirty-two PPPoE sessions carries ninety-six of them. They used
+to read as a stranger's - ninety-six alarming rows burying the handful worth
+looking at - and they are now their own owner, counted apart from the rules a
+person actually has to do something about.
 
-The reply gets its own parser rather than the sweep's. The sweep's parser
-requires a numeric lookup and a `from`, so it drops a rule with a named table
-(`lookup vpn`) and every selector-only rule (`fwmark`, `iif`, `oif`) - which is
-to say it drops precisely what the monitor exists to find. The monitor keys
-rules and routes by the lookup token as text, maps `main`, `default` and
-`local` to their numbers for display, shows selector-only rules as rules with
-no source address and counts them separately. The kernel's own three baseline
-rules are skipped: they are on every Linux machine ever booted and steer
-nothing, and listing them would put three permanent false positives at the top
-of a table whose whole value is that a row in it means something.
+Three properties make that safe to run against a production router, and all
+three now sit on the router rather than in a shell script here. The list is
+capped there, at 2000 rules, and the reply says `capped` when it was cut short,
+because *"this router has no policy rules"* is the single most misleading
+sentence this feature could ever produce. The reply also carries `read`, which
+is a different fact from an empty list and is the one that matters: a kernel
+that would not answer reports a **failed scan** rather than a clean read of a
+small rule table. And nothing is assembled into a command line at all any more -
+the daemon reads rules and routes over netlink, so a table name written by
+whoever administers the router never reaches a shell.
 
-Each row gets an owner, decided by evidence and never by trust, strongest first:
+Each row gets an owner, decided by the daemon on evidence and never on trust:
 
 | Owner | How it is recognised |
 |---|---|
-| **One-to-one binding** | a stored binding was stamped with that exact preference *and* the rule's source address is one of the two this binding may legitimately hold a rule for: the address it resolves to against the router's leases now, or the address the one-to-one pass last actually wrote a rule for. Those two part company for the length of **Lease release grace (s)** - the lease resolution gives up the instant a MAC's lease disappears, while the pass keeps the rule standing at the last address it saw - and on the live answer alone the monitor spent that entire window publishing a rule this module wrote, at a preference in this module's own band, as *written outside this module*, next to advice telling the reader to go and remove it. The row says which of the two it matched, so a rule sitting at an address nothing currently answers to is credited by name and told when it goes rather than left as a puzzle. The preference alone is never the answer: nothing stops a stranger's rule from being numbered where this module numbers its own, and crediting that rule to a binding would be the exact mistake this page exists to catch, made in the module's own voice - so a rule at that preference matching neither address is *foreign*, and says which addresses it was compared against. The rule's **table** is deliberately not asked about at all, because a binding in hold keeps its address and its preference while being re-pointed at the blackhole, and matching on the table would have called every held binding on the router foreign |
-| **Binding instance** | the preference is inside one of the stamped assignment bands *and* the instance half has that address assigned |
-| **Safety catch-all** | the preference is the catch-all preference an instance owns |
-| **Router agent** | `bm-wanbind` provides binding on this router and the module's cached view has that address assigned - the daemon writes at its own base, which this side cannot read back per rule, so a cached assignment is the only evidence there is, and one fast tick of staleness is something a monitor can live with where a reconcile could not |
-| **mwan3** | mwan3 is configured and the rule is outside every band this module writes |
+| **One-to-one binding** | the rule sits at the priority a `config direct` section is stamped with, and its source address is the one that section resolves to now. The priority alone is never the answer: nothing stops a stranger's rule from being numbered where the daemon numbers its own, and crediting that rule to a binding would be the exact mistake this page exists to catch, made in the module's own voice. The rule's **table** is deliberately not asked about, because a binding in hold keeps its address and its priority while being re-pointed at the blackhole, and matching on the table would call every held binding on the router foreign |
+| **Binding instance** | the priority is inside the band that instance was stamped with, and the address is inside that instance's scope - its LAN, or its range where it has one |
+| **Safety catch-all** | the priority is the catch-all priority an instance owns |
+| **Parked** | a rule pointing at a table whose only default route is an `unreachable` one. Somebody chose fail-closed for that address and got it; it is not a fault |
+| **The router routing itself** | netifd's own. Three rules per interface carrying `option ip4table`, written without anybody asking |
+| **Kernel baseline** | `local`, `main` and `default`. Recognised so they can be dropped: they are on every Linux machine ever booted, they steer nothing, and listing them would put three permanent rows at the top of a table whose whole value is that a row in it means something |
 | **Outside this module** | everything left over - and being left over is the answer the feature was built to produce |
 
-The bands come from each instance's **stamped** layout rather than from the
-settings in force, so moving a priority base does not make the module start
-calling its own assignments foreign. The one-to-one row above refuses the same
-trap one step harder: the live one-to-one band is not consulted at all, only the
-preference each record was stamped with. **One-to-one rule priority base** can
-be edited while bindings exist, and the rules already on the router keep the
-numbers they were written with, so a band read from the setting in force is how
-this page came to say *"this module did not write this rule"* about every
-one-to-one binding at once, the moment somebody saved a new base. A rule inside
-the band with no record behind it is still unattributed and still falls through
-to the bottom of the table, which is the only thing the band was ever able to
-say that the record does not.
+The bands come from each section's **stamped** numbers rather than from the
+settings in force, and that is what stops the page calling the daemon's own work
+foreign the moment somebody changes a default. A section keeps the band it was
+created under for its whole life; the settings under **Daemon settings** are the
+defaults for the next one. A rule inside a band with no section behind it is
+still unattributed and still falls to the bottom of the table, which is the only
+thing the band was ever able to say that the section does not.
 
 Beside the owner, each row says where that address actually leaves, against
 what the main table's default does, in a sentence built from the evidence
@@ -1876,11 +1910,10 @@ main/
   setup/            the install gate and the install job
   service/          the fast and slow collectors, and the dashboard payload
   pppoe/            the PPPoE pools, as a client of the router's own daemon
-  binding/          WAN binding, end to end
-  direct/           one-to-one bindings: one address, one WAN port
+  wanbind/          WAN Binding, as a client of the router's own daemon
   scan/             the binding monitor: every source-routed address, and who wrote it
   agent/            the router packages: every ubus call, the guard, the installer
-  uci/              the `uci batch` primitive binding still writes through
+  uci/              the name and value sieves a spec is built with
   store/            the per-router document
   config/           effective module rules and the hint preference
   *.ts              what more than one of those folders shares
@@ -1896,18 +1929,16 @@ ui/widgets/*.json   the Overview widget spec
 | `main/setup/` | The gate an install has to pass, and the job that runs it. The only place in the module that builds an apk command line. |
 | `main/service/` | Adaptive fast/slow collection, the two remote shell commands, the small dashboard payload, and collector health. |
 | `main/pppoe/` | The pool client: the daemon's answers cached behind a short TTL, the check/apply sessions for create and edit, the actions, the delete with its binding gate, and the rows every surface renders. |
-| `main/binding/` | WAN-pool discovery, the pure planner, per-client rule reconciliation, the routing-table audit, device actions, and its rows. |
-| `main/direct/` | Hand-placed bindings: the create gate, the apply job, the pure per-tick pass that decides every rule this folder ever writes, and the lifecycle. `layout.ts` is the one to open first when a refusal is wrong about the router - it is where an interface is weighed into LAN, uplink or unclear from what `/etc/config` says, and where every sentence the gate says about that answer is written. It shares the instance half's runtime helpers through `binding/`'s barrel rather than copying them, which is why the two can never disagree about what a forwarding or a table claim looks like. |
-| `main/scan/` | The monitor: one bounded router command, a parser that keeps the rules the sweep's parser is right to drop, the owner verdicts and the evidence sentence behind each, and the poller that only runs while the Connection page is open. `classify.ts` is the file to open when the page names one of this module's own rules as a stranger's - it holds every fact a verdict is allowed to rest on, and the deliberate omissions are commented as such. |
+| `main/wanbind/` | WAN Binding, all of it, as a client of `bm.wanbind`. One folder rather than the two this replaces, because on the router they were always one thing: an instance is a generator of bindings, and both go through one core there. `plan.ts` is the one to open first when a refusal is wrong - it holds this side's own sieve and the call that asks the router for the rest. `handover.ts` is the one-way door out of 3.3: it hands each record this module still holds to the daemon, stamped with the numbers the rules already standing were written at, and drops it only once the router confirms. Nothing here writes to the router except through a ubus call. |
+| `main/scan/` | The monitor: one `rules` call to the daemon, and what the page makes of the answer. The classification is deliberately not here - the daemon is the half that knows which sections exist and which priority bands each was stamped with, and two classifiers would be two answers about one rule. `rows.ts` is the file to open when a row reads wrong; the reasons it drops the kernel's own three, and counts netifd apart from a stranger's, are commented where they happen. |
 | `main/agent/` | The client for the router packages: every `bm.agent`, `bm.wanbind` and `bm.pppoe` call, the `0600` spec push, the commit-confirm guard wrapper, and the package install and remove flows. |
-| `main/uci/` | What this side still writes to a router: the legal-name and value sieves, and the only code that executes a `uci batch` - binding's, now that pool sections are the daemon's. |
+| `main/uci/` | The legal-name and value sieves. Nothing here executes anything any more: the `uci batch` primitive went with binding's SSH half, and what is left is what a spec is built out of before it is handed to a daemon. |
 | `main/store/` | The bounded, debounced per-router document, and the trimming that keeps it inside its size budget. |
 | `main/packages.ts` | The allowlist: every package this module may install, and why. |
 | `main/config/` | Effective module rules and the hint preference: the schema and defaults, the cached store, and the settings-form editor. |
-| `main/events.ts` | The PPPoE, router and binding event rings, and the live log stream. |
+| `main/events.ts` | The PPPoE, router and binding event rings, and the live log stream. The binding half's own per-instance ring lives in `wanbind/events.ts`, built by diffing two consecutive answers from the router rather than from anything this side did. |
 | `main/jobs.ts` | Cancellable chunk-job progress and history. |
 | `main/parse.ts` | OpenWRT output parsers, and the UCI value quoting. |
-| `main/options.ts` | Dynamic form choices from the in-memory model - including the two carrier dropdowns and their different rules, and the one budgeter that decides which rows a list at its 500-row ceiling gives up. Every list here is deliberately permissive: hiding an interface costs the operator the feature with nothing on screen to say why, and the checks are where a pick is refused. |
 | `main/queries.ts` | Large table rows built from the in-memory model. |
 | `main/badges.ts` | One colour per meaning, for every status shown anywhere. |
 | `main/util.ts` | The helpers more than one of the folders above needs - among them `uciBoolean`, the module's single reader of a UCI boolean, and `ifaceDevices`, the netdev names a firewall zone written with `list device` has to be matched against. Both are here rather than beside any one caller because each had been written down several times and the copies had drifted. |

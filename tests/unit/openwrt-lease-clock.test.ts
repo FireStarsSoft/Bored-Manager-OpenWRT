@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ModuleExecResult } from '@shared/modules'
 import { ConfigStore } from '../../openwrt/main/config'
-import { planBindingReconciliation } from '../../openwrt/main/binding'
 import { FastSweep } from '../../openwrt/main/service'
 import { HostStore } from '../../openwrt/main/store'
 import type { Lease } from '../../openwrt/main/types'
@@ -17,9 +16,17 @@ import { moduleHarness, sharedModuleConfig } from '../helpers/module-harness'
  * one, which is exactly the router most likely to be freshly booted and
  * handing out leases. The raw router epoch was then passed on as though it
  * were ours: a router sitting at 1970 made every lease read "expired", the
- * lease table said so, and the binding automation skipped every client on it.
+ * lease table said so, and every device on it read as a client with no lease.
  *
- * There is no offset to recover in that case, so nothing pretends there is.
+ * There is no offset to recover in that case, so nothing pretends there is: the
+ * flag says the expiry is unreadable rather than passed, and `queries.ts` and
+ * `service/overview.ts` render the device table from it.
+ *
+ * The half of this that used to live below - what the module's own binding
+ * planner made of an undatable lease - went to the router with everything else
+ * in 3.4.0. `bm-wanbind` reads /tmp/dhcp.leases on the clock that wrote it, so
+ * there is no rebasing to get wrong on that side and nothing left here to
+ * assert about it.
  */
 
 const ok = (stdout: string): ModuleExecResult => ({ code: 0, stdout, stderr: '' })
@@ -106,73 +113,5 @@ describe('a DHCP lease whose expiry is on the router clock', () => {
     expect(withClock[0].expiresUnknown).toBeUndefined()
     expect(without[0]).toMatchObject({ expires: 0 })
     expect(without[0].expiresUnknown).toBeUndefined()
-  })
-})
-
-describe('what the binding planner does with a lease it cannot date', () => {
-  const NOW = 1_800_000_000_000
-
-  function lease(overrides: Partial<Lease> = {}): Lease {
-    return {
-      mac: '00:11:22:33:44:55',
-      ip: '192.168.10.2',
-      host: 'phone',
-      expires: 4_000,
-      ...overrides
-    }
-  }
-
-  const policy = {
-    rulePrefBase: 20_000,
-    catchAllPrefBase: 29_900,
-    ruleChunkLines: 500,
-    wanErrorGraceSec: 30,
-    wanWarnUptimeSec: 0,
-    releaseGraceSec: 300,
-    maxEvents: 200
-  }
-
-  function reconcile(one: Lease) {
-    return planBindingReconciliation({
-      now: NOW,
-      instance: {
-        id: 'pool1',
-        lan: 'lan',
-        prefix: 'pd',
-        count: 1,
-        running: true,
-        username: 'u',
-        password: 'p',
-        service: '',
-        mtu: 1492,
-        tableBase: 10_001
-      } as never,
-      lanCidr: '192.168.10.0/24',
-      leases: [one],
-      rules: [],
-      wans: [
-        {
-          name: 'pd00001',
-          table: 10_001,
-          up: true,
-          pending: false,
-          ipv4: '198.51.100.1',
-          uptimeSec: 3_600
-        }
-      ],
-      tableToWan: [[10_001, 'pd00001']],
-      sticky: [],
-      policy,
-      randomSeed: 7
-    })
-  }
-
-  it('binds a client whose lease expiry is unknown instead of ignoring it', () => {
-    expect(reconcile(lease({ expiresUnknown: true })).devices).toMatchObject({ total: 1, bound: 1 })
-  })
-
-  /** Without the flag the same epoch is simply a lease that ran out in 1970. */
-  it('still ignores a client whose lease really did expire', () => {
-    expect(reconcile(lease()).devices).toMatchObject({ total: 0, bound: 0 })
   })
 })

@@ -75,7 +75,10 @@ function installedPackages(runtime: AgentRuntime): string[] {
   return ORDER.filter((name) => present.has(name))
 }
 
-export function checkUninstall(runtime: AgentRuntime, raw: unknown): ModuleCheckReport {
+export async function checkUninstall(
+  runtime: AgentRuntime,
+  raw: unknown
+): Promise<ModuleCheckReport> {
   const caps = runtime.deps.capabilities()
 
   if (!runtime.deps.ctx.connected) {
@@ -109,7 +112,7 @@ export function checkUninstall(runtime: AgentRuntime, raw: unknown): ModuleCheck
   // The refusal that matters. Naming what is running is the whole of it: "stop
   // things first" sends somebody hunting, and they may well have forgotten
   // which router this is.
-  const blocking = runtime.deps.blockers()
+  const blocking = await runtime.deps.blockers()
   if (blocking.instances.length) {
     findings.push({
       level: 'error',
@@ -255,7 +258,7 @@ function jobItems(runtime: AgentRuntime, plan: FrozenUninstallPlan): JobItemSpec
   return items
 }
 
-export function applyUninstall(runtime: AgentRuntime, raw: unknown): OkResult {
+export async function applyUninstall(runtime: AgentRuntime, raw: unknown): Promise<OkResult> {
   const payload = (isRecord(raw) ? raw : {})
   const token = typeof payload.token === 'string' ? payload.token : ''
   const taken = runtime.uninstall.take(token, payload.values)
@@ -274,7 +277,7 @@ export function applyUninstall(runtime: AgentRuntime, raw: unknown): OkResult {
   // Re-asked, not trusted from the token. A binding instance can be started in
   // the minutes between reading a report and pressing the button, and the whole
   // point of the refusal is that nothing is removed from underneath one.
-  const blocking = runtime.deps.blockers()
+  const blocking = await runtime.deps.blockers()
   if (blocking.instances.length || blocking.batches.length) {
     return {
       ok: false,

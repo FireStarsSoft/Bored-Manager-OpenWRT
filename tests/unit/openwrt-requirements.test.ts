@@ -117,16 +117,23 @@ describe('the registry and the manifest are the same list', () => {
 
 describe('what the gate stops', () => {
   it('refuses bindingStart with a sentence rather than a shell error', async () => {
-    // The instance was created on a router that had ip-full and has since lost
-    // it. Nothing asked again: the start ran, the reconcile called `ip rule`,
-    // and the user got whatever BusyBox prints when a subcommand does not exist.
-    const owrt = await router({ without: ['ip-full'] })
+    // This used to be about `ip-full`: the instance was created on a router
+    // that had it and has since lost it, nothing asked again, the reconcile
+    // called `ip rule`, and the user got whatever BusyBox prints when a
+    // subcommand does not exist.
+    //
+    // The binary is not on this path any more - the daemon writes rules over
+    // netlink and this module writes none - so the missing thing a person now
+    // has to be told about is the daemon itself. The shape of the obligation is
+    // unchanged and is the point of the case: a sentence naming what is missing
+    // and where to get it, rather than a failure somewhere the user cannot see.
+    const owrt = await router({ agent: null })
 
     const result = await owrt.call('bindingStart', 'bind_1')
 
     expect((result as OkResult).ok).toBe(false)
-    expect(errorOf(result)).toContain('steer traffic by routing table')
-    expect(errorOf(result)).toContain('Install missing packages')
+    expect(errorOf(result)).toContain('binding daemon')
+    expect(errorOf(result)).toContain('Router packages')
     owrt.dispose()
   })
 
@@ -163,7 +170,12 @@ describe('what the gate stops', () => {
   })
 
   it('refuses on a service that stopped, naming the service and not a package', async () => {
-    const owrt = await router({ service: ['pidof', 'netifd', 'nftok', 'fw4'] })
+    // With the daemon: this case is about a service, and a router missing the
+    // package would answer about the package instead.
+    const owrt = await router({
+      agent: BINDING_AGENT_INFO,
+      service: ['pidof', 'netifd', 'nftok', 'fw4']
+    })
 
     const result = await owrt.call('bindingCheck', {
       name: 'Office',
@@ -234,8 +246,23 @@ describe('what the gate deliberately lets through', () => {
     const setup = report(await owrt.call('setupCheck', { pppoe: true }))
     expect(text(setup)).not.toContain('missing on this router')
     expect((await owrt.call('sweepNow')) as OkResult).toMatchObject({ ok: true })
-    // Renaming an instance touches nothing on the router at all.
-    expect(errorOf(await owrt.call('bindingUpdate', 'bind_1', { name: 'Renamed' }))).toBe('')
+    owrt.dispose()
+  })
+
+  it('still refuses a rename, because a rename is now a write to the router', async () => {
+    // This case used to assert the opposite, and it was right to at the time:
+    // an instance's name lived in this module's own records, so renaming one
+    // touched nothing and refusing it would have been a gate for its own sake.
+    //
+    // From 3.4.0 there are no records here. The name is an option on a section
+    // in /etc/config/bm_wanbind, and setting it is one `instance_set` call - so
+    // a router with no daemon genuinely cannot do it, and saying so beats a
+    // rename that appears to work and is gone at the next tick.
+    const owrt = await router({ agent: null })
+
+    const refusal = errorOf(await owrt.call('bindingUpdate', 'bind_1', { name: 'Renamed' }))
+
+    expect(refusal).toContain('binding daemon')
     owrt.dispose()
   })
 
@@ -254,7 +281,11 @@ describe('what the gate deliberately lets through', () => {
 
 describe('a rule that outranks everything this module writes', () => {
   it('warns on the binding check without refusing it', async () => {
+    // With the daemon, so that the gate passes and the check gets as far as
+    // looking at the router's other rules. Without it the only finding would be
+    // the missing package, which is a different case tested above.
     const owrt = await router({
+      agent: BINDING_AGENT_INFO,
       conflict: ['rule 100: from 192.168.9.0/24 lookup 42', 'total 4']
     })
 
@@ -276,6 +307,7 @@ describe('a rule that outranks everything this module writes', () => {
 
   it('names mwan3 instead, when that is what is doing it', async () => {
     const owrt = await router({
+      agent: BINDING_AGENT_INFO,
       conflict: ['mwan3conf', 'mwan3run', 'rule 1001: from all fwmark 0x100 lookup 1', 'total 1']
     })
 

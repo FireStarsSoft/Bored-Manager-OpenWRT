@@ -10,6 +10,8 @@ import type { AgentCapability } from '../../openwrt/main/probe'
 import type { IfaceState, RouterModel } from '../../openwrt/main/types'
 import { ifaceIndex } from '../../openwrt/main/util'
 import { moduleHarness, sharedModuleConfig } from '../helpers/module-harness'
+import { BINDING_AGENT_INFO, routerProbeOutput } from '../helpers/router'
+import { fakeWanbind, instanceConfig, type WanbindDaemon } from '../helpers/wanbind'
 
 /**
  * What the module does between two ticks, when nothing has changed.
@@ -29,36 +31,11 @@ const settle = async (rounds = 10): Promise<void> => {
   }
 }
 
-const ROUTER_TOOLS = [
-  '/sbin/ubus',
-  '/sbin/uci',
-  '/sbin/ip',
-  '/sbin/fw4',
-  '/sbin/logread',
-  '/usr/sbin/nft',
-  '/sbin/netifd',
-  '/usr/sbin/pppd'
-]
-
-function probeOutput(): string {
-  return [
-    '===REL===',
-    "DISTRIB_ID='OpenWrt'",
-    "DISTRIB_RELEASE='25.12.0'",
-    '===BOARD===',
-    JSON.stringify({
-      model: 'Test Router',
-      release: { distribution: 'OpenWrt', version: '25.12.0' }
-    }),
-    '===TOOLS===',
-    ...ROUTER_TOOLS,
-    '===PPP===',
-    'plugin',
-    'kmod',
-    '===PKG===',
-    'apkdb',
-    '===DONE==='
-  ].join('\n')
+function probeOutput(withBindingDaemon = false): string {
+  // The shared builder, because it emits every section the probe parser looks
+  // for. A hand-rolled subset here silently produced a router whose agent was
+  // never read, which is a fixture that agrees with any implementation.
+  return routerProbeOutput({ agent: withBindingDaemon ? BINDING_AGENT_INFO : null })
 }
 
 function sweepOutput(): string {
@@ -76,18 +53,6 @@ function sweepOutput(): string {
   ].join('\n')
 }
 
-const INSTANCE = {
-  id: 'bind1',
-  name: 'Office',
-  lan: 'lan',
-  carrier: 'eth1',
-  running: true,
-  sticky: true,
-  remap: true,
-  createdAt: 1,
-  slot: 0
-}
-
 // ----------------------------------------------------- the idle fast sweep
 
 describe('the fast sweep on a router with nothing to automate', () => {
@@ -95,22 +60,28 @@ describe('the fast sweep on a router with nothing to automate', () => {
    * `fastIntervalMs` is 2 s and `slowIntervalSec` is 60 in the harness, so the
    * two cadences below are 30 sweeps a minute and 1.
    */
-  function idleRouter(options: { tabActive?: boolean; hostData?: unknown }): {
+  function idleRouter(options: {
+    tabActive?: boolean
+    hostData?: unknown
+    /** A router that answers for `bm.wanbind`, for the cases about automation. */
+    daemon?: WanbindDaemon
+  }): {
     harness: ReturnType<typeof moduleHarness>
     options: { tabActive?: boolean }
     probes: () => number
   } {
     let probes = 0
-    const shared = { config: sharedModuleConfig(null), ...options }
+    const { daemon, ...rest } = options
+    const shared = { config: sharedModuleConfig(null), ...rest }
     const harness = moduleHarness(
       'openwrt',
       (command) => {
         if (command.includes("echo '===REL==='")) {
           probes += 1
-          return ok(probeOutput())
+          return ok(probeOutput(!!daemon))
         }
         if (command.includes("echo '===SYS==='")) return ok(sweepOutput())
-        return ok('')
+        return daemon?.answer(command) ?? ok('')
       },
       shared
     )
@@ -134,16 +105,39 @@ describe('the fast sweep on a router with nothing to automate', () => {
     runtime.dispose?.()
   })
 
-  it('keeps the full rate as soon as there is automation on the router', async () => {
+  it('keeps the full rate as soon as the router says it has automation', async () => {
     // Reconcile needs every tick whether or not anybody has the page open: a
     // client bound to a WAN that just dropped stays off the internet until a
     // sweep notices, and a minute of that is worse than any saving here.
-    const { harness } = idleRouter({
-      tabActive: false,
-      hostData: { version: 2, instances: [INSTANCE] }
+    //
+    // What changed at 3.4.0 is where the answer comes from, and it is worth
+    // being exact about because it costs one tick. The instances used to be in
+    // this module's own records, so `hostData` alone decided the cadence before
+    // a single byte had been read off the router. They live in
+    // /etc/config/bm_wanbind now, so the first fast sample is what learns of
+    // them - and the re-time happens on the next `applyPollers`, which is every
+    // tab switch, every settings change and every reconnect.
+    //
+    // The window that leaves is one slow interval on a router nobody is looking
+    // at, and the daemon reconciles on its own thirty-second timer throughout
+    // it. That is the whole point of the release: the router does not need this
+    // module to be awake.
+    const daemon = fakeWanbind({
+      configured: [instanceConfig({ id: 'bmi_home', name: 'Office LAN', enabled: true })]
     })
+    const { harness } = idleRouter({ tabActive: false, daemon })
     const runtime = activate(harness.ctx)
 
+    runtime.applyPollers?.()
+    await settle()
+
+    // One fast sample, which is what asks the router. Driving it by hand is the
+    // honest shape of this: the poller is a spy here, so nothing fires on its
+    // own, and on a real router this is simply the first tick after connecting.
+    await harness.ticks[0]?.()
+    await settle()
+
+    // The router has now been asked, so the next layout pass re-times.
     runtime.applyPollers?.()
     await settle()
 

@@ -23,7 +23,7 @@ const ok = (): { code: number; stdout: string; stderr: string } => ({
 function editor(stored: unknown = null): { check: RulesEditor['check']; apply: RulesEditor['apply'] } {
   const harness = moduleHarness('openwrt', ok, { config: sharedModuleConfig(stored) })
   const config = new ConfigStore(harness.ctx)
-  const rules = new RulesEditor(harness.ctx, config, () => 'none')
+  const rules = new RulesEditor(harness.ctx, config)
   return { check: (raw) => rules.check(raw), apply: (raw) => rules.apply(raw) }
 }
 

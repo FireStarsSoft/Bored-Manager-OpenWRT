@@ -1,33 +1,36 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ModuleExecResult } from '@shared/modules'
 import type { OkResult } from '@shared/types'
 import activate from '../../openwrt/main/index'
-import { moduleHarness, sharedModuleConfig } from '../helpers/module-harness'
-import { isProbeCommand, routerProbeOutput, type RouterProbeOptions } from '../helpers/router'
+import type { DirectRow } from '../../openwrt/main/wanbind'
+import { moduleHarness, sharedModuleConfig, type ModuleHarness } from '../helpers/module-harness'
+import {
+  BINDING_AGENT_INFO,
+  isProbeCommand,
+  routerProbeOutput,
+  type RouterProbeOptions
+} from '../helpers/router'
+import { binding, fakeWanbind, type WanbindDaemon } from '../helpers/wanbind'
 
 /**
  * Two doors into one action.
  *
  * A one-to-one binding is switched back on from the row's Enable button, and
  * also from the Enabled checkbox on the row's edit form - and both end the same
- * way, with the next pass writing the same rule at the same priority. Only the
- * button was ever gated. So on the router this was reported from, one missing
- * `ip-full`, Enable answered "This router cannot steer traffic by routing
- * table" and told the user what to install, while ticking Enabled and pressing
- * Save answered "Save: done" and then failed inside a reconcile nobody sees.
+ * way, with a rule standing at the same priority for the same address. Only the
+ * button was ever gated. So on the router this was first reported from, Enable
+ * answered "This router cannot steer traffic by routing table" and told the
+ * user what to install, while ticking Enabled and pressing Save answered "Save:
+ * done" and then failed somewhere nobody sees.
  *
- * Everything below is about the two doors giving the same answer, and about the
- * edits that reach the router through nothing at all still going through on a
- * router that can do nothing at all.
- *
- * The capability gate closed one half of that: both doors now refuse a router
- * that cannot steer traffic by routing table, in one sentence. The other half is
- * the router that passes every check and still will not take the rule - a WAN
- * section with `option ip4table` deleted by hand, an `ip -4 rule add` that
- * returns non-zero for any of the reasons a probe cannot see. There the button
- * put the flag back and reported the failure while the form said "Save: done"
- * and left a binding switched on with no rule under it, which is the same
- * silence one layer down. The last group below is about that.
+ * The rule that writes it is the daemon's from packages 2.4.0, so the half of
+ * this file that was about a pass this module ran, a record it kept and a rule
+ * it wrote is gone with the code: `bind` carries the rename, the down behaviour
+ * and the switch in one call, which is why there is no longer a "the rename was
+ * saved, the switch-on was not" to word. What is left is what the two doors
+ * still share, and it is the part that was actually wrong in the first place:
+ * one refusal, in one wording, from one table - and neither door writing a
+ * thing when it refuses.
  */
 
 const ok = (stdout = '', stderr = '', code = 0): ModuleExecResult => ({ code, stdout, stderr })
@@ -38,113 +41,147 @@ const settle = async (rounds = 30): Promise<void> => {
   }
 }
 
-/** Switched off, and so one tick of a checkbox away from writing a rule. */
-const OFF = {
-  id: 'dir1',
-  name: 'NAS',
-  target: { kind: 'ip', ip: '192.168.1.20' },
-  wan: 'wan',
-  enabled: false,
-  whenDown: 'hold',
-  pref: 19_000,
-  table: 30_001,
-  lan: 'lan',
-  slot: 0,
-  createdAt: 1
+/**
+ * Only `Date` is faked, and only so the clock can be moved on by hand.
+ *
+ * The domain refetches from the daemon at most once every two seconds, which is
+ * right on a router and wrong here: two ticks a few milliseconds apart are one
+ * fetch, so a row read after a Save would be the row from before it and the
+ * idempotence case below would report a change that had in fact landed. Timers
+ * stay real because `settle` is built out of them.
+ */
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+})
+
+/** The id the daemon answers to, which is the only id this side has. */
+const SECTION = 'bmdir_nas'
+
+/** Switched off on the router, and so one tick of a checkbox away from a rule. */
+function offBinding(): ReturnType<typeof binding> {
+  return binding({
+    id: SECTION,
+    name: 'NAS',
+    ip: '10.0.0.20',
+    label: '10.0.0.20',
+    wan: 'wan1',
+    enabled: false,
+    state: 'disabled'
+  })
 }
 
-/** Already on, so a save of the same three fields changes nothing anywhere. */
-const ON = {
-  ...OFF,
-  id: 'dir2',
-  name: 'Printer',
-  target: { kind: 'ip', ip: '192.168.1.21' },
-  enabled: true,
-  pref: 19_001,
-  table: 30_002,
-  slot: 1
-}
-
-function hostData(): unknown {
-  return {
-    version: 3,
-    instances: [],
-    direct: [OFF, ON],
-    extraTables: [
-      ['wan', 30_001, 'dir1'],
-      ['wan', 30_002, 'dir2']
-    ],
-    stickyMap: [],
-    events: [],
-    moduleEvents: [],
-    jobs: []
-  }
+/**
+ * One LAN with an address, one WAN with a table, and one lease on it.
+ *
+ * `===RULESOK===` has to say 1 or the sweep reads as "the router would not
+ * answer about its rules", no model is produced at all, and the assertions
+ * below would pass for the wrong reason.
+ */
+function sweepAnswer(): ModuleExecResult {
+  return ok(
+    [
+      '===SYS===',
+      JSON.stringify({ uptime: 3600, load: [0, 0, 0], memory: { total: 1, free: 1 } }),
+      '===DEV===',
+      '===POOL=== 0 0 0',
+      '===LEASES===',
+      '1900000000 aa:bb:cc:dd:ee:01 10.0.0.20 nas *',
+      '===RULES===',
+      '===RULESOK===',
+      '1',
+      '===DUMP===',
+      JSON.stringify({
+        interface: [
+          {
+            interface: 'lan',
+            proto: 'static',
+            device: 'br-lan',
+            l3_device: 'br-lan',
+            up: true,
+            'ipv4-address': [{ address: '10.0.0.1', mask: 24 }],
+            uptime: 3600
+          },
+          {
+            interface: 'wan1',
+            proto: 'dhcp',
+            device: 'eth1',
+            l3_device: 'eth1',
+            up: true,
+            'ipv4-address': [{ address: '203.0.113.5', mask: 24 }],
+            uptime: 3600,
+            ip4table: 101
+          }
+        ]
+      })
+    ].join('\n')
+  )
 }
 
 interface Router {
+  harness: ModuleHarness
+  daemon: WanbindDaemon
   call(method: string, ...args: unknown[]): Promise<unknown>
-  /** The row the page draws, so a claim about the record is read the way a person reads it. */
-  row(id: string): Promise<{ name: string; enabled: boolean }>
-  /** What the job list says went wrong, which is where the Enable button reports. */
+  /** The row the page draws, so a claim about the binding is read as a person reads it. */
+  row(id: string): Promise<DirectRow>
+  /** What the job list says went wrong, which is where a mutation reports. */
   lastJobFailure(): string
-  /** Every script this router was actually sent, so a claim about a pass can be checked. */
-  scripts(): string[]
+  commands(): string[]
+  /** A rule write would run as one `sh -s` script, so the verbs are on stdin. */
+  stdins(): string[]
+  /** Ask the router again, the way the fast poller does. */
+  sweep(): Promise<void>
   dispose(): void
 }
 
 interface RouterOptions extends RouterProbeOptions {
-  /**
-   * An address whose `ip -4 rule add` this router answers non-zero to, while
-   * taking every other command it is given. That is the router no probe can
-   * spot: fw4 present, ruleset loaded, `ip` able to do policy routing, netifd
-   * running - and the one write that matters still refused.
-   */
-  refusesRuleFor?: string
-  /**
-   * A module whose readiness probe has not landed yet, which is every router
-   * for the first seconds after it is connected. `===DONE===` is the sentinel
-   * that says a router answered at all, so a probe without it leaves every
-   * capability unknown and `probed` false - and every switch-on refused with
-   * "The router has not been checked yet".
-   */
-  unprobed?: boolean
+  daemon?: WanbindDaemon
 }
 
 async function router(options: RouterOptions = {}): Promise<Router> {
+  const { daemon: given, ...probe } = options
+  const daemon = given ?? fakeWanbind({ bindings: [offBinding()] })
   const harness = moduleHarness('openwrt', () => ok(), {
-    hostData: hostData(),
+    hostData: null,
     config: sharedModuleConfig(null)
   })
-  const refused = options.refusesRuleFor ?? ''
-  const scripts: string[] = []
-  harness.exec.mockImplementation(async (command, execOptions) => {
+  harness.exec.mockImplementation(async (command) => {
     if (isProbeCommand(command)) {
-      const answer = routerProbeOutput(options)
-      return ok(options.unprobed ? answer.replace('===DONE===', '') : answer)
+      // `agent` defaults to packages 2.4.0 rather than to nothing, because a
+      // router with no daemon refuses every case here for one reason and the
+      // cases that are about a second reason would never reach it.
+      return ok(
+        routerProbeOutput({ agent: BINDING_AGENT_INFO, ...probe })
+      )
     }
-    const stdin = execOptions?.stdin ?? ''
-    scripts.push(stdin)
-    if (refused && stdin.includes(`rule add from ${refused}/32`)) {
-      return ok('', 'RTNETLINK answers: Invalid argument', 2)
-    }
+    const answered = daemon.answer(command)
+    if (answered) return answered
+    if (command.includes("echo '===SYS==='")) return sweepAnswer()
     return ok()
   })
+
   const runtime = activate(harness.ctx)
   runtime.applyPollers?.()
   await settle()
-  // One sweep, so the module is holding a sample of this router. Without one
-  // every path that runs a pass answers "no router sample is available yet"
-  // instead, which is a true sentence about a different situation.
-  for (const tick of harness.ticks) await tick()
-  await settle()
+  const sweep = async (): Promise<void> => {
+    vi.setSystemTime(Date.now() + 5_000)
+    for (const tick of harness.ticks) await tick()
+    await settle()
+  }
+  // One sweep, so the module is holding this router's bindings. Without one
+  // every edit answers "no such one-to-one binding" instead, which is a true
+  // sentence about a different situation.
+  await sweep()
+
   return {
+    harness,
+    daemon,
     call: async (method, ...args) => harness.handlers.get(method)?.(...args),
     row: async (id) => {
-      const rows = (await harness.handlers.get('directRows')?.()) as Array<{
-        id: string
-        name: string
-        enabled: boolean
-      }>
+      const rows = (await harness.handlers.get('directRows')?.()) as DirectRow[]
       const row = rows.find((entry) => entry.id === id)
       if (!row) throw new Error(`no row for ${id}`)
       return row
@@ -162,7 +199,10 @@ async function router(options: RouterOptions = {}): Promise<Router> {
       }
       return ''
     },
-    scripts: () => [...scripts],
+    commands: () => harness.exec.mock.calls.map((call) => String(call[0])),
+    stdins: () =>
+      harness.exec.mock.calls.map((call) => String((call[1] as { stdin?: string })?.stdin ?? '')),
+    sweep,
     dispose: () => runtime.dispose?.()
   }
 }
@@ -172,16 +212,29 @@ const errorOf = (result: unknown): string => (result as OkResult).error ?? ''
 /**
  * The edit form sends one argument per field, in the order it lists them:
  * Binding name, When that WAN is down, Enabled. A field left out is a field the
- * form did not send, and the binding keeps what it has.
+ * form did not send, and the binding keeps what the router's section has.
  */
 const save = (owrt: Router, ...fields: unknown[]): Promise<unknown> =>
-  owrt.call('directUpdate', 'dir1', ...fields)
+  owrt.call('directUpdate', SECTION, ...fields)
+
+/**
+ * Nothing anywhere in this module reached the kernel's rule table.
+ *
+ * Both halves of every call are searched, because a rule write ran as one
+ * `sh -s` script with its verbs on stdin - a check that read the command lines
+ * alone would have called the very fault this module was rebuilt to remove
+ * clean.
+ */
+function wroteNoRule(owrt: Router): boolean {
+  const everything = [...owrt.commands(), ...owrt.stdins()].join('\n')
+  return !everything.includes('ip -4 rule add') && !everything.includes('ip -4 rule del')
+}
 
 describe('ticking Enabled is the same action as pressing Enable', () => {
   it('refuses the save in the sentence the button would have refused with', async () => {
-    const owrt = await router({ without: ['ip-full'] })
+    const owrt = await router({ agent: null })
 
-    const button = await owrt.call('directEnable', 'dir1')
+    const button = await owrt.call('directEnable', SECTION)
     const form = await save(owrt, 'NAS', 'hold', true)
 
     expect((form as OkResult).ok).toBe(false)
@@ -189,254 +242,183 @@ describe('ticking Enabled is the same action as pressing Enable', () => {
     // off one entry in the requirements table, so neither can be reworded
     // without the other.
     expect(errorOf(form)).toBe(errorOf(button))
-    expect(errorOf(form)).toContain('This router cannot steer traffic by routing table')
-    expect(errorOf(form)).toContain('Install missing packages')
+    expect(errorOf(form)).toContain('The binding daemon this module drives is not on this router')
+    expect(errorOf(form)).toContain('Install the router packages')
     owrt.dispose()
   })
 
-  it('leaves the binding switched off when it refuses', async () => {
-    // A refusal that had already written the record would leave the page
-    // showing a binding that is on and a router carrying no rule for it.
-    const owrt = await router({ without: ['ip-full'] })
+  it('leaves the binding as the router holds it when it refuses', async () => {
+    // A refusal that had gone as far as the call would leave the page showing a
+    // binding that is on and a router with no rule under it. There is no record
+    // on this side any more, so the proof is that the router was asked nothing.
+    const owrt = await router({ agent: null })
 
     await save(owrt, 'NAS', 'hold', true)
-    const again = await save(owrt, 'NAS', 'hold', true)
+    await settle()
 
-    expect(errorOf(again)).toContain('This router cannot steer traffic by routing table')
+    expect(owrt.daemon.calls).toEqual([])
+    expect(wroteNoRule(owrt)).toBe(true)
     owrt.dispose()
   })
 
-  it('goes through on a router that can write the rule', async () => {
+  it('goes through as one call on a router whose daemon takes it', async () => {
     const owrt = await router()
 
     const first = await save(owrt, 'NAS', 'hold', true)
-    // Proof the flag actually landed rather than being quietly dropped: the
+    await settle()
+    await owrt.sweep()
+    // Proof the switch actually landed rather than being quietly dropped: the
     // same save a second time now finds nothing left to change.
     const second = await save(owrt, 'NAS', 'hold', true)
 
     expect(first).toMatchObject({ ok: true })
     expect(second).toMatchObject({ ok: true, data: 'nothing changed' })
+    // All three fields in one `bind`, which is why there is no half-saved
+    // binding to explain: the router either has the change or it does not.
+    expect(owrt.daemon.count('bind')).toBe(1)
+    expect(owrt.daemon.payloads('bind')[0]).toMatchObject({
+      id: SECTION,
+      name: 'NAS',
+      when_down: 'hold',
+      enabled: true
+    })
+    // And the priority is not restated. The rule the daemon allocated is not
+    // this module's to re-derive, and a guess here is the one way to collide
+    // with a binding somebody made at a router shell.
+    expect(owrt.daemon.payloads('bind')[0]).not.toHaveProperty('pref')
+    expect(await owrt.row(SECTION)).toMatchObject({ enabled: true })
+    expect(wroteNoRule(owrt)).toBe(true)
     owrt.dispose()
   })
 })
 
 describe('what the gate must not stop', () => {
-  it('renames a binding on a router that can do nothing at all', async () => {
-    // A rename reaches the router through nothing, and the edit form is a page
-    // a user reaches precisely when something is already wrong.
-    const owrt = await router({ without: ['dnsmasq', 'fw4', 'nft', 'ip-full'] })
+  /** Everything gone but the daemon, which is the router this form is opened on. */
+  const HOPELESS: RouterProbeOptions = { without: ['dnsmasq', 'fw4', 'nft', 'ip-full'] }
+
+  it('renames a binding on a router that can do nothing else at all', async () => {
+    // A rename changes no rule, no table and no firewall path, and the edit
+    // form is a page a user reaches precisely when something is already wrong.
+    const owrt = await router(HOPELESS)
 
     const result = await save(owrt, 'Media box')
+    await settle()
 
     expect(result).toMatchObject({ ok: true })
     expect(errorOf(result)).toBe('')
+    expect(owrt.daemon.payloads('bind').at(-1)).toMatchObject({ name: 'Media box' })
     owrt.dispose()
   })
 
   it('changes When that WAN is down on the same hopeless router', async () => {
-    const owrt = await router({ without: ['dnsmasq', 'fw4', 'nft', 'ip-full'] })
+    const owrt = await router(HOPELESS)
 
     const result = await save(owrt, 'NAS', 'fallback')
+    await settle()
 
     expect(result).toMatchObject({ ok: true })
+    expect(owrt.daemon.payloads('bind').at(-1)).toMatchObject({ when_down: 'fallback' })
     owrt.dispose()
   })
 
-  it('saves a binding that was already on without calling it an enable', async () => {
-    // Enabled arrives ticked on every save of a running binding, because that
-    // is what the checkbox is showing. Only the off-to-on transition is the
-    // action the gate exists for.
-    const owrt = await router({ without: ['ip-full'] })
-
-    const result = await owrt.call('directUpdate', 'dir2', 'Printer 2', 'hold', true)
-
-    expect(result).toMatchObject({ ok: true })
-    expect(errorOf(result)).toBe('')
-    owrt.dispose()
-  })
-
-  it('switches a binding off from the form on a router that refuses the rule', async () => {
+  it('switches one off from the form on a router the Enable button refuses', async () => {
     // Off is not the mirror of on, and the difference is on purpose. Switching
-    // off is how a person stops the module managing an address, this form is
-    // the surface they have open when they want that, and the record going off
-    // is self-correcting: every following pass sees a rule in the band with no
-    // enabled record behind it and takes it off again.
-    const owrt = await router({ refusesRuleFor: '192.168.1.21' })
+    // off is how a person stops the router steering an address, this form is
+    // the surface they have open when they want that, and the checkbox may not
+    // be stricter than the button: a router with no firewall to write a
+    // forwarding into cannot be switched on, and must still be switchable off.
+    const owrt = await router({
+      without: ['fw4'],
+      daemon: fakeWanbind({ bindings: [binding({ id: SECTION, name: 'NAS', enabled: true })] })
+    })
 
-    const result = await owrt.call('directUpdate', 'dir2', 'Printer', 'hold', false)
+    const button = await owrt.call('directEnable', SECTION)
+    const form = await owrt.call('directUpdate', SECTION, 'NAS', 'hold', false)
+    await settle()
 
-    expect(result).toMatchObject({ ok: true })
-    expect(await owrt.row('dir2')).toMatchObject({ enabled: false })
-    owrt.dispose()
-  })
-
-  it('still lets a binding be switched off from the form', async () => {
-    // Off is the way out of a broken state, and `directDisable` is refused by
-    // nothing for that reason; the checkbox may not be stricter than the button.
-    const owrt = await router({ without: ['ip-full'] })
-
-    const result = await owrt.call('directUpdate', 'dir2', 'Printer', 'hold', false)
-
-    expect(result).toMatchObject({ ok: true })
+    expect((button as OkResult).ok).toBe(false)
+    expect(errorOf(button)).toContain('Firewall4 is required')
+    expect(form).toMatchObject({ ok: true })
+    expect(owrt.daemon.payloads('bind').at(-1)).toMatchObject({ enabled: false })
     owrt.dispose()
   })
 })
 
 /**
- * The rest of the submission, when it is the capability gate that refuses.
+ * The router that takes the call and will not take the change.
  *
- * The group above is one save carrying one field, so the two doors can be held
- * side by side and compared word for word. A real save carries three, and the
- * two refusals a switch-on can meet - this router cannot do it at all, and this
- * router would not take the rule - used to treat the other two fields
- * completely differently: the failed pass saved them and said so, while the
- * capability verdict was returned before the domain ran at all and wrote
- * nothing. The row detail promises the first behaviour under the Enabled line,
- * unconditionally, so the second was the page telling the truth about half of
- * its own form.
+ * Everything DIRECT_CREATE asks for is here and the daemon is answering, and
+ * the section is still refused - because the priority it would need is inside
+ * an instance's band, because the WAN it names is one of this router's own
+ * LANs, or for any of the reasons only the half that owns the rules can see.
+ * Both doors have to end in the same place: the binding as it was, nothing
+ * written from here, and the daemon's own sentence carried rather than reworded
+ * into one of this module's.
  */
-describe('a save the router cannot do, with a rename beside it', () => {
-  it('keeps the rename, refuses the switch-on, and says both', async () => {
-    const owrt = await router({ without: ['ip-full'] })
+describe('a daemon that answers, and still will not take the change', () => {
+  const REFUSING = (): WanbindDaemon => {
+    const daemon = fakeWanbind({ bindings: [offBinding()] })
+    daemon.on('bind', () => ({
+      ok: false,
+      reason: 'pref 19000 is not below binding instance bmi_office, which numbers its clients from 19000'
+    }))
+    return daemon
+  }
 
-    const result = await save(owrt, 'Till at the front counter', 'hold', true)
-
-    expect((result as OkResult).ok).toBe(false)
-    // The verdict first, because it is the reason, and word for word the one
-    // the Enable button gives.
-    expect(errorOf(result)).toContain('This router cannot steer traffic by routing table')
-    expect(errorOf(result)).toContain('Enabled is still off and no rule was written')
-    expect(errorOf(result)).toContain('Binding name was saved')
-    expect(await owrt.row('dir1')).toMatchObject({
-      name: 'Till at the front counter',
-      enabled: false
-    })
-    // In the record, not only in the sentence: the same submission with the box
-    // cleared now finds nothing left to change.
-    expect(await save(owrt, 'Till at the front counter', 'hold', false)).toMatchObject({
-      ok: true,
-      data: 'nothing changed'
-    })
-    owrt.dispose()
-  })
-
-  it('keeps it on a module that has not finished probing the router', async () => {
-    // The likeliest way anyone meets this: a router connected seconds ago, no
-    // verdict yet, and every switch-on refused until there is one. A rename
-    // lost there is a rename lost for no reason at all - the router may well
-    // turn out to be perfectly capable.
-    const owrt = await router({ unprobed: true })
-
-    const result = await save(owrt, 'Till at the front counter', 'fallback', true)
-
-    expect((result as OkResult).ok).toBe(false)
-    expect(errorOf(result)).toContain('The router has not been checked yet')
-    expect(errorOf(result)).toContain('Enabled is still off and no rule was written')
-    expect(errorOf(result)).toContain('Binding name and When that WAN is down were saved')
-    expect(await owrt.row('dir1')).toMatchObject({
-      name: 'Till at the front counter',
-      whenDown: 'fallback',
-      enabled: false
-    })
-    owrt.dispose()
-  })
-
-  it('writes no rule for the binding it refused', async () => {
-    // The saved half reaches the router through nothing whatsoever, and the
-    // refused half must reach it through nothing either: a capability refusal
-    // that had gone as far as the pass would be the gate not gating.
-    const owrt = await router({ without: ['ip-full'] })
-
-    await save(owrt, 'Till at the front counter', 'hold', true)
-
-    expect(owrt.scripts().filter((script) => script.includes('rule add from 192.168.1.20/32'))).toHaveLength(0)
-    owrt.dispose()
-  })
-})
-
-/**
- * The router the capability gate cannot see.
- *
- * Everything DIRECT_CREATE asks for is here - fw4, a loaded ruleset, an `ip`
- * that does policy routing, netifd running - and the one write that matters is
- * still refused, because somebody deleted `option ip4table` from the WAN
- * section by hand or the kernel simply said no. Both doors have to end in the
- * same place: the binding switched off, nothing on the router, and a sentence
- * carrying what the router said.
- */
-describe('a router that can steer traffic, and still will not take the rule', () => {
-  const REFUSING: RouterOptions = { refusesRuleFor: '192.168.1.20' }
-
-  it('leaves the binding switched off and hands back what the router said', async () => {
-    const owrt = await router(REFUSING)
+  it('files what the router said, and leaves the binding switched off', async () => {
+    const owrt = await router({ daemon: REFUSING() })
 
     const result = await save(owrt, 'NAS', 'hold', true)
+    await settle()
+    await owrt.sweep()
 
-    expect((result as OkResult).ok).toBe(false)
-    expect(errorOf(result)).toContain('reconcile one-to-one binding rules failed')
-    // Named by the label on the checkbox, and stated as the position it is
-    // actually in - the whole failure here is a form that said "done" while the
-    // record and the router disagreed about that one word.
-    expect(errorOf(result)).toContain('Enabled is still off and no rule was written')
-    expect(await owrt.row('dir1')).toMatchObject({ enabled: false })
+    // The submission itself succeeds, because it became a job the instant the
+    // job started - which is why the sentence has to reach the job list, and
+    // why a test that only read the return value would prove nothing at all.
+    expect(result).toMatchObject({ ok: true })
+    expect(owrt.lastJobFailure()).toContain('not below binding instance')
+    expect(await owrt.row(SECTION)).toMatchObject({ enabled: false })
     owrt.dispose()
   })
 
-  it('carries the same sentence the Enable button files in the job list', async () => {
-    const owrt = await router(REFUSING)
+  it('carries the same sentence whichever door it came through', async () => {
+    const owrt = await router({ daemon: REFUSING() })
 
-    await owrt.call('directEnable', 'dir1')
+    await owrt.call('directEnable', SECTION)
     await settle()
     const button = owrt.lastJobFailure()
-    const form = await save(owrt, 'NAS', 'hold', true)
+    await save(owrt, 'NAS', 'hold', true)
+    await settle()
 
-    // Not merely a refusal of its own: the button runs the pass and reports
-    // what stopped it, and the form now runs the same pass rather than writing
-    // the flag and leaving a later reconcile to find out.
-    expect(button).toContain('reconcile one-to-one binding rules failed')
-    expect(errorOf(form)).toContain(button)
-    // And the button left it off too, which is the state the two have to agree
-    // on before the sentence is worth comparing.
-    expect(await owrt.row('dir1')).toMatchObject({ enabled: false })
+    // Not merely a refusal of its own: both doors send the same `bind` and both
+    // quote the answer, rather than one of them writing a flag and leaving
+    // something later to find out.
+    expect(button).toContain('not below binding instance')
+    expect(owrt.lastJobFailure()).toBe(button)
     owrt.dispose()
   })
 
-  it('keeps the fields it could save and says which ones those were', async () => {
-    // Deliberate. Both of the others reach the router through nothing at all,
-    // and undoing a rename because an `ip rule` would not write would be a
-    // second surprise stacked on the first - so they are saved, the switch-on
-    // is all-or-nothing, and the refusal says which was which.
-    const owrt = await router(REFUSING)
+  it('never writes an ip rule for the binding it could not get taken', async () => {
+    // The temptation is to steer the address from here until the router takes
+    // the section. It is the wrong answer and it is the whole of the 3.4.0
+    // changeover: the daemon sweeps this priority band on every pass, so a rule
+    // written from here is removed thirty seconds later and put back on the
+    // next tick, for ever, with every surface green. Nothing in this module may
+    // write one - not on a create, not on an edit, not on a delete.
+    const owrt = await router({ daemon: REFUSING() })
 
-    const result = await save(owrt, 'Media box', 'fallback', true)
+    await save(owrt, 'NAS', 'hold', true)
+    await settle()
+    await owrt.call('directEnable', SECTION)
+    await settle()
+    await owrt.call('directDelete', SECTION)
+    await settle()
 
-    expect(errorOf(result)).toContain(
-      'Binding name and When that WAN is down were saved'
-    )
-    expect(await owrt.row('dir1')).toMatchObject({ name: 'Media box', enabled: false })
-    // In the record, not only in the sentence: the same submission with the box
-    // cleared now finds nothing left to change.
-    expect(await save(owrt, 'Media box', 'fallback', false)).toMatchObject({
-      ok: true,
-      data: 'nothing changed'
-    })
-    owrt.dispose()
-  })
-
-  it('writes the rule during the save, not in some later reconcile', async () => {
-    // The proof that the save is the pass and not a flag write: no tick runs
-    // between the submission and the assertion, so the rule that is on this
-    // router got there because Save put it there.
-    const owrt = await router()
-
-    const before = owrt.scripts().filter((script) => script.includes('rule add from 192.168.1.20/32'))
-    const result = await save(owrt, 'NAS', 'hold', true)
-    const after = owrt.scripts().filter((script) => script.includes('rule add from 192.168.1.20/32'))
-
-    expect(before).toHaveLength(0)
-    expect(after).toHaveLength(1)
-    expect(result).toMatchObject({ ok: true })
-    expect(await owrt.row('dir1')).toMatchObject({ enabled: true })
+    expect(wroteNoRule(owrt)).toBe(true)
+    // Nor through UCI: the daemon writes its own sections and its own
+    // `option ip4table`, and two writers of one option are two numbers that do
+    // not have to agree.
+    expect(owrt.commands()).not.toContain('uci batch')
     owrt.dispose()
   })
 })

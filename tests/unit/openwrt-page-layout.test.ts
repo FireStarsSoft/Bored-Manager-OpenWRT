@@ -144,10 +144,13 @@ describe('each automation owns its own configuration', () => {
   })
 
   it('tunes each automation from its own tab', () => {
-    // The pool daemon's watchdog is a router setting reached from the PPPoE
-    // tab; binding behaviour still edits the module's own rules from its tab.
+    // Both daemons are tuned where their automation is, and neither form edits
+    // anything this module keeps: the numbers behind WAN Binding stopped being
+    // the module's in 3.4.0, when one priority band with two writers turned out
+    // to mean each half deleting the other's rules every pass.
     expect(methodsIn(automation(), 'pppoe').has('pppoeSettingsCheck')).toBe(true)
-    expect(methodsIn(automation(), 'binding').has('rulesCheck')).toBe(true)
+    expect(methodsIn(automation(), 'binding').has('bindingSettingsCheck')).toBe(true)
+    expect(methodsIn(automation(), 'binding').has('rulesCheck')).toBe(false)
   })
 
   it('keeps only what both automations share on the settings page', () => {
@@ -158,10 +161,14 @@ describe('each automation owns its own configuration', () => {
       .filter((node) => node['type'] === 'section')
       .map((node) => node['title'])
 
-    expect(titles).toContain('Numbering and firewall layout')
+    expect(titles).toContain('The binding monitor')
     expect(titles).toContain('Housekeeping')
     expect(titles).not.toContain('Batch pacing and limits')
     expect(titles).not.toContain('Binding behaviour')
+    // The numbering went with the rules it described. A form here that still
+    // set a priority base would be the second writer of the band the router
+    // owns, which is the whole fault this release removes.
+    expect(titles).not.toContain('Numbering and firewall layout')
   })
 })
 
@@ -249,7 +256,12 @@ describe('the hints toggle reaches everything it claims to', () => {
       'Nothing has been read off this router yet',
       'The numbers below are frozen',
       'Everything else on this page is still live',
-      'Compatibility mode: no Bored Manager agent on this router'
+      'Compatibility mode: no Bored Manager agent on this router',
+      // WAN Binding is kept by the router now, so every table under it is empty
+      // on a router without the packages. Hiding the reason would leave five
+      // tabs saying this router carries no binding, which is the opposite of
+      // what an unread router means.
+      'This router does not answer for WAN Binding'
     ]
     for (const file of specFiles()) {
       for (const node of nodes(specNamed(file))) {

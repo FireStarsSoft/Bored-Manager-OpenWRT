@@ -10,6 +10,139 @@ needs OpenWrt **25.12** on the router. The 1.0.x line needs **0.3.3**, for the
 also need the router packages at **2.x** - the rest of the module does not.
 Which release a module build installs is pinned in `main/agent/manifest.ts`.
 
+## 3.4.0
+
+Needs Bored Manager **0.7.0**, unchanged, and the router packages at **2.4.0**,
+which is new and is not optional: WAN Binding is the router's now, and a router
+without them has none.
+
+### The bug this release exists for
+
+Somebody created a dozen one-to-one bindings, saw nothing appear on the
+router's own pages, and found nothing new under Routing or Firewall either. The
+bindings were real. They were also being deleted and rewritten in a loop.
+
+`bm-wanbind` owns ip rule priorities 19000-19999 and removes every rule in that
+band that no `config direct` section asks for. This module wrote the rules there
+over SSH and **never wrote the sections**. So the daemon cleared all thirty-four
+of them every thirty seconds, and this module wrote them back about nine tenths
+of a second later, for as long as the app stayed open. Each bound address spent
+roughly a second in every thirty on the router's default connection instead of
+the WAN it was bound to.
+
+Neither half reported a conflict, because each was doing exactly what it had
+been told. Read off the router itself:
+
+    20:51:38.383  Deleted 19000: from 12.10.10.10 lookup 10001
+    20:51:39.273          19000: from 12.10.10.10 lookup 10001
+    20:52:08.403  Deleted 19000: from 12.10.10.10 lookup 10001
+    20:52:09.223          19000: from 12.10.10.10 lookup 10001
+
+The daemon's own counter said it: 103,868 rules removed across 3,071 passes,
+and none written.
+
+This also retires the mystery recorded against 3.3.2 - *"the daemon reports a
+rule added, with no error from the socket, and `ip -4 rule show` has nothing at
+that priority"*. That was this module's sweep. `direct` was held out of the
+feature descriptor for a fault that never existed.
+
+### So the router owns binding, and this module stopped writing
+
+The fix is not a smaller sweep or a better lock. **Two writers of one priority
+band is not a slower arrangement than one, it is a wrong one**, and it fails in
+the way that shows up nowhere: green on every surface, traffic on the wrong line
+a few percent of the time. So the daemon owns the sections, the routing tables,
+the firewall paths, the fail-closed catch-all and every ip rule; this module
+asks, shows, and sends changes back. PPPoE pools moved the same way at 3.0.0.
+
+There is no fall back to writing, and there must never be one. A call that fails
+means the rows are one tick stale, which the page says. The only fall back is at
+the capability verdict, where no package, a package too old to drive and a
+stopped service all mean the same thing - and the pages say so rather than
+quietly doing a worse job.
+
+`main/binding/` and `main/direct/` are gone. What replaces both is one folder,
+because on the router they were always one thing.
+
+### An instance is a generator of bindings
+
+That is the other half of the change, and it is what makes "bind many clients to
+one WAN" reuse the one-to-one machinery instead of sitting beside it. A binding
+is a target, a WAN and what happens when that WAN is down. Somebody places one
+by hand; an instance produces them from DHCP leases. Both go through one core on
+the router, and both appear in one list, told apart by where they came from.
+
+**Clients per WAN.** `1` gives every device a line of its own, which is what
+every earlier release did and is still the default. A larger number lets that
+many share one, and the pool fills by least-loaded rather than front-first, so
+the last WAN is not idle while the first carries everybody. `0` is no limit -
+and with a single-WAN pool that is the other thing a multi-WAN router gets
+bought for: this whole LAN out of that one line, with the catch-all still
+fencing everything the instance did not seat.
+
+**An address range.** `range_from` and `range_to`, both inside the LAN. The
+catch-all becomes the minimal set of blocks covering *exactly* the range, never
+the whole LAN - a whole-LAN fence under a scoped instance would fail-close every
+device the scope was chosen to leave alone. Two instances may now share a LAN
+when their ranges do not overlap.
+
+**Addresses a binding already decides are left alone.** An instance no longer
+seats a device that a hand-placed binding follows. It used to: the binding's
+rule sits below the whole client range, so the instance's rule steered nothing
+while the instance held one of its WANs open for traffic that left by the other
+one. Those devices are listed with a reason rather than vanishing from every
+table.
+
+### What happens to what you already have
+
+Instances and bindings this module created are **handed over** on the first
+connect after the packages are updated: each becomes a section on the router,
+stamped with the numbers the rules already standing were written at, so the
+daemon adopts those rules rather than writing a second set. The record is
+dropped only once the router confirms; anything it refuses is kept, named, and
+retried every pass, so fixing the reason needs no button.
+
+Until the packages are there, the page says so: the rules stand exactly as they
+were, nothing is maintaining them, and a new device on those LANs gets no WAN.
+That is the honest description of a router in that state, and it is a state that
+lasts as long as it takes to press Install.
+
+**Do not run a module older than 3.4.0 against packages 2.4.0.** A 3.3.x module
+treats `/etc/config/bm_wanbind` as a projection of records it no longer has and
+removes every instance section the daemon holds. Update both together.
+
+### Settings moved
+
+The priority bands, the catch-all table, the WAN table base and the three timers
+are the daemon's and are edited under **Connection -> WAN Binding -> Daemon
+settings**. They are defaults for instances created afterwards; a section
+already on the router keeps the numbers it was stamped with. Module settings
+keeps what is genuinely this module's: the monitor's interval, the charts and
+the housekeeping.
+
+The numbering rules are no longer locked while an instance exists, because there
+is nothing here left for a rule on a router to have been written against.
+
+### The monitor asks rather than works it out
+
+Every ip rule on the router still gets a row and a sentence saying why that
+address is not on the default connection - but the daemon classifies now,
+because it is the half that knows which sections exist and which bands they own.
+Two classifiers would be two answers about one rule.
+
+It also learned **netifd**. Every interface carrying `option ip4table` gets three
+rules from netifd without anybody asking, so a router dialling thirty-two PPPoE
+sessions carries ninety-six of them, and the monitor called every one a
+stranger's. On the router this was found on, that was 96 alarming rows burying
+the handful worth reading.
+
+### Requirements
+
+`ip-full` is no longer required for binding: the daemon writes rules and routes
+over netlink and never touches the `ip` binary. dnsmasq is still required for an
+instance, which follows leases, and still not for a hand-placed binding on a
+typed address.
+
 ## 3.3.2
 
 Needs Bored Manager **0.7.0** and the router packages at **2.3.0**, both

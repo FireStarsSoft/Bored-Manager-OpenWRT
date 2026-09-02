@@ -34,8 +34,15 @@ import {
   hasPoolDaemon,
   installHint,
   PPPOE_POOL_API,
+  type AgentCapability,
   type OpenWrtCapabilities
 } from './probe'
+
+// The one gate that is not about a package being present but about which
+// contract it speaks. Reached through the agent client rather than reimplemented
+// here, so the sentence a page shows and the call a page would have made agree
+// about the same router.
+import { hasBindingDaemon, wanbindApi, WANBIND_API } from './agent'
 
 // Written in `probe/text.ts` so the readiness card can say the same thing;
 // re-exported here because this is where every create-form gate looks for it.
@@ -59,12 +66,43 @@ export function unprobed(caps: OpenWrtCapabilities): ModuleCheckReport | null {
 export type RequirementKey =
   | 'pppoe'
   | 'pppoePool'
+  | 'bindingDaemon'
   | 'fw4'
   | 'fw4Loaded'
-  | 'ipRule'
   | 'dnsmasq'
   | 'dnsmasqRunning'
   | 'netifdRunning'
+
+/**
+ * Why this router cannot be driven for WAN Binding, or ''.
+ *
+ * Three separate facts, kept apart because they need three different things
+ * done about them and folding them together would send somebody to reinstall an
+ * agent they can see running. Exported because the pages need the same sentence
+ * the requirement gate would have given them: a leaf that renders empty rows
+ * with no explanation is the thing this module keeps promising not to do.
+ */
+export function bindingDaemonProblem(agent: AgentCapability): string {
+  if (hasBindingDaemon(agent)) return ''
+
+  if (!agent.usable) {
+    return (
+      'WAN Binding is owned end to end by bm-wanbind on the router, and there is no ' +
+      'Bored Manager agent to reach it through. Install the router packages from Router ' +
+      'packages, in Module settings.'
+    )
+  }
+
+  if (!agent.provides.includes('binding')) {
+    return 'This router has the agent but not bm-wanbind. Install it from Router packages, in Module settings.'
+  }
+
+  return (
+    `The installed bm-wanbind speaks version ${wanbindApi(agent)} of its contract and this ` +
+    `module drives ${WANBIND_API}. Update the router packages from Router packages, in Module ` +
+    'settings; the instances and bindings it holds keep working meanwhile.'
+  )
+}
 
 /** Everything a feature may demand be *absent*. Reported, never refused. */
 export type ConflictKey = 'mwan3' | 'foreignRules'
@@ -113,6 +151,11 @@ const REQUIREMENTS: Record<RequirementKey, RequirementSpec> = {
       )
     }
   },
+  bindingDaemon: {
+    title: 'The binding daemon this module drives is not on this router',
+    met: (caps) => hasBindingDaemon(caps.agent),
+    detail: (caps) => bindingDaemonProblem(caps.agent) || ''
+  },
   fw4: {
     title: 'Firewall4 is required, and this router does not have it',
     met: (caps) => caps.hasFw4,
@@ -123,34 +166,6 @@ const REQUIREMENTS: Record<RequirementKey, RequirementSpec> = {
     met: (caps) => caps.services.fw4 !== 'stopped',
     detail: () =>
       'fw4 and nft are both present, but no `inet fw4` table is loaded, so nothing is masquerading and a managed pool would carry no client traffic. Start it with `service firewall start` at a router shell, then run Check again.'
-  },
-  ipRule: {
-    // Not "has no rule support": BusyBox's applet lists rules perfectly well
-    // and refuses only the numeric routing tables, which is the whole of what
-    // binding asks of it. The readiness card carries the three reasons apart;
-    // this is the one sentence a refused apply gets.
-    title: 'This router cannot steer traffic by routing table',
-    // Met by the binary this module writes through - or by the router's own
-    // binding daemon. With bm-wanbind installed the module never writes an ip
-    // rule itself: every bind goes over ubus and the daemon writes netlink,
-    // so refusing on the module's own `ip` binary would block work the router
-    // is demonstrably doing. The readback the fast sweep does works on the
-    // BusyBox applet either way.
-    //
-    // `direct` is named beside `binding` rather than folded into it because
-    // they are two statements about two halves and a router can make one
-    // without the other: bm-wanbind 2.2.0 owns instances and not one-to-one
-    // bindings, and a router that gained only the newer half would otherwise
-    // have every one-to-one create refused for the sake of an `ip` this module
-    // no longer uses on it.
-    met: (caps) =>
-      caps.hasIpRule ||
-      (caps.agent.usable &&
-        (caps.agent.provides.includes('binding') || caps.agent.provides.includes('direct'))),
-    detail: (caps) =>
-      caps.ip.fullPresent
-        ? `Router readiness, in Module settings, has the reason - iproute2 is on this router and \`ip\` is not resolving to it, or this kernel has no policy routing. Neither is fixed by installing a package.`
-        : installHint(caps, 'ip-full')
   },
   dnsmasq: {
     title: 'dnsmasq is missing on this router',
@@ -258,9 +273,9 @@ const PPPOE_CREATE: readonly RequirementKey[] = [
   'netifdRunning'
 ]
 const BINDING_CREATE: readonly RequirementKey[] = [
+  'bindingDaemon',
   'fw4',
   'fw4Loaded',
-  'ipRule',
   'dnsmasq',
   'dnsmasqRunning',
   'netifdRunning'
@@ -277,26 +292,35 @@ const BINDING_CREATE: readonly RequirementKey[] = [
  * here - the address may simply be offline this minute.
  */
 const DIRECT_CREATE: readonly RequirementKey[] = [
+  'bindingDaemon',
   'fw4',
   'fw4Loaded',
-  'ipRule',
   'netifdRunning'
 ]
 
 /**
- * All four still apply on a router that keeps its own one-to-one bindings, and
- * that is worth saying because it is not obvious.
+ * What a one-to-one binding needs, on a router that owns every one of them.
  *
- * The work moved; what the work needs did not. The daemon writes the ip rule
- * over netlink rather than through this module's `ip`, which is why `ipRule`
- * counts the capability as well as the binary - but it still writes a firewall
- * forwarding, which needs fw4 loaded, and it still asks netifd which table a
- * WAN puts its routes in. A router missing any of those refuses the create for
- * exactly the same reason it always did, in exactly the same sentence, whether
- * the refusal comes from here or from the daemon a moment later. The one entry
- * that would have been wrong to keep - a ceiling on the records this module
- * stores - is not a requirement at all and lives in the create gate, which
- * skips it on that half.
+ * The work moved; most of what the work needs did not, and that is worth saying
+ * because it is not obvious. The daemon still writes a firewall forwarding,
+ * which needs fw4 loaded, and it still asks netifd which table a WAN puts its
+ * routes in. A router missing either refuses the create for exactly the reason
+ * it always did, in the same sentence, whether the refusal comes from here or
+ * from the daemon a moment later.
+ *
+ * The one that went is `ipRule`, and it went rather than being loosened. It
+ * asked whether this module's `ip` binary could steer traffic by routing table,
+ * which was the right question while this module wrote the rules; the daemon
+ * writes them over netlink and never opens `/sbin/ip`, so the question no
+ * longer has a bearing on anything. `ip-full` is still offered under Router
+ * readiness, because a router somebody administers by hand is better off with
+ * it, and the readiness card still reports what it found - but nothing here is
+ * gated on it, and a requirement nothing gates on is a sentence waiting to be
+ * said about the wrong router.
+ *
+ * The other entry that would have been wrong to keep - a ceiling on the records
+ * this module stores - is not a requirement at all and lives in the create gate,
+ * which skips it on that half.
  */
 
 /**
@@ -375,48 +399,72 @@ export const FEATURES: Record<string, FeatureSpec | null> = {
   // next pass - so requiring anything of the router would be a refusal invented
   // for the sake of symmetry, on the one screen a user reaches when something
   // is already wrong.
-  bindingUpdate: { kind: 'action', requires: [] },
+  bindingUpdate: { kind: 'action', requires: ['bindingDaemon'] },
   // Asked again on every start, not just at creation. An instance made months
   // ago on a router that has since lost `ip-full` used to answer a start with a
   // shell error from the middle of a reconcile.
   bindingStart: { kind: 'action', requires: BINDING_CREATE },
   // Stop and delete are the way out of a broken state; they never refuse.
-  bindingStop: { kind: 'action', requires: [] },
-  bindingDelete: { kind: 'action', requires: [] },
-  // All three write a rule, so an `ip` that cannot write one is worth naming
-  // rather than letting the next reconcile fail somewhere the user cannot see.
-  bindingUnassign: { kind: 'action', requires: ['ipRule'] },
-  bindingReassign: { kind: 'action', requires: ['ipRule'] },
-  bindingPin: { kind: 'action', requires: ['ipRule'] },
+  //
+  // They still need the daemon, and that is not the same thing as refusing
+  // them: a router with no daemon has no instance to stop, so the gate can
+  // never be the reason somebody is stuck with one they cannot remove.
+  bindingStop: { kind: 'action', requires: ['bindingDaemon'] },
+  bindingDelete: { kind: 'action', requires: ['bindingDaemon'] },
+  // All three are one ubus call to the router, which either does it or says
+  // why. There is nothing left here for an `ip` binary to fail at.
+  bindingUnassign: { kind: 'action', requires: ['bindingDaemon'] },
+  bindingReassign: { kind: 'action', requires: ['bindingDaemon'] },
+  bindingPin: { kind: 'action', requires: ['bindingDaemon'] },
 
   // The hand-placed one-to-one bindings. The reads answer on any router at
   // all, for the same reason every other read here does.
   directRows: null,
   directCheck: { kind: 'check', requires: DIRECT_CREATE, conflicts: ['mwan3', 'foreignRules'] },
   directApply: { kind: 'action', requires: DIRECT_CREATE },
-  // Switching one back on writes a rule, so it is gated exactly as the apply
-  // is - an instance created months ago on a router that has since lost
-  // `ip-full` used to answer with a shell error from inside a reconcile.
+  // Switching one back on puts a rule and a firewall path on the router, so it
+  // is gated exactly as the apply is.
   directEnable: { kind: 'action', requires: DIRECT_CREATE },
-  // A rename and a change to When that WAN is down reach nothing. The third
-  // field on the same form does: ticking Enabled writes the flag to the record
-  // and the next pass writes the rule from it, which is the action `directEnable`
-  // above is gated for. That one save is escalated to this entry's requirements
-  // in `runtime/handlers.ts`, because whether a save is an enable depends on the
-  // values submitted and on what the record already holds - neither of which a
-  // table of standing conditions can see. What the table still owns is the
-  // sentence, so both doors refuse a router in exactly the same words.
-  directUpdate: { kind: 'action', requires: [] },
-  // The way out of a broken state is never refused.
-  directDisable: { kind: 'action', requires: [] },
-  directDelete: { kind: 'action', requires: [] },
+  // Deliberately lighter than `directEnable` above, and the difference is worth
+  // stating because it used to be papered over by an escalation in
+  // `runtime/handlers.ts` that no longer exists.
+  //
+  // Two of this form's three fields have to go through on a router that can do
+  // nothing else at all: a rename, and switching a binding *off*. The way out
+  // of a broken state is never refused, and refusing a rename on the router
+  // where somebody most wants to label what is wrong is a gate for its own
+  // sake. So this entry asks for the daemon and nothing else.
+  //
+  // The third field is ticking Enabled, and the bug that escalation was written
+  // for is gone rather than moved. It was: the form answered "Save: done", the
+  // flag went into a record here, and the rule failed inside a reconcile a
+  // minute later where nobody was looking. There is no record and no later
+  // reconcile now - the save is one `bind` call, and what comes back is the row
+  // itself, saying `held` or `refused` and why, on the page the person is
+  // already looking at. The Enable button keeps the heavier list because it
+  // knows it is an enable before it runs and can say so first; this form finds
+  // out by asking the router, and then shows the answer.
+  directUpdate: { kind: 'action', requires: ['bindingDaemon'] },
+  // The way out of a broken state is never refused for anything but the one
+  // thing that would make it impossible: a router with no daemon has no
+  // binding to switch off, so this gate cannot strand anybody.
+  directDisable: { kind: 'action', requires: ['bindingDaemon'] },
+  directDelete: { kind: 'action', requires: ['bindingDaemon'] },
 
   // The binding monitor. Its whole purpose is to describe a router whose
   // routing somebody else is deciding, so requiring anything of that router
   // before it will look would be a refusal aimed at the one page written to
   // explain the refusals.
   scanRows: null,
-  scanNow: { kind: 'action', requires: [] },
+  scanNow: { kind: 'action', requires: ['bindingDaemon'] },
+
+  // The daemon's own numbers - the priority bands, the catch-all table and the
+  // timers an instance is stamped with when it is created. They were module
+  // settings until 3.4.0, which meant this side held an opinion about numbers
+  // the rules standing on the router had been written against.
+  bindingSettingsGet: null,
+  bindingSettingsCheck: { kind: 'check', requires: ['bindingDaemon'] },
+  bindingSettingsApply: { kind: 'action', requires: ['bindingDaemon'] },
 
   // The rules editor writes numbers into this module's own configuration. It
   // has its own validation, and it must stay usable on a router with problems -

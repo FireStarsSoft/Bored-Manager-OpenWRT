@@ -1,295 +1,149 @@
 import { describe, expect, it } from 'vitest'
-import type { ModuleExecResult } from '@shared/modules'
 import type { OkResult } from '@shared/types'
-import { BindingEngine } from '../../openwrt/main/binding'
-import { DEFAULT_RULES, type OwrtRules } from '../../openwrt/main/config'
-import { HostStore } from '../../openwrt/main/store'
-import type { Lease, RouterModel } from '../../openwrt/main/types'
-import { moduleHarness } from '../helpers/module-harness'
+import { fakeWanbind, instanceConfig, wanbindClient, type WanbindClient } from '../helpers/wanbind'
 
 /**
  * Unassign and Reassign: the two things an operator does to one device that has
  * already been given a WAN.
  *
- * Both work by writing into the planner's memory and running an ordinary
- * reconcile, so a manual choice is allocated by exactly the same pass as an
- * automatic one. That is also what makes the failure case matter: the pass can
- * stop halfway through an SSH command, and a memory left holding the request
- * would leave the device held, or moved, by work that never reached the router.
+ * Until 3.4.0 both wrote into a planner's memory on this side and then ran a
+ * pass that rewrote the router's ip rules from it, which is why the file they
+ * came from cloned that memory first and put it back when the pass stopped half
+ * way: a device left held, or force-reassigned, by work that never reached the
+ * router was the failure that code existed to prevent. **There is no planner
+ * and no memory now.** Each of these is one ubus call, the daemon holds who is
+ * on which WAN, and a call that fails has changed nothing to put back - so the
+ * four cases about restoring a clone are not cases any more.
+ *
+ * What is still decided here, and what these three cases are about, is the
+ * selection: a table can send one row's two fields or a whole column of ticked
+ * `<instance>|<mac>` keys, the two views of one device have to dedupe against
+ * each other, and one unreadable key out of two hundred must not lose the other
+ * hundred and ninety-nine. Everything past that is the router's answer, quoted
+ * rather than reworded.
  */
 
-const ok = (stdout = '', stderr = '', code = 0): ModuleExecResult => ({ code, stdout, stderr })
-
-const NOW = 1_700_000_000_000
 const DESK = 'aa:bb:cc:dd:ee:01'
 const PHONE = 'aa:bb:cc:dd:ee:02'
+const INSTANCE = 'bmi_office'
 
-const LAN_IFACE = {
-  name: 'lan',
-  proto: 'static',
-  device: 'br-lan',
-  l3Device: 'br-lan',
-  up: true,
-  pending: false,
-  autostart: true,
-  uptimeSec: 4_000,
-  ipv4: { addr: '192.168.1.1', mask: 24 }
-}
-
-function poolIface(seq: number): RouterModel['ifaces'][number] {
-  const name = `pd${String(seq).padStart(5, '0')}`
-  return {
-    name,
-    proto: 'pppoe',
-    device: 'eth1',
-    l3Device: `pppoe-${name}`,
-    up: true,
-    pending: false,
-    autostart: true,
-    uptimeSec: 3_000,
-    // The dump carries each pool member's table - written by bm-pppoe-pool -
-    // which is where the binding half's WAN-to-table map reads it from.
-    ip4Table: 10_000 + seq,
-    ipv4: { addr: `198.51.100.${seq}`, mask: 32 }
+const settle = async (rounds = 10): Promise<void> => {
+  for (let index = 0; index < rounds; index++) {
+    await new Promise((resolve) => setTimeout(resolve, 0))
   }
 }
 
-const LEASES: Lease[] = [
-  { expires: 0, mac: DESK, ip: '192.168.1.20', host: 'desk' },
-  { expires: 0, mac: PHONE, ip: '192.168.1.21', host: 'phone' }
-]
-
-function routerModel(leases: Lease[] = LEASES): RouterModel {
-  return {
-    t: NOW,
-    sys: { uptimeSec: 4_000, load1: 0.2, memTotal: 512_000, memFree: 200_000 },
-    ifaces: [LAN_IFACE, poolIface(1), poolIface(2), poolIface(3)],
-    poolDev: { count: 3, rx: 0, tx: 0 },
-    leases,
-    rules: [],
-    rates: {}
-  }
-}
-
-interface Fixture {
-  engine: BindingEngine
-  store: HostStore
-  sample(model?: RouterModel): Promise<void>
-  wanOf(mac: string): string | undefined
-  waiting(mac: string): { reason: string; held: boolean; heldLabel: string } | undefined
-  failScripts(fail: boolean): void
-}
-
-function fixture(options: { sticky?: boolean } = {}): Fixture {
-  let failing = false
-  const harness = moduleHarness('openwrt', () => ok(), {
-    hostData: {
-      version: 2,
-      instances: [
-        {
-          id: 'bind1',
-          name: 'Office LAN',
-          lan: 'lan',
-          carrier: 'eth1',
-          running: true,
-          sticky: options.sticky ?? true,
-          remap: true,
-          createdAt: 1,
-          slot: 0
-        }
-      ],
-      extraTables: [],
-      stickyMap: [],
-      events: [],
-      moduleEvents: [],
-      jobs: []
-    }
-  })
-  harness.exec.mockImplementation(async (command) => {
-    if (command === 'sh -s' && failing) return ok('', '', 1)
-    return ok()
-  })
-  const rules: OwrtRules = { ...DEFAULT_RULES }
-  const store = new HostStore(harness.ctx, () => rules)
-  const engine = new BindingEngine(harness.ctx, store, { rules: () => rules })
-  return {
-    engine,
-    store,
-    sample: (model) => engine.onSample(model ?? routerModel()),
-    wanOf: (mac) => engine.rows('bind1').find((row) => row.mac === mac)?.wan,
-    waiting: (mac) => engine.waitingRows('bind1').find((row) => row.mac === mac),
-    failScripts: (fail) => {
-      failing = fail
-    }
-  }
-}
-
-describe('unassigning one device', () => {
-  it('takes its WAN away and puts it in the queue as held by hand', async () => {
-    const run = fixture()
-    await run.sample()
-    expect(run.wanOf(DESK)).toBeTruthy()
-
-    expect(await run.engine.unassign('bind1', DESK)).toMatchObject({ ok: true })
-
-    expect(run.wanOf(DESK)).toBeUndefined()
-    // Every waiting row used to read as though a free WAN were the only thing
-    // missing. For a device an operator took off the network by hand that is
-    // untrue, and no WAN coming free will change it.
-    expect(run.waiting(DESK)).toMatchObject({
-      reason: 'unassigned by hand',
-      held: true,
-      heldLabel: 'Held'
+function office(): WanbindClient {
+  return wanbindClient({
+    daemon: fakeWanbind({
+      configured: [instanceConfig({ id: INSTANCE, name: 'Office LAN' })]
     })
   })
+}
 
-  it('keeps holding it across later reconciles rather than handing it back a WAN', async () => {
-    // The hold lives in the planner's memory and is carried from pass to pass;
-    // a forced request is not. Losing the difference would give the device its
-    // WAN back on the very next fast tick.
-    const run = fixture()
-    await run.sample()
-    await run.engine.unassign('bind1', DESK)
+/** One client, ticked and acted on, with the daemon's answers already read. */
+async function ready(): Promise<WanbindClient> {
+  const client = office()
+  await client.tick()
+  return client
+}
 
-    await run.sample()
-    await run.sample()
+describe('acting on a selection of devices', () => {
+  it('takes a whole selection sent as instance-and-mac keys', async () => {
+    // What the bulk toolbar posts, as opposed to the two arguments a row action
+    // sends. The MAC is lower-cased on the way in because a router reports
+    // `AA:BB:...` in one place and `aa:bb:...` in another, and two spellings of
+    // one device would be two calls about one client.
+    const client = await ready()
 
-    expect(run.wanOf(DESK)).toBeUndefined()
-    expect(run.waiting(DESK)?.held).toBe(true)
+    const result = (await client.manager.unassign(
+      [`${INSTANCE}|${DESK}`, `${INSTANCE}|${PHONE.toUpperCase()}`],
+      undefined
+    )) as OkResult
+    await settle()
+
+    expect(result.ok).toBe(true)
+    expect(client.daemon.payloads('unassign')).toEqual([
+      { instance: INSTANCE, mac: DESK },
+      { instance: INSTANCE, mac: PHONE }
+    ])
+    expect(client.jobs.at(-1)).toMatchObject({ label: 'Unassign 2 devices', ok: true })
+    client.dispose()
   })
 
-  it('leaves the other devices on the WANs they had', async () => {
-    const run = fixture()
-    await run.sample()
-    const phoneWan = run.wanOf(PHONE)
+  it('asks about one device once, however many tables named it', async () => {
+    // The drawer's Assignments table and the page-wide one are two views of one
+    // row. Asking the daemon twice would report two changes where one happened.
+    const client = await ready()
 
-    await run.engine.unassign('bind1', DESK)
+    await client.manager.unassign([`${INSTANCE}|${DESK}`, `${INSTANCE}|${DESK}`], undefined)
+    await settle()
 
-    expect(run.wanOf(PHONE)).toBe(phoneWan)
+    expect(client.daemon.count('unassign')).toBe(1)
+    client.dispose()
   })
 
-  it('does not hold it when the pass never reached the router', async () => {
-    // The memory each instance had is restored on failure. Without that the
-    // device would be shown as held by an operator action that failed, and the
-    // next reconcile would act on a hold nothing on the router reflects.
-    const run = fixture()
-    await run.sample()
-    run.failScripts(true)
+  it('drops a key it cannot read rather than losing the rest of the selection', async () => {
+    const client = await ready()
 
-    const result = (await run.engine.unassign('bind1', DESK)) as OkResult
+    await client.manager.unassign(
+      [`${INSTANCE}|${DESK}`, 'no-separator-here', `${INSTANCE}|not-a-mac`, `|${PHONE}`],
+      undefined
+    )
+    await settle()
 
-    expect(result.ok).toBe(false)
-    run.failScripts(false)
-    await run.sample()
-    expect(run.wanOf(DESK)).toBeTruthy()
-    expect(run.waiting(DESK)).toBeUndefined()
-  })
-})
-
-describe('reassigning one device', () => {
-  it('moves it off the WAN it is on, every time it is pressed', async () => {
-    const run = fixture()
-    await run.sample()
-
-    // Eight in a row, because the WAN is otherwise picked at random from the
-    // free pool: "not this one" is the whole request, and a reassign that can
-    // land back where it started is a button that sometimes does nothing.
-    for (let press = 0; press < 8; press++) {
-      const before = run.wanOf(DESK)
-      expect(before).toBeTruthy()
-      expect(await run.engine.reassign('bind1', DESK)).toMatchObject({ ok: true })
-      expect(run.wanOf(DESK)).toBeTruthy()
-      expect(run.wanOf(DESK)).not.toBe(before)
-    }
-  })
-
-  it('forgets the sticky choice, so the old WAN cannot pull it back', async () => {
-    const run = fixture()
-    await run.sample()
-    const before = run.wanOf(DESK)
-    expect(run.store.read().stickyMap.find((entry) => entry[1] === DESK)?.[2]).toBe(before)
-
-    await run.engine.reassign('bind1', DESK)
-    // The device drops off the network and comes back, which is when a sticky
-    // choice is consulted. A stale entry here would undo the reassign.
-    await run.sample(routerModel([]))
-    await run.sample()
-
-    expect(run.wanOf(DESK)).not.toBe(before)
-  })
-
-  it('releases a device that was being held', async () => {
-    const run = fixture()
-    await run.sample()
-    await run.engine.unassign('bind1', DESK)
-    expect(run.waiting(DESK)?.held).toBe(true)
-
-    expect(await run.engine.reassign('bind1', DESK)).toMatchObject({ ok: true })
-
-    expect(run.wanOf(DESK)).toBeTruthy()
-    expect(run.waiting(DESK)).toBeUndefined()
-  })
-
-  it('puts the sticky map back when the pass never reached the router', async () => {
-    // The order the entries come back in is the store's business; which
-    // device is on which WAN is not.
-    const sticky = (): string[] =>
-      run.store
-        .read()
-        .stickyMap.map((entry) => `${entry[1]}=${entry[2]}`)
-        .sort()
-    const run = fixture()
-    await run.sample()
-    const before = sticky()
-    expect(before).toHaveLength(2)
-    run.failScripts(true)
-
-    const result = (await run.engine.reassign('bind1', DESK)) as OkResult
-
-    expect(result.ok).toBe(false)
-    // The entry is deleted before the pass runs, so a failure that did not put
-    // it back would silently forget which WAN the device was on.
-    expect(sticky()).toEqual(before)
-  })
-
-  it('acts on a whole selection sent as instance-and-mac keys', async () => {
-    // What the bulk action on the table posts, as opposed to the two arguments
-    // a row action sends.
-    const run = fixture()
-    await run.sample()
-    const before = { desk: run.wanOf(DESK), phone: run.wanOf(PHONE) }
-
-    expect(await run.engine.reassign([`bind1|${DESK}`, `bind1|${PHONE}`])).toMatchObject({
-      ok: true,
-      data: '2'
-    })
-
-    expect(run.wanOf(DESK)).not.toBe(before.desk)
-    expect(run.wanOf(PHONE)).not.toBe(before.phone)
+    expect(client.daemon.payloads('unassign')).toEqual([{ instance: INSTANCE, mac: DESK }])
+    // And the job says how many are really going, so the count on screen is the
+    // count that was sent.
+    expect(client.jobs.at(-1)?.label).toBe('Unassign 1 device')
+    client.dispose()
   })
 })
 
 describe('a device action that names nothing usable', () => {
   it('is refused rather than applied to whatever is first', async () => {
-    const run = fixture()
-    await run.sample()
+    const client = await ready()
 
     for (const result of [
-      (await run.engine.unassign('bind1', 'not-a-mac')) as OkResult,
-      (await run.engine.reassign([])) as OkResult,
-      (await run.engine.unassign([':::'])) as OkResult
+      (await client.manager.unassign(INSTANCE, 'not-a-mac')) as OkResult,
+      (await client.manager.reassign([], undefined)) as OkResult,
+      (await client.manager.unassign([':::'], undefined)) as OkResult
     ]) {
       expect(result).toMatchObject({ ok: false, error: 'no valid device was selected' })
     }
+    // Refused here, so the router was never asked to do anything at all.
+    expect(client.daemon.count('unassign')).toBe(0)
+    expect(client.daemon.count('reassign')).toBe(0)
+    client.dispose()
   })
 
-  it('is refused when the instance is gone', async () => {
-    const run = fixture()
-    await run.sample()
-
-    expect(await run.engine.reassign('bind9', DESK)).toMatchObject({
-      ok: false,
-      error: expect.stringContaining('no longer exists')
+  it('is refused in the router own words when the instance is gone', async () => {
+    // The daemon holds the instances, so "there is no such pool" is its
+    // sentence and not one this module invents. What this side owes the
+    // operator is that the sentence survives the trip and says how much of the
+    // selection went through before it stopped - reporting only the failure
+    // would have them repeat the ones that worked.
+    const client = await ready()
+    let seen = 0
+    client.daemon.on('unassign', () => {
+      seen += 1
+      return seen > 1
+        ? { ok: false, reason: 'binding instance bmi_gone is not configured' }
+        : { ok: true }
     })
+
+    const result = (await client.manager.unassign(
+      [`${INSTANCE}|${DESK}`, `bmi_gone|${PHONE}`],
+      undefined
+    )) as OkResult
+    await settle()
+
+    // The call itself starts a job, so the refusal is the job's rather than the
+    // return value's - which is where the operator reads it.
+    expect(result.ok).toBe(true)
+    expect(client.jobs.at(-1)?.ok).toBe(false)
+    expect(client.jobs.at(-1)?.error).toContain('bmi_gone is not configured')
+    expect(client.jobs.at(-1)?.error).toContain('1 of 2 were done first')
+    client.dispose()
   })
 })

@@ -2159,6 +2159,97 @@
                               "when": {
                                 "source": {
                                   "kind": "stream",
+                                  "event": "binding",
+                                  "path": "daemon.ready"
+                                },
+                                "op": "eq",
+                                "value": false
+                              },
+                              "blocks": [
+                                {
+                                  "type": "section",
+                                  "blocks": [
+                                    {
+                                      "type": "note",
+                                      "title": "This router does not answer for WAN Binding",
+                                      "tone": "warning",
+                                      "lines": [
+                                        "Every instance, every one-to-one binding, the routing tables behind them and every ip rule they use are kept by bm-wanbind on the router itself. This module asks it and sends changes to it; it writes none of that. Without the router packages there is nothing to ask, so the tables on these tabs are empty because nothing was read - not because this router is carrying nothing.",
+                                        "The sentence below is the readiness check’s own. Router packages, under Module settings, is where the packages are installed, and Check again re-reads the router once they are.",
+                                        "An instance or a one-to-one binding this module created before the router kept its own is handed to the daemon by itself once it is there, with the priority and the table it was stamped with, so the rules already standing are adopted rather than written a second time. Nothing here has to be pressed for that."
+                                      ]
+                                    },
+                                    {
+                                      "type": "keyValue",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "binding"
+                                      },
+                                      "rows": [
+                                        {
+                                          "key": "daemon.problem",
+                                          "label": "Problem"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "actions",
+                                      "actions": [
+                                        {
+                                          "label": "Check again",
+                                          "method": "sweepNow"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "conditional",
+                              "when": {
+                                "source": {
+                                  "kind": "stream",
+                                  "event": "binding",
+                                  "path": "notice"
+                                },
+                                "op": "exists"
+                              },
+                              "blocks": [
+                                {
+                                  "type": "section",
+                                  "blocks": [
+                                    {
+                                      "type": "note",
+                                      "title": "Something about WAN Binding needs saying",
+                                      "tone": "warning",
+                                      "lines": [
+                                        "The sentence below is not a call that failed - this router is answering. It is the router disagreeing with something it was asked for, or a record this module still holds that the daemon has not taken over yet, and it is the only place either is stated.",
+                                        "Where it names something made before the router kept its own binding, that thing is offered to the daemon again on every pass, with the priority and the table it was stamped with. Its ip rules stand exactly where they were meanwhile, and traffic still follows them - what has stopped is anything reacting to a change. Fix what the sentence names and the next pass finishes the handover; nothing here has to be pressed."
+                                      ]
+                                    },
+                                    {
+                                      "type": "keyValue",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "binding"
+                                      },
+                                      "rows": [
+                                        {
+                                          "key": "notice",
+                                          "label": "Reason"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "conditional",
+                              "when": {
+                                "source": {
+                                  "kind": "stream",
                                   "event": "ui",
                                   "path": "hintsOn"
                                 },
@@ -2434,6 +2525,97 @@
                           "label": "Binding 1-1",
                           "icon": "Tag",
                           "blocks": [
+                            {
+                              "type": "conditional",
+                              "when": {
+                                "source": {
+                                  "kind": "stream",
+                                  "event": "binding",
+                                  "path": "daemon.ready"
+                                },
+                                "op": "eq",
+                                "value": false
+                              },
+                              "blocks": [
+                                {
+                                  "type": "section",
+                                  "blocks": [
+                                    {
+                                      "type": "note",
+                                      "title": "This router does not answer for WAN Binding",
+                                      "tone": "warning",
+                                      "lines": [
+                                        "Every instance, every one-to-one binding, the routing tables behind them and every ip rule they use are kept by bm-wanbind on the router itself. This module asks it and sends changes to it; it writes none of that. Without the router packages there is nothing to ask, so the tables on these tabs are empty because nothing was read - not because this router is carrying nothing.",
+                                        "The sentence below is the readiness check’s own. Router packages, under Module settings, is where the packages are installed, and Check again re-reads the router once they are.",
+                                        "An instance or a one-to-one binding this module created before the router kept its own is handed to the daemon by itself once it is there, with the priority and the table it was stamped with, so the rules already standing are adopted rather than written a second time. Nothing here has to be pressed for that."
+                                      ]
+                                    },
+                                    {
+                                      "type": "keyValue",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "binding"
+                                      },
+                                      "rows": [
+                                        {
+                                          "key": "daemon.problem",
+                                          "label": "Problem"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "actions",
+                                      "actions": [
+                                        {
+                                          "label": "Check again",
+                                          "method": "sweepNow"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "conditional",
+                              "when": {
+                                "source": {
+                                  "kind": "stream",
+                                  "event": "binding",
+                                  "path": "notice"
+                                },
+                                "op": "exists"
+                              },
+                              "blocks": [
+                                {
+                                  "type": "section",
+                                  "blocks": [
+                                    {
+                                      "type": "note",
+                                      "title": "Something about WAN Binding needs saying",
+                                      "tone": "warning",
+                                      "lines": [
+                                        "The sentence below is not a call that failed - this router is answering. It is the router disagreeing with something it was asked for, or a record this module still holds that the daemon has not taken over yet, and it is the only place either is stated.",
+                                        "Where it names something made before the router kept its own binding, that thing is offered to the daemon again on every pass, with the priority and the table it was stamped with. Its ip rules stand exactly where they were meanwhile, and traffic still follows them - what has stopped is anything reacting to a change. Fix what the sentence names and the next pass finishes the handover; nothing here has to be pressed."
+                                      ]
+                                    },
+                                    {
+                                      "type": "keyValue",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "binding"
+                                      },
+                                      "rows": [
+                                        {
+                                          "key": "notice",
+                                          "label": "Reason"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
                             {
                               "type": "conditional",
                               "when": {
@@ -2752,6 +2934,29 @@
                                   ]
                                 },
                                 {
+                                  "type": "conditional",
+                                  "when": {
+                                    "source": {
+                                      "kind": "stream",
+                                      "event": "ui",
+                                      "path": "hintsOn"
+                                    },
+                                    "op": "eq",
+                                    "value": true
+                                  },
+                                  "blocks": [
+                                    {
+                                      "type": "note",
+                                      "title": "Not every row here was placed by hand",
+                                      "lines": [
+                                        "The router reports both halves of binding through one call, so this table carries the seats binding instances are holding as well as the bindings somebody wrote. Source tells them apart: manual is a section written here or at a router shell, and anything else is the id of the instance holding that seat.",
+                                        "Only a manual row can be renamed, switched off or deleted. Editing a seat here would be this page reaching into the other half’s work, and the instance would take it straight back on its next pass - a change that appeared to succeed, showed for a few seconds and then undid itself with nothing anywhere to explain it. The row actions refuse it and name the instance instead.",
+                                        "To free a seat, use Unassign or Reassign on that instance’s own Assignments table, under Instances."
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
                                   "type": "table",
                                   "source": {
                                     "kind": "invoke",
@@ -2793,6 +2998,10 @@
                                       "align": "right"
                                     },
                                     {
+                                      "key": "source",
+                                      "label": "Source"
+                                    },
+                                    {
                                       "key": "whenDownLabel",
                                       "label": "When down"
                                     },
@@ -2821,7 +3030,8 @@
                                     "name",
                                     "target",
                                     "address",
-                                    "wan"
+                                    "wan",
+                                    "source"
                                   ],
                                   "rowActions": [
                                     {
@@ -2989,6 +3199,97 @@
                               "when": {
                                 "source": {
                                   "kind": "stream",
+                                  "event": "binding",
+                                  "path": "daemon.ready"
+                                },
+                                "op": "eq",
+                                "value": false
+                              },
+                              "blocks": [
+                                {
+                                  "type": "section",
+                                  "blocks": [
+                                    {
+                                      "type": "note",
+                                      "title": "This router does not answer for WAN Binding",
+                                      "tone": "warning",
+                                      "lines": [
+                                        "Every instance, every one-to-one binding, the routing tables behind them and every ip rule they use are kept by bm-wanbind on the router itself. This module asks it and sends changes to it; it writes none of that. Without the router packages there is nothing to ask, so the tables on these tabs are empty because nothing was read - not because this router is carrying nothing.",
+                                        "The sentence below is the readiness check’s own. Router packages, under Module settings, is where the packages are installed, and Check again re-reads the router once they are.",
+                                        "An instance or a one-to-one binding this module created before the router kept its own is handed to the daemon by itself once it is there, with the priority and the table it was stamped with, so the rules already standing are adopted rather than written a second time. Nothing here has to be pressed for that."
+                                      ]
+                                    },
+                                    {
+                                      "type": "keyValue",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "binding"
+                                      },
+                                      "rows": [
+                                        {
+                                          "key": "daemon.problem",
+                                          "label": "Problem"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "actions",
+                                      "actions": [
+                                        {
+                                          "label": "Check again",
+                                          "method": "sweepNow"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "conditional",
+                              "when": {
+                                "source": {
+                                  "kind": "stream",
+                                  "event": "binding",
+                                  "path": "notice"
+                                },
+                                "op": "exists"
+                              },
+                              "blocks": [
+                                {
+                                  "type": "section",
+                                  "blocks": [
+                                    {
+                                      "type": "note",
+                                      "title": "Something about WAN Binding needs saying",
+                                      "tone": "warning",
+                                      "lines": [
+                                        "The sentence below is not a call that failed - this router is answering. It is the router disagreeing with something it was asked for, or a record this module still holds that the daemon has not taken over yet, and it is the only place either is stated.",
+                                        "Where it names something made before the router kept its own binding, that thing is offered to the daemon again on every pass, with the priority and the table it was stamped with. Its ip rules stand exactly where they were meanwhile, and traffic still follows them - what has stopped is anything reacting to a change. Fix what the sentence names and the next pass finishes the handover; nothing here has to be pressed."
+                                      ]
+                                    },
+                                    {
+                                      "type": "keyValue",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "binding"
+                                      },
+                                      "rows": [
+                                        {
+                                          "key": "notice",
+                                          "label": "Reason"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "conditional",
+                              "when": {
+                                "source": {
+                                  "kind": "stream",
                                   "event": "ui",
                                   "path": "hintsOn"
                                 },
@@ -3002,7 +3303,9 @@
                                   "lines": [
                                     "An instance owns exactly one logical LAN and one physical WAN carrier. Interfaces outside that pair remain independent.",
                                     "A sticky client keeps its WAN by MAC address. Optional remapping moves it only after the WAN has stayed failed beyond the grace period.",
-                                    "A newly leased device is assigned a random free WAN; when none is free it waits in FIFO order. New instances are created on the Create an instance tab, the next one along."
+                                    "A newly leased device is assigned a random free WAN; when none is free it waits in FIFO order. New instances are created on the Create an instance tab, the next one along.",
+                                    "Per WAN is how many devices may share one line: one client per WAN is a line each, a number is that many sharing, no limit puts every device this instance sees on the pool however small it is. It is stamped at creation and cannot be changed.",
+                                    "Why is the daemon’s own sentence about a section it will not accept. Such an instance installs no rule, seats nobody and appears in none of the tables below, so its row would otherwise be nothing but zeroes with nothing anywhere saying what is wrong with it."
                                   ]
                                 },
                                 {
@@ -3134,6 +3437,10 @@
                                       "label": "WAN carrier"
                                     },
                                     {
+                                      "key": "capacityLabel",
+                                      "label": "Per WAN"
+                                    },
+                                    {
                                       "key": "stateBadges",
                                       "label": "State",
                                       "format": "badges",
@@ -3180,6 +3487,10 @@
                                       "label": "Waiting",
                                       "format": "number",
                                       "align": "right"
+                                    },
+                                    {
+                                      "key": "reason",
+                                      "label": "Why"
                                     }
                                   ],
                                   "sortDefault": {
@@ -3190,7 +3501,8 @@
                                     "name",
                                     "lan",
                                     "scope",
-                                    "carrier"
+                                    "carrier",
+                                    "reason"
                                   ],
                                   "emptyText": "No WAN Binding instance has been configured - the form is on the Create an instance tab",
                                   "rowActions": [
@@ -3291,10 +3603,11 @@
                                           "blocks": [
                                             {
                                               "type": "note",
-                                              "title": "The LAN, the carrier and the address range are fixed",
+                                              "title": "The LAN, the carrier, the address range and Per WAN are fixed",
                                               "lines": [
                                                 "Every client rule and the safety catch-all were installed for this exact LAN, carrier and address range, so changing any of the three would leave rules on the router pointing at addresses that are no longer behind this instance. Delete the instance and create one for the scope you want instead.",
-                                                "Addresses served is the window this instance may hand a WAN to - the whole LAN, or the range it was created with. A device whose lease falls outside that window never enters this instance's pass, so it appears in none of the tables below and is not waiting for anything."
+                                                "Addresses served is the window this instance may hand a WAN to - the whole LAN, or the range it was created with. A device whose lease falls outside that window never enters this instance's pass, so it appears in none of the tables below and is not waiting for anything.",
+                                                "Per WAN is fixed for a harder reason than the other three: the rule priorities this instance holds were reserved for the number it was created with, so there is no room to seat more devices than that number allowed. Delete it and create one with the number you want."
                                               ]
                                             },
                                             {
@@ -3796,6 +4109,97 @@
                               "when": {
                                 "source": {
                                   "kind": "stream",
+                                  "event": "binding",
+                                  "path": "daemon.ready"
+                                },
+                                "op": "eq",
+                                "value": false
+                              },
+                              "blocks": [
+                                {
+                                  "type": "section",
+                                  "blocks": [
+                                    {
+                                      "type": "note",
+                                      "title": "This router does not answer for WAN Binding",
+                                      "tone": "warning",
+                                      "lines": [
+                                        "Every instance, every one-to-one binding, the routing tables behind them and every ip rule they use are kept by bm-wanbind on the router itself. This module asks it and sends changes to it; it writes none of that. Without the router packages there is nothing to ask, so the tables on these tabs are empty because nothing was read - not because this router is carrying nothing.",
+                                        "The sentence below is the readiness check’s own. Router packages, under Module settings, is where the packages are installed, and Check again re-reads the router once they are.",
+                                        "An instance or a one-to-one binding this module created before the router kept its own is handed to the daemon by itself once it is there, with the priority and the table it was stamped with, so the rules already standing are adopted rather than written a second time. Nothing here has to be pressed for that."
+                                      ]
+                                    },
+                                    {
+                                      "type": "keyValue",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "binding"
+                                      },
+                                      "rows": [
+                                        {
+                                          "key": "daemon.problem",
+                                          "label": "Problem"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "actions",
+                                      "actions": [
+                                        {
+                                          "label": "Check again",
+                                          "method": "sweepNow"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "conditional",
+                              "when": {
+                                "source": {
+                                  "kind": "stream",
+                                  "event": "binding",
+                                  "path": "notice"
+                                },
+                                "op": "exists"
+                              },
+                              "blocks": [
+                                {
+                                  "type": "section",
+                                  "blocks": [
+                                    {
+                                      "type": "note",
+                                      "title": "Something about WAN Binding needs saying",
+                                      "tone": "warning",
+                                      "lines": [
+                                        "The sentence below is not a call that failed - this router is answering. It is the router disagreeing with something it was asked for, or a record this module still holds that the daemon has not taken over yet, and it is the only place either is stated.",
+                                        "Where it names something made before the router kept its own binding, that thing is offered to the daemon again on every pass, with the priority and the table it was stamped with. Its ip rules stand exactly where they were meanwhile, and traffic still follows them - what has stopped is anything reacting to a change. Fix what the sentence names and the next pass finishes the handover; nothing here has to be pressed."
+                                      ]
+                                    },
+                                    {
+                                      "type": "keyValue",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "binding"
+                                      },
+                                      "rows": [
+                                        {
+                                          "key": "notice",
+                                          "label": "Reason"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "conditional",
+                              "when": {
+                                "source": {
+                                  "kind": "stream",
                                   "event": "capabilities",
                                   "path": "missingFor.binding"
                                 },
@@ -3978,6 +4382,13 @@
                                       }
                                     },
                                     {
+                                      "key": "clientsPerWan",
+                                      "label": "Clients per WAN",
+                                      "input": "number",
+                                      "placeholder": "1",
+                                      "initial": 1
+                                    },
+                                    {
                                       "key": "sticky",
                                       "label": "Keep a device on the same WAN",
                                       "input": "checkbox",
@@ -4038,6 +4449,8 @@
                                         "First address / Last address - Read only when the range is chosen, and both have to sit inside the subnet of the LAN chosen above. A rule this instance writes selects on a source address behind that LAN, so an address outside the subnet could never match one, and the check refuses rather than writing a rule nothing can hit. The range is turned into whole address blocks for the safety rule, so a wide range costs a handful of rules rather than one per address.",
                                         "The choice of whole LAN or range cannot be changed afterwards, for the same reason the LAN and the carrier cannot: every client rule and the safety rule were installed for exactly this scope. Delete the instance and create it again to change it.",
                                         "WAN carrier - A device, or one VLAN on a device when the ISP hands out the uplink tagged. Every PPPoE, DHCP, or static WAN using it, directly or through one of its VLANs, becomes part of the pool.",
+                                        "Clients per WAN - a whole number from 0 to 4096, default 1. 1 gives every device a WAN of its own, which is what every release before this one did: the pool runs out when there are more devices than WANs and the rest queue. A larger number lets that many devices share one WAN, so twenty lines at five seats a hundred devices before anybody waits. 0 is no limit, and on a pool of one WAN that reads as every device on this LAN leaving by that one line.",
+                                        "That number cannot be changed afterwards either. The rule priorities an instance holds were reserved for the number it was created with, so raising it later would need a band it was never given; delete the instance and create it again.",
                                         "Keep a device on the same WAN - Remember the WAN by client MAC and prefer it after a lease IP change or a reconnect, when that WAN is free and healthy.",
                                         "Remap after a WAN failure - When a WAN stays in error longer than the configured grace period, move its client to another free WAN.",
                                         "Raise dnsmasq lease limits when needed - Allow apply to raise this LAN's DHCP limit and the global dnsmasq lease cap to the size the check reports. That restarts dnsmasq, which briefly interrupts DHCP and DNS for the whole router; leave it off and the check still reports the numbers to set by hand."
@@ -4060,6 +4473,97 @@
                               "when": {
                                 "source": {
                                   "kind": "stream",
+                                  "event": "binding",
+                                  "path": "daemon.ready"
+                                },
+                                "op": "eq",
+                                "value": false
+                              },
+                              "blocks": [
+                                {
+                                  "type": "section",
+                                  "blocks": [
+                                    {
+                                      "type": "note",
+                                      "title": "This router does not answer for WAN Binding",
+                                      "tone": "warning",
+                                      "lines": [
+                                        "Every instance, every one-to-one binding, the routing tables behind them and every ip rule they use are kept by bm-wanbind on the router itself. This module asks it and sends changes to it; it writes none of that. Without the router packages there is nothing to ask, so the tables on these tabs are empty because nothing was read - not because this router is carrying nothing.",
+                                        "The sentence below is the readiness check’s own. Router packages, under Module settings, is where the packages are installed, and Check again re-reads the router once they are.",
+                                        "An instance or a one-to-one binding this module created before the router kept its own is handed to the daemon by itself once it is there, with the priority and the table it was stamped with, so the rules already standing are adopted rather than written a second time. Nothing here has to be pressed for that."
+                                      ]
+                                    },
+                                    {
+                                      "type": "keyValue",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "binding"
+                                      },
+                                      "rows": [
+                                        {
+                                          "key": "daemon.problem",
+                                          "label": "Problem"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "actions",
+                                      "actions": [
+                                        {
+                                          "label": "Check again",
+                                          "method": "sweepNow"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "conditional",
+                              "when": {
+                                "source": {
+                                  "kind": "stream",
+                                  "event": "binding",
+                                  "path": "notice"
+                                },
+                                "op": "exists"
+                              },
+                              "blocks": [
+                                {
+                                  "type": "section",
+                                  "blocks": [
+                                    {
+                                      "type": "note",
+                                      "title": "Something about WAN Binding needs saying",
+                                      "tone": "warning",
+                                      "lines": [
+                                        "The sentence below is not a call that failed - this router is answering. It is the router disagreeing with something it was asked for, or a record this module still holds that the daemon has not taken over yet, and it is the only place either is stated.",
+                                        "Where it names something made before the router kept its own binding, that thing is offered to the daemon again on every pass, with the priority and the table it was stamped with. Its ip rules stand exactly where they were meanwhile, and traffic still follows them - what has stopped is anything reacting to a change. Fix what the sentence names and the next pass finishes the handover; nothing here has to be pressed."
+                                      ]
+                                    },
+                                    {
+                                      "type": "keyValue",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "binding"
+                                      },
+                                      "rows": [
+                                        {
+                                          "key": "notice",
+                                          "label": "Reason"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "conditional",
+                              "when": {
+                                "source": {
+                                  "kind": "stream",
                                   "event": "ui",
                                   "path": "hintsOn"
                                 },
@@ -4071,8 +4575,9 @@
                                   "type": "note",
                                   "title": "What this reads, and what it will never touch",
                                   "lines": [
-                                    "Every other table on this page shows what this module wrote. This one reads the router's whole ip rule table on a timer - not only the narrow priority window the module writes in - so a rule somebody added by hand, one left behind by another package, or one from an older release of this module is visible here and nowhere else in the app.",
-                                    "Each row says which routing table the rule sends that address to, which WAN that table's default route actually leaves through, and how that compares with the main table's default. That is the whole question the page answers: whether an address is on the router's normal connection or somewhere else, and who put it there.",
+                                    "Every other table on this page shows what this module asked the router for. This one asks for the whole ip rule table on a timer - not only the priority bands WAN Binding writes in - so a rule somebody added by hand, one left behind by another package, or one from an older release of this module is visible here and nowhere else in the app.",
+                                    "Each row says which routing table the rule sends that address to, which WAN that table’s default route actually leaves through, and how that compares with the main table’s default. That is the whole question the page answers: whether an address is on the router’s normal connection or somewhere else, and who put it there. The verdict is the daemon’s own, because it holds the sections, the bands and the kernel’s dumps at once - a priority on its own cannot tell an instance’s client rule from a hand-written one at the same number.",
+                                    "Most of what a multi-WAN router carries here is the router routing itself. netifd writes three rules for every interface given a routing table of its own - its address to its table, traffic addressed to it to its table, and traffic the router sends out of it - so a box dialling thirty-two PPPoE sessions has ninety-six of them before anybody has bound anything. They are neither this module’s work nor a stranger’s, and counting them as either buries the handful of rows worth reading.",
                                     "Nothing on this page ever changes a rule it did not write. A row marked as written outside this module is reported and left exactly where it is - quietly deleting somebody else's policy rule from a page they never opened is not a thing this module will do.",
                                     "The scan runs while the Connection page is open - any tab of it, not only this one - at the interval under Module settings, Advanced rules, in the field called Binding scan interval. Scan now asks for one pass immediately."
                                   ]
@@ -4158,19 +4663,19 @@
                                       "status": "ok"
                                     },
                                     {
-                                      "key": "router agent",
-                                      "label": "Router agent",
-                                      "status": "ok"
-                                    },
-                                    {
                                       "key": "safety catch-all",
                                       "label": "Safety catch-all",
                                       "status": "warn"
                                     },
                                     {
-                                      "key": "mwan3",
-                                      "label": "mwan3",
+                                      "key": "the router routing itself",
+                                      "label": "The router routing itself",
                                       "status": "unknown"
+                                    },
+                                    {
+                                      "key": "outside this module, parked",
+                                      "label": "Parked by something else",
+                                      "status": "bad"
                                     },
                                     {
                                       "key": "outside this module",
@@ -4239,7 +4744,7 @@
                                   "tone": "warning",
                                   "title": "This router has more rules than one scan carries",
                                   "lines": [
-                                    "The scan reads the rule table in one bounded command, and this router's table is longer than that command prints. The rules below are the lowest-numbered ones - the ones consulted first - and the rest are not here.",
+                                    "The daemon answers with a bounded reply - two thousand rules by default - and this router’s table is longer than that. The rules below are the lowest-numbered ones, the ones the kernel consults first, and the rest are not here.",
                                     "The counts above describe what was read, not what is on the router. Anything this module writes sits at high priorities, so its own rules are the first to fall off the end: read an empty owner column as “not in this scan” rather than as “not on this router”."
                                   ]
                                 }
@@ -4337,7 +4842,7 @@
                                             },
                                             {
                                               "key": "wanIp",
-                                              "label": "That WAN's address"
+                                              "label": "Next hop out of that table"
                                             },
                                             {
                                               "key": "owner",
@@ -4372,104 +4877,232 @@
                         },
                         {
                           "id": "behaviour",
-                          "label": "Behaviour",
+                          "label": "Daemon settings",
                           "icon": "Settings2",
                           "blocks": [
                             {
+                              "type": "conditional",
+                              "when": {
+                                "source": {
+                                  "kind": "stream",
+                                  "event": "binding",
+                                  "path": "daemon.ready"
+                                },
+                                "op": "eq",
+                                "value": false
+                              },
+                              "blocks": [
+                                {
+                                  "type": "section",
+                                  "blocks": [
+                                    {
+                                      "type": "note",
+                                      "title": "This router does not answer for WAN Binding",
+                                      "tone": "warning",
+                                      "lines": [
+                                        "Every instance, every one-to-one binding, the routing tables behind them and every ip rule they use are kept by bm-wanbind on the router itself. This module asks it and sends changes to it; it writes none of that. Without the router packages there is nothing to ask, so the tables on these tabs are empty because nothing was read - not because this router is carrying nothing.",
+                                        "The sentence below is the readiness check’s own. Router packages, under Module settings, is where the packages are installed, and Check again re-reads the router once they are.",
+                                        "An instance or a one-to-one binding this module created before the router kept its own is handed to the daemon by itself once it is there, with the priority and the table it was stamped with, so the rules already standing are adopted rather than written a second time. Nothing here has to be pressed for that."
+                                      ]
+                                    },
+                                    {
+                                      "type": "keyValue",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "binding"
+                                      },
+                                      "rows": [
+                                        {
+                                          "key": "daemon.problem",
+                                          "label": "Problem"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "actions",
+                                      "actions": [
+                                        {
+                                          "label": "Check again",
+                                          "method": "sweepNow"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "conditional",
+                              "when": {
+                                "source": {
+                                  "kind": "stream",
+                                  "event": "binding",
+                                  "path": "notice"
+                                },
+                                "op": "exists"
+                              },
+                              "blocks": [
+                                {
+                                  "type": "section",
+                                  "blocks": [
+                                    {
+                                      "type": "note",
+                                      "title": "Something about WAN Binding needs saying",
+                                      "tone": "warning",
+                                      "lines": [
+                                        "The sentence below is not a call that failed - this router is answering. It is the router disagreeing with something it was asked for, or a record this module still holds that the daemon has not taken over yet, and it is the only place either is stated.",
+                                        "Where it names something made before the router kept its own binding, that thing is offered to the daemon again on every pass, with the priority and the table it was stamped with. Its ip rules stand exactly where they were meanwhile, and traffic still follows them - what has stopped is anything reacting to a change. Fix what the sentence names and the next pass finishes the handover; nothing here has to be pressed."
+                                      ]
+                                    },
+                                    {
+                                      "type": "keyValue",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "binding"
+                                      },
+                                      "rows": [
+                                        {
+                                          "key": "notice",
+                                          "label": "Reason"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "conditional",
+                              "when": {
+                                "source": {
+                                  "kind": "stream",
+                                  "event": "ui",
+                                  "path": "hintsOn"
+                                },
+                                "op": "eq",
+                                "value": true
+                              },
+                              "blocks": [
+                                {
+                                  "type": "note",
+                                  "title": "The numbers an instance is stamped with",
+                                  "lines": [
+                                    "Everything on this form is bm-wanbind’s own configuration on the router, in /etc/config/bm_wanbind. This module keeps no copy of any of it. Until 3.4.0 it kept one under Module settings, wrote ip rules from that copy while the daemon wrote its own from this one, and the two removed each other’s work every pass - thirty-four rules deleted every thirty seconds on a real router, with every surface green because each half was doing exactly what it had been told.",
+                                    "Only the pass interval acts on what is already running: the router re-arms its timer rather than waiting out the old one. Every other number here is the default an instance is stamped with when it is created afterwards. A section already on the router keeps the numbers it has, because those are what the ip rules standing in its kernel were written against, so moving a base here moves nothing that is already routing.",
+                                    "To renumber an instance that already exists, delete it and create it again."
+                                  ]
+                                }
+                              ]
+                            },
+                            {
                               "type": "section",
-                              "title": "Binding behaviour",
+                              "title": "How the daemon numbers and times its work",
                               "columns": 2,
                               "blocks": [
                                 {
                                   "type": "checkForm",
-                                  "checkMethod": "rulesCheck",
-                                  "applyMethod": "rulesApply",
-                                  "checkLabel": "Check this group",
-                                  "applyLabel": "Save this group",
+                                  "checkMethod": "bindingSettingsCheck",
+                                  "applyMethod": "bindingSettingsApply",
+                                  "checkLabel": "Check",
+                                  "applyLabel": "Apply on the router",
                                   "fields": [
                                     {
-                                      "key": "remapOnWanError",
-                                      "label": "Remap after WAN errors",
-                                      "input": "checkbox",
-                                      "initialFrom": {
-                                        "kind": "invoke",
-                                        "method": "rulesEffective",
-                                        "path": "remapOnWanError"
-                                      }
-                                    },
-                                    {
-                                      "key": "wanErrorGraceSec",
-                                      "label": "WAN error grace (s)",
+                                      "key": "interval",
+                                      "label": "Pass interval (s)",
                                       "input": "number",
                                       "placeholder": "30",
                                       "initialFrom": {
                                         "kind": "invoke",
-                                        "method": "rulesEffective",
-                                        "path": "wanErrorGraceSec"
+                                        "method": "bindingSettingsGet",
+                                        "path": "interval"
                                       }
                                     },
                                     {
-                                      "key": "wanWarnUptimeSec",
+                                      "key": "wan_warn_uptime",
                                       "label": "New-WAN warning window (s)",
                                       "input": "number",
-                                      "placeholder": "60",
+                                      "placeholder": "5",
                                       "initialFrom": {
                                         "kind": "invoke",
-                                        "method": "rulesEffective",
-                                        "path": "wanWarnUptimeSec"
+                                        "method": "bindingSettingsGet",
+                                        "path": "wan_warn_uptime"
                                       }
                                     },
                                     {
-                                      "key": "stickyByMac",
-                                      "label": "Sticky by MAC",
-                                      "input": "checkbox",
+                                      "key": "wan_error_grace",
+                                      "label": "WAN error grace (s)",
+                                      "input": "number",
+                                      "placeholder": "20",
                                       "initialFrom": {
                                         "kind": "invoke",
-                                        "method": "rulesEffective",
-                                        "path": "stickyByMac"
+                                        "method": "bindingSettingsGet",
+                                        "path": "wan_error_grace"
                                       }
                                     },
                                     {
-                                      "key": "releaseGraceSec",
+                                      "key": "release_grace",
                                       "label": "Lease release grace (s)",
                                       "input": "number",
-                                      "placeholder": "300",
+                                      "placeholder": "120",
                                       "initialFrom": {
                                         "kind": "invoke",
-                                        "method": "rulesEffective",
-                                        "path": "releaseGraceSec"
+                                        "method": "bindingSettingsGet",
+                                        "path": "release_grace"
                                       }
                                     },
                                     {
-                                      "key": "autoRedialAfterMin",
-                                      "label": "Watchdog redial after (min)",
+                                      "key": "direct_pref_base",
+                                      "label": "One-to-one rule priority base",
                                       "input": "number",
-                                      "placeholder": "0",
+                                      "placeholder": "19000",
                                       "initialFrom": {
                                         "kind": "invoke",
-                                        "method": "rulesEffective",
-                                        "path": "autoRedialAfterMin"
+                                        "method": "bindingSettingsGet",
+                                        "path": "direct_pref_base"
                                       }
                                     },
                                     {
-                                      "key": "autoRepairTables",
-                                      "label": "Repair WAN routing tables automatically",
-                                      "input": "checkbox",
+                                      "key": "rule_pref_base",
+                                      "label": "Assignment rule priority base",
+                                      "input": "number",
+                                      "placeholder": "20000",
                                       "initialFrom": {
                                         "kind": "invoke",
-                                        "method": "rulesEffective",
-                                        "path": "autoRepairTables"
+                                        "method": "bindingSettingsGet",
+                                        "path": "rule_pref_base"
                                       }
                                     },
                                     {
-                                      "key": "leaseFile",
-                                      "label": "DHCP lease file",
-                                      "input": "text",
-                                      "placeholder": "/tmp/dhcp.leases",
+                                      "key": "catch_all_pref_base",
+                                      "label": "Catch-all rule priority base",
+                                      "input": "number",
+                                      "placeholder": "30000",
                                       "initialFrom": {
                                         "kind": "invoke",
-                                        "method": "rulesEffective",
-                                        "path": "leaseFile"
+                                        "method": "bindingSettingsGet",
+                                        "path": "catch_all_pref_base"
+                                      }
+                                    },
+                                    {
+                                      "key": "catch_all_table",
+                                      "label": "Catch-all routing table",
+                                      "input": "number",
+                                      "placeholder": "253",
+                                      "initialFrom": {
+                                        "kind": "invoke",
+                                        "method": "bindingSettingsGet",
+                                        "path": "catch_all_table"
+                                      }
+                                    },
+                                    {
+                                      "key": "wan_table_base",
+                                      "label": "WAN routing table base",
+                                      "input": "number",
+                                      "placeholder": "10000",
+                                      "initialFrom": {
+                                        "kind": "invoke",
+                                        "method": "bindingSettingsGet",
+                                        "path": "wan_table_base"
                                       }
                                     }
                                   ]
@@ -4490,15 +5123,17 @@
                                       "type": "note",
                                       "title": "What each field means",
                                       "lines": [
-                                        "Remap after WAN errors - default on for new instances when no per-instance value is supplied. Each instance’s own Remap choice is authoritative afterwards.",
-                                        "WAN error grace - 0 to 3600 seconds, default 30. A failed WAN must remain failed this long before its client can move.",
-                                        "New-WAN warning window - 0 to 3600 seconds, default 60. A newly reconnected WAN stays Warning for this long so flapping is visible.",
-                                        "Sticky by MAC - default on for new instances when no per-instance value is supplied. Each instance’s own Sticky choice is authoritative afterwards.",
-                                        "Lease release grace - 0 to 86400 seconds, default 300. The WAN stays reserved for this long after a DHCP lease disappears.",
-                                        "Watchdog redial after - 0 disables the watchdog (default) because netifd already retries. A positive value redials sessions that stay failed for that many minutes.",
-                                        "Repair WAN routing tables automatically - default on. When a managed WAN loses its option ip4table, rewrite it and reload the network. Switch it off to keep every write to /etc/config/network under your own hand; the audit still runs and reports what it found under Events.",
-                                        "DHCP lease file - default /tmp/dhcp.leases. An absolute path without shell metacharacters, in dnsmasq’s standard lease format.",
-                                        "These are the defaults new instances start from. An instance that already exists keeps its own Sticky and Remap, editable from its row."
+                                        "Pass interval - 5 to 3600 seconds, default 30. How often the daemon reconciles: it seats new leases, moves clients off failed WANs, and puts back any rule in the bands it owns that has gone missing.",
+                                        "New-WAN warning window - 0 to 3600 seconds, default 5. A WAN that has just come up is held in Warning this long and is not handed to a device, so a flapping uplink shows as flapping instead of being given out and taken back.",
+                                        "WAN error grace - 0 to 3600 seconds, default 20. A failed WAN has to stay failed this long before an instance set to remap moves its client somewhere else.",
+                                        "Lease release grace - 0 to 86400 seconds, default 120. How long a WAN stays reserved for a device after its DHCP lease disappears, so a machine that reboots comes back to the line it had.",
+                                        "One-to-one rule priority base - 1000 to 28000, default 19000. A binding placed by hand takes one priority from a band 1000 wide starting here, and that band has to end before the assignment base. A binding numbered inside the instance band is adopted by that instance as one of its own seats, found to have no lease behind it and deleted on the next pass - once every pass, for ever, with nothing anywhere saying why that address keeps losing its WAN.",
+                                        "Assignment rule priority base - 1000 to 28999, default 20000. Where an instance starts numbering its client rules. They run from here up to, but not including, the catch-all base, so that gap is also the most clients one instance could ever seat; at least 64 have to be left in it.",
+                                        "Catch-all rule priority base - 2000 to 29999, default 30000. Each instance takes one priority from here for its fail-closed rule, the one that stops a device it has not seated yet from leaking out through the router’s default connection.",
+                                        "Catch-all routing table - 2000 to 32766, default 253. The table holding an unreachable default. A waiting device and a held one-to-one binding are both pointed at it, which is why they have no way out rather than a different one. The router’s own main and local tables are refused by name: an unreachable default written into either takes the router off the network.",
+                                        "WAN routing table base - 1000 to 25000, default 10000. Where the daemon numbers the routing table it gives each WAN in a pool.",
+                                        "A value already in force is accepted whatever the window above says. Two of the daemon’s shipped defaults sit outside these windows - the catch-all base at 30000 and the catch-all table at 253 - so a form opened on a stock router would otherwise refuse to save a pass interval because of a number nobody had touched.",
+                                        "A blank field keeps the value in force, and only what actually changes is sent. The daemon’s own switch is not on this form and is never sent from it: turning it off takes every instance’s rules off the router, and a checkbox reports false when it is simply absent, so one saved pass interval would have taken every pool off the air."
                                       ]
                                     }
                                   ]

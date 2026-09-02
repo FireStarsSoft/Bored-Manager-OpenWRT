@@ -3,22 +3,19 @@ import type { ModuleExecResult } from '@shared/modules'
 import type { ValueBadge } from '@shared/module-ui'
 import activate from '../../openwrt/main/index'
 import { BADGE, countBadges, statusBadges, statusTone } from '../../openwrt/main/badges'
-import {
-  ConfigStore,
-  DEFAULT_RULES,
-  RulesEditor,
-  type RulesTopology
-} from '../../openwrt/main/config'
+import { ConfigStore, DEFAULT_RULES, RulesEditor } from '../../openwrt/main/config'
 import { Jobs, type JobHistoryData, type JobStore } from '../../openwrt/main/jobs'
-import { planBindingReconciliation } from '../../openwrt/main/binding'
-import type {
-  BindingPlannerInstance,
-  BindingPlannerPolicy,
-  BindingPlannerWan,
-  BindingReconcileInput
-} from '../../openwrt/main/binding'
-import type { Lease, OpenWrtOverview, OpenWrtSeriesPoint } from '../../openwrt/main/types'
+import type { OpenWrtOverview, OpenWrtSeriesPoint } from '../../openwrt/main/types'
 import { moduleHarness, sharedModuleConfig } from '../helpers/module-harness'
+import {
+  assignment,
+  fakeWanbind,
+  instanceConfig,
+  instanceState,
+  routerModel,
+  waiting,
+  wanbindClient
+} from '../helpers/wanbind'
 
 /**
  * Everything a page reads instead of computing for itself.
@@ -308,151 +305,143 @@ describe('the dashboard payload', () => {
 // openwrt-pppoe-guards.test.ts against the daemon contract; the SSH-era
 // describe that lived here tested rows the module no longer builds.
 
+/**
+ * The rows the WAN Binding pages render, built from the daemon's answers.
+ *
+ * Every one of these was a claim about the module's own planner until 3.4.0.
+ * The planner is the router's now and is tested there - `wanbind-direct` and
+ * `wanbind-generator` in `packages/ci/probes/` drive the real ucode - so what
+ * is left on this side, and what these four cases are about, is the same thing
+ * the rest of this file is about: what a page reads instead of computing it
+ * for itself. A JSON spec cannot turn a state word into a colour, a router
+ * second into a moment on this clock, or four counters into the two that are
+ * not zero.
+ */
 describe('the binding payload', () => {
-  const NOW = 1_700_000_000_000
-  const INSTANCE: BindingPlannerInstance = {
-    id: 'bind_1',
-    running: true,
-    sticky: true,
-    remap: true
+  const INSTANCE = 'bmi_office'
+  /** Router seconds, which is what every timestamp in a reply is measured in. */
+  const nowSec = (): number => Math.floor(Date.now() / 1_000)
+
+  /** One pool WAN, as the fast sweep sees it - the daemon does not report this. */
+  const poolModel = (up: boolean) =>
+    routerModel({
+      ifaces: [
+        {
+          name: 'pd00001',
+          proto: 'pppoe',
+          device: 'eth1',
+          l3Device: 'pppoe-pd00001',
+          up,
+          pending: false,
+          autostart: true,
+          uptimeSec: up ? 3_600 : 0,
+          ip4Table: 10_001,
+          ...(up ? { ipv4: { addr: '198.51.100.1', mask: 32 } } : { errorCode: 'LINK_LOST' })
+        }
+      ]
+    })
+
+  async function seated(options: { up?: boolean; agoSec?: number }) {
+    const client = wanbindClient({
+      model: poolModel(options.up ?? true),
+      daemon: fakeWanbind({
+        configured: [instanceConfig({ id: INSTANCE })],
+        assignments: [
+          assignment({
+            instance: INSTANCE,
+            wan: 'pd00001',
+            assignedAt: nowSec() - (options.agoSec ?? 0)
+          })
+        ]
+      })
+    })
+    await client.tick()
+    const rows = client.manager.rows(INSTANCE)
+    client.dispose()
+    return rows
   }
-  const POLICY: BindingPlannerPolicy = {
-    rulePrefBase: 20_000,
-    catchAllPrefBase: 29_900,
-    ruleChunkLines: 500,
-    wanErrorGraceSec: 30,
-    wanWarnUptimeSec: 0,
-    releaseGraceSec: 300,
-    maxEvents: 200
-  }
-  const lease = (mac: string, ip: string, host: string): Lease => ({
-    mac,
-    ip,
-    host,
-    expires: Math.floor(NOW / 1_000) + 3_600
-  })
-  const wan = (
-    name: string,
-    table: number,
-    overrides: Partial<BindingPlannerWan> = {}
-  ): BindingPlannerWan => ({
-    name,
-    table,
-    up: true,
-    pending: false,
-    ipv4: `198.51.100.${table % 250}`,
-    uptimeSec: 3_600,
-    ...overrides
-  })
-  const input = (overrides: Partial<BindingReconcileInput> = {}): BindingReconcileInput => ({
-    now: NOW,
-    instance: INSTANCE,
-    lanCidr: '192.168.10.0/24',
-    leases: [lease('00:11:22:33:44:55', '192.168.10.2', 'phone')],
-    rules: [],
-    wans: [wan('pd00001', 10_001)],
-    tableToWan: [[10_001, 'pd00001']],
-    sticky: [],
-    policy: POLICY,
-    randomSeed: 7,
-    ...overrides
+
+  it('says when a device was bound, not only how long ago it was at the time', async () => {
+    const [row] = await seated({})
+
+    // The router counts in whole seconds on its own wall clock and this side
+    // counts in milliseconds on the app's; passed through raw, every seat reads
+    // as taken in 1970.
+    expect(row?.assignedAt).toBeGreaterThan(1_600_000_000_000)
+    expect(labels(row?.wanStatusBadges)).toEqual(['bound'])
+    expect(row?.wanStatusBadges[0].color).toBe(BADGE.good)
+    // The frozen label stops counting the moment it is emitted; `assignedAt` is
+    // what the renderer keeps counting from.
+    expect(row?.sinceLabel).toBe('0s')
   })
 
-  it('says when a device was bound, not only how long ago it was at the time', () => {
-    const result = planBindingReconciliation(input())
-
-    const [row] = result.assignments
-    expect(row.assignedAt).toBe(NOW)
-    expect(labels(row.wanStatusBadges)).toEqual(['bound'])
-    expect(row.wanStatusBadges[0].color).toBe(BADGE.good)
-    // The frozen label stays for compatibility, and stops counting the moment
-    // it is emitted; `assignedAt` is what the renderer keeps counting from.
-    expect(row.sinceLabel).toBe('0s')
-  })
-
-  it('colours an assignment whose WAN broke under it', () => {
+  it('colours an assignment whose WAN broke under it', async () => {
     // A dead WAN is never handed out in the first place, so the only way a row
     // carries a status other than `bound` is a link that dropped after the
-    // device was put on it - inside the error grace, before the remap.
-    const healthy = planBindingReconciliation(input())
-    const degraded = planBindingReconciliation(
-      input({
-        now: NOW + 5_000,
-        memory: healthy.memory,
-        rules: healthy.desired.map((entry) => ({
-          pref: entry.pref,
-          from: `${entry.ip}/32`,
-          table: entry.table
-        })),
-        wans: [wan('pd00001', 10_001, { up: false, ipv4: '', uptimeSec: 0, errorCode: 'LINK_LOST' })]
-      })
-    )
+    // device was put on it. The daemon does not report a WAN's live condition -
+    // it answers for its own rules - so this comes off the same sweep the
+    // Overview reads, which is what stops one page calling a line down while
+    // the other calls it up.
+    const [row] = await seated({ up: false, agoSec: 5 })
 
-    const [row] = degraded.assignments
-    expect(labels(row.wanStatusBadges)).toEqual(['error'])
-    expect(row.wanStatusBadges[0].color).toBe(BADGE.bad)
+    expect(labels(row?.wanStatusBadges)).toEqual(['error'])
+    expect(row?.wanStatusBadges[0].color).toBe(BADGE.bad)
     // Still the moment it was bound, not the moment the WAN failed.
-    expect(row.assignedAt).toBe(NOW)
-    expect(row.sinceLabel).toBe('5s')
+    expect(row?.sinceLabel).toBe('5s')
   })
 
-  it('chips a queued device by whether it is held or simply waiting', () => {
-    const queued = planBindingReconciliation(input({ wans: [], tableToWan: [] }))
-
-    expect(queued.waiting[0].held).toBe(false)
-    expect(labels(queued.waiting[0].holdBadges)).toEqual(['waiting'])
-    expect(queued.waiting[0].holdBadges[0].color).toBe(BADGE.warn)
-
-    // A device someone unassigned by hand is held out of the queue; the row
-    // used to say so only in a `heldLabel` column nothing rendered.
-    const heldOut = planBindingReconciliation(
-      input({
-        wans: [],
-        tableToWan: [],
-        memory: { ...queued.memory, heldMacs: ['00:11:22:33:44:55'] }
+  it('chips a queued device by whether it is held or simply waiting', async () => {
+    const client = wanbindClient({
+      daemon: fakeWanbind({
+        configured: [instanceConfig({ id: INSTANCE })],
+        instances: [instanceState({ id: INSTANCE, waiting: 1, held: 1, devices: 2 })],
+        waiting: [
+          waiting({ instance: INSTANCE, mac: 'aa:bb:cc:dd:ee:02', why: 'queued' }),
+          // A device someone unassigned by hand is held out of the queue; the
+          // row used to say so only in a `heldLabel` column nothing rendered.
+          waiting({
+            instance: INSTANCE,
+            mac: 'aa:bb:cc:dd:ee:03',
+            order: 0,
+            held: true,
+            why: 'held'
+          })
+        ]
       })
-    )
-    expect(heldOut.waiting[0].held).toBe(true)
-    expect(labels(heldOut.waiting[0].holdBadges)).toEqual(['held'])
+    })
+    await client.tick()
+    const rows = client.manager.waitingRows(INSTANCE)
+    client.dispose()
+
+    expect(rows[0]?.held).toBe(false)
+    expect(labels(rows[0]?.holdBadges)).toEqual(['waiting'])
+    expect(rows[0]?.holdBadges[0].color).toBe(BADGE.warn)
+
+    expect(rows[1]?.held).toBe(true)
+    expect(labels(rows[1]?.holdBadges)).toEqual(['held'])
   })
 
   it('summarises an instance by what is not zero', async () => {
-    const harness = moduleHarness(
-      'openwrt',
-      (command) =>
-        command.includes('===SYS===')
-          ? ok(sweepOutput({ dump: JSON.stringify({ interface: [LAN_DUMP] }) }))
-          : ok(''),
-      {
-        config: sharedModuleConfig(null),
-        hostData: {
-          version: 1,
-          instances: [
-            {
-              id: 'bind_1',
-              name: 'Office',
-              lan: 'lan',
-              carrier: 'eth1',
-              running: false,
-              sticky: true,
-              remap: true
-            }
-          ]
-        }
-      }
-    )
-    const runtime = activate(harness.ctx)
+    const running = wanbindClient({
+      daemon: fakeWanbind({
+        configured: [instanceConfig({ id: INSTANCE })],
+        instances: [instanceState({ id: INSTANCE, bound: 2, waiting: 1, devices: 3 })]
+      })
+    })
+    await running.tick()
+    // Two counters out of six, because the other four are zero and a chip
+    // reading `0 dialing` is a number to read and discard.
+    expect(labels(running.manager.list()[0]?.stateBadges)).toEqual(['1 waiting', '2 bound'])
+    running.dispose()
 
-    await harness.ticks[0]()
-
-    const snapshot = harness.emit.mock.calls
-      .filter((call) => call[0] === 'binding')
-      .map((call) => call[1] as { rows: Array<{ stateBadges: ValueBadge[] }> })
-      .at(-1)
-    expect(labels(snapshot?.rows[0].stateBadges)).toEqual(['stopped'])
-    runtime.dispose?.()
-    harness.revoke()
-    expect(harness.afterStopCalls).toEqual([])
+    const stopped = wanbindClient({
+      daemon: fakeWanbind({ configured: [instanceConfig({ id: INSTANCE, enabled: false })] })
+    })
+    await stopped.tick()
+    // And a section that is switched off says only that: counts of zero beside
+    // it would describe a healthy empty instance rather than a stopped one.
+    expect(labels(stopped.manager.list()[0]?.stateBadges)).toEqual(['stopped'])
+    stopped.dispose()
   })
 })
 
@@ -611,10 +600,10 @@ describe('the jobs payload', () => {
 })
 
 describe('the settings rules form', () => {
-  function editor(topology: RulesTopology = 'none'): { rules: RulesEditor; config: ConfigStore } {
+  function editor(): { rules: RulesEditor; config: ConfigStore } {
     const harness = moduleHarness('openwrt', () => ok(''), { config: sharedModuleConfig(null) })
     const config = new ConfigStore(harness.ctx)
-    return { rules: new RulesEditor(harness.ctx, config, () => topology), config }
+    return { rules: new RulesEditor(harness.ctx, config), config }
   }
 
   const apply = (rules: RulesEditor, values: Record<string, unknown>): void => {
@@ -674,79 +663,26 @@ describe('the settings rules form', () => {
     expect(config.effectiveRules().autoRepairTables).toBe(true)
   })
 
-  it('still refuses a locked key, measured against what is in force', () => {
-    const { rules } = editor('present')
+  it('puts every rule back on reset, with nothing held over', () => {
+    // Three numbers here used to be locked while a record existed on the
+    // router, because the rules standing there had been written against them.
+    // The router stamps each section with the band it was created under and
+    // re-reads them itself from packages 2.4.0, so there is nothing left on any
+    // router this could contradict - and the lock's cost was real: one record
+    // and "Reset every rule" did nothing at all, so the grace periods and the
+    // lease file could not be reset without deleting the instance first.
+    const { rules, config } = editor()
+    apply(rules, { catchAllTable: '31000', releaseGraceSec: '600' })
 
-    // Same value as the current one: nothing changes, so nothing is locked.
-    expect(rules.check({ catchAllTable: String(DEFAULT_RULES.catchAllTable) }).ok).toBe(true)
-    const moved = rules.check({ catchAllTable: '31000' })
-    expect(moved.ok).toBe(false)
-    expect(moved.findings.some((finding) => finding.level === 'error')).toBe(true)
-  })
-
-  it('locks the layout when it cannot tell whether this router has records', () => {
-    // The records are per-machine, the rules are global: no connected host
-    // means no evidence either way, and the old boolean read that as "none".
-    // On a router carrying live binding rules, that unlocked the preference
-    // range the next reconcile would have written into.
-    const { rules } = editor('unknown')
-
-    expect(rules.check({ stickyCap: '2000' }).ok).toBe(true)
-    const moved = rules.check({ catchAllTable: '31000' })
-    expect(moved.ok).toBe(false)
-    expect(moved.findings.some((finding) => finding.label.includes('no router is connected'))).toBe(
-      true
-    )
     expect(rules.reset()).toEqual({ ok: true })
-  })
-
-  it('keeps a locked rule on reset instead of refusing the whole thing', () => {
-    const known = editor('none')
-    apply(known.rules, { catchAllTable: '31000', stickyCap: '2000' })
-    expect(known.config.effectiveRules().catchAllTable).toBe(31_000)
-
-    // Same ConfigStore contents, but now nothing can vouch for the router.
-    // Reset used to refuse outright here, so one locked override made every
-    // unlocked rule - grace periods, the lease file - permanently
-    // unresettable without deleting the router's records first.
-    const blind = new RulesEditor(
-      moduleHarness('openwrt', () => ok(''), { config: sharedModuleConfig(null) }).ctx,
-      known.config,
-      () => 'unknown'
-    )
-    const result = blind.reset()
-
-    expect(result.ok).toBe(true)
-    expect(known.config.effectiveRules().stickyCap).toBe(DEFAULT_RULES.stickyCap)
-    expect(known.config.effectiveRules().catchAllTable).toBe(31_000)
-    // And it says which one it kept, and what to do about it.
-    expect(result.data).toContain('catchAllTable')
-    expect(result.data).toContain('no router is connected')
-  })
-
-  it('says why a locked rule survived a reset when records exist', () => {
-    const { rules, config } = editor('none')
-    apply(rules, { catchAllTable: '30000', releaseGraceSec: '600' })
-
-    const withRecords = new RulesEditor(
-      moduleHarness('openwrt', () => ok(''), { config: sharedModuleConfig(null) }).ctx,
-      config,
-      () => 'present'
-    )
-    const result = withRecords.reset()
-
-    expect(result.ok).toBe(true)
+    expect(config.effectiveRules().catchAllTable).toBe(DEFAULT_RULES.catchAllTable)
     expect(config.effectiveRules().releaseGraceSec).toBe(DEFAULT_RULES.releaseGraceSec)
-    expect(config.effectiveRules().catchAllTable).toBe(30_000)
-    expect(result.data).toContain('catchAllTable')
-    expect(result.data).toContain('binding instances')
   })
 
   it('re-derives at apply time instead of writing the checked snapshot', () => {
     // The token used to carry the whole merged document, so a save made ten
-    // minutes later reverted every override written in between - and wrote its
-    // frozen locked values straight past the lock that had approved them.
-    const { rules, config } = editor('none')
+    // minutes later reverted every override written in between.
+    const { rules, config } = editor()
 
     const report = rules.check({ stickyCap: '2000' })
     expect(report.ok).toBe(true)
@@ -760,21 +696,6 @@ describe('the settings rules form', () => {
     expect(config.effectiveRules()).toMatchObject({ stickyCap: 2_000, releaseGraceSec: 600 })
   })
 
-  it('refuses at apply time when the lock closed after the check', () => {
-    let topology: RulesTopology = 'none'
-    const harness = moduleHarness('openwrt', () => ok(''), { config: sharedModuleConfig(null) })
-    const config = new ConfigStore(harness.ctx)
-    const rules = new RulesEditor(harness.ctx, config, () => topology)
-
-    const report = rules.check({ catchAllTable: '31000' })
-    expect(report.ok).toBe(true)
-    if (!report.ok) return
-    // An instance is created - or the router disconnects - before Save lands.
-    topology = 'present'
-
-    expect(rules.apply({ token: report.token, values: { catchAllTable: '31000' } }).ok).toBe(false)
-    expect(config.effectiveRules().catchAllTable).toBe(DEFAULT_RULES.catchAllTable)
-  })
 })
 
 describe('the hints flag', () => {

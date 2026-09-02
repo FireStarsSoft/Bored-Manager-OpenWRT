@@ -2,16 +2,11 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import type { ModuleExecResult } from '@shared/modules'
 import activate from '../../openwrt/main/index'
-import { BindingEngine } from '../../openwrt/main/binding'
-import { ConfigStore, DEFAULT_RULES, type OwrtRules } from '../../openwrt/main/config'
+import { ConfigStore, DEFAULT_RULES } from '../../openwrt/main/config'
 import { Queries } from '../../openwrt/main/queries'
-import {
-  MANAGED_PREF_CEILING,
-  recordLayout,
-  type ManagedLayout
-} from '../../openwrt/main/records'
+import { MANAGED_PREF_CEILING } from '../../openwrt/main/records'
 import { buildFastSweepCommand } from '../../openwrt/main/service'
-import { HostStore } from '../../openwrt/main/store'
+import { HostStore, normalize, type BindingInstanceRecord } from '../../openwrt/main/store'
 import type { RouterModel } from '../../openwrt/main/types'
 import { textField } from '../../openwrt/main/util'
 import { moduleHarness, sharedModuleConfig } from '../helpers/module-harness'
@@ -24,19 +19,21 @@ import { moduleHarness, sharedModuleConfig } from '../helpers/module-harness'
  * and an edit to `catchAllPrefBase`, and a lock is not a guarantee: it opens
  * whenever the last record is deleted, it opens on a machine that has no
  * records of its own, and it never covered a config file edited by hand. The
- * six values are stamped onto every batch and every instance instead.
+ * layout is stamped onto the record instead.
+ *
+ * From packages 2.4.0 nothing here writes a rule at those numbers: the daemon
+ * owns every one of them and reads each section's own stamped priorities back
+ * out of `/etc/config/bm_wanbind` on every pass, which `wanbind-config` in
+ * `packages/ci/probes/` checks against the real daemon.
+ * The stamp still matters on this side for exactly one reason, and it is why
+ * the two cases below stay - `wanbind/handover.ts` reads `record.layout` to
+ * tell the daemon which priorities the rules already standing were written at,
+ * and a stamp that came back half-read would have it adopt one number and
+ * allocate the other: two copies of every rule, and the first set left with no
+ * owner.
  */
 
 const ok = (stdout = '', stderr = '', code = 0): ModuleExecResult => ({ code, stdout, stderr })
-
-/** The layout every record below was created under. */
-const STAMPED: ManagedLayout = {
-  tableBase: DEFAULT_RULES.tableBase,
-  rulePrefBase: DEFAULT_RULES.rulePrefBase,
-  catchAllPrefBase: DEFAULT_RULES.catchAllPrefBase,
-  catchAllTable: DEFAULT_RULES.catchAllTable,
-  zoneName: DEFAULT_RULES.zoneName
-}
 
 const MODEL: RouterModel = {
   t: 1_700_000_000_000,
@@ -72,84 +69,38 @@ const MODEL: RouterModel = {
   rates: {}
 }
 
-/**
- * A router carrying one instance created under the default layout, and a
- * config that has since been edited to a different one.
- */
-function fixture(edited: Partial<OwrtRules>): {
-  engine: BindingEngine
-  scripts: string[]
-  model: RouterModel
-} {
-  const harness = moduleHarness('openwrt', () => ok(), {
-    hostData: {
-      version: 1,
-      nextSeq: 2,
-      batches: [
-        {
-          id: 'b1',
-          name: 'Home',
-          prefix: 'pd',
-          carrier: 'eth1',
-          createdAt: 1,
-          count: 1,
-          seqFrom: 1,
-          seqTo: 1,
-          layout: { ...STAMPED }
-        }
-      ],
-      instances: [
-        {
-          id: 'bind1',
-          name: 'Office LAN',
-          lan: 'lan',
-          carrier: 'eth1',
-          running: true,
-          sticky: true,
-          remap: true,
-          createdAt: 1,
-          slot: 0,
-          layout: { ...STAMPED }
-        }
-      ],
-      extraTables: [],
-      stickyMap: [],
-      events: [],
-      moduleEvents: [],
-      jobs: []
-    }
-  })
-  const scripts: string[] = []
-  harness.exec.mockImplementation(async (command, options) => {
-    if (command === 'sh -s') scripts.push(options?.stdin ?? '')
-    return ok()
-  })
-  const rules: OwrtRules = { ...DEFAULT_RULES, ...edited }
-  const store = new HostStore(harness.ctx, () => rules)
+/** One instance record, with whatever the case under test wants stamped on it. */
+function instanceRecord(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    engine: new BindingEngine(harness.ctx, store, { rules: () => rules }),
-    scripts,
-    model: structuredClone(MODEL)
+    id: 'bind1',
+    name: 'Office LAN',
+    lan: 'lan',
+    carrier: 'eth1',
+    running: false,
+    sticky: true,
+    remap: true,
+    createdAt: 1,
+    slot: 0,
+    ...over
   }
 }
 
-describe('a rule change under a running router', () => {
-  it('keeps writing an instance catch-all at the numbers it was created with', async () => {
-    // The whole layout moved after this instance was installed: a different
-    // safety-rule base and a different unreachable table. Read live, the next
-    // reconcile would add a second catch-all at 25000 and leave the real one
-    // at 29900 in place - two rules, and nothing that ever removes either.
-    const run = fixture({ catchAllPrefBase: 25_000, catchAllTable: 25_500 })
-
-    await run.engine.onSample(run.model)
-
-    const written = run.scripts.join('\n')
-    expect(written).toContain(`pref ${DEFAULT_RULES.catchAllPrefBase}`)
-    expect(written).toContain(`lookup ${DEFAULT_RULES.catchAllTable}`)
-    expect(written).not.toContain('pref 25000')
-    expect(written).not.toContain('lookup 25500')
+/** That record after a round trip through the reader every caller goes via. */
+function stored(record: Record<string, unknown>): BindingInstanceRecord {
+  const data = normalize({
+    version: 3,
+    instances: [record],
+    direct: [],
+    extraTables: [],
+    stickyMap: [],
+    events: [],
+    moduleEvents: [],
+    jobs: []
   })
+  return data.instances[0]!
+}
 
+describe('a rule change under a running router', () => {
   it('names a pool session from the table the dump reports, whatever the rules say', () => {
     // The table base rule was edited to 12000 after this pool member was
     // created against 10000. Its table arrives with the dump (`ip4Table`),
@@ -168,54 +119,47 @@ describe('a rule change under a running router', () => {
     expect(queries.deviceRows()[0]).toMatchObject({ ip: '192.168.1.20', wan: 'pd00001' })
   })
 
-  it('falls back to the live rules for a record written before this existed', () => {
-    // Records from an earlier build carry no layout at all, and the rules in
-    // force are the only answer available for them - which is what that build
-    // used on every single use anyway.
-    expect(recordLayout({}, DEFAULT_RULES)).toMatchObject({
-      catchAllTable: DEFAULT_RULES.catchAllTable,
-      zoneName: DEFAULT_RULES.zoneName
-    })
-    expect(recordLayout(undefined, DEFAULT_RULES).tableBase).toBe(DEFAULT_RULES.tableBase)
+  it('carries no layout at all for a record written before this existed', () => {
+    // Records from an earlier build have no stamp, and a half-written one is
+    // treated exactly the same way: all five values or none. There is nothing
+    // left on this side to fall back to - the handover simply sends no numbers
+    // and lets the daemon allocate, which is the only honest answer once no
+    // priority band is this module's to derive.
+    expect(stored(instanceRecord()).layout).toBeUndefined()
+    expect(
+      stored(
+        instanceRecord({
+          layout: {
+            tableBase: 9_000,
+            rulePrefBase: 19_000,
+            catchAllPrefBase: 28_000,
+            catchAllTable: 28_999
+          }
+        })
+      ).layout
+    ).toBeUndefined()
   })
 
   it('reads a stamped layout back off a stored record', () => {
-    const harness = moduleHarness('openwrt', () => ok(), {
-      hostData: {
-        version: 1,
-        nextSeq: 2,
-        instances: [
-          {
-            id: 'bind1',
-            name: 'Office LAN',
-            lan: 'lan',
-            carrier: 'eth1',
-            running: false,
-            sticky: true,
-            remap: true,
-            createdAt: 1,
-            slot: 0,
-            layout: {
-              tableBase: 9_000,
-              rulePrefBase: 19_000,
-              catchAllPrefBase: 28_000,
-              catchAllTable: 28_999,
-              zoneName: 'oldpool',
-              // Written by an earlier build; ignored on the way back in.
-              zoneMode: 'networks'
-            }
-          }
-        ],
-        extraTables: [],
-        stickyMap: [],
-        events: [],
-        moduleEvents: [],
-        jobs: []
-      }
-    })
-    const instance = new HostStore(harness.ctx, () => DEFAULT_RULES).read().instances[0]
+    // What the handover sends the daemon: the numbers the rules already on this
+    // router were written at, whatever the settings say today. Read through the
+    // store rather than off the document, because the store is what the
+    // handover reads and it is where a value can be dropped in silence.
+    const instance = stored(
+      instanceRecord({
+        layout: {
+          tableBase: 9_000,
+          rulePrefBase: 19_000,
+          catchAllPrefBase: 28_000,
+          catchAllTable: 28_999,
+          zoneName: 'oldpool',
+          // Written by an earlier build; ignored on the way back in.
+          zoneMode: 'networks'
+        }
+      })
+    )
 
-    expect(recordLayout(instance, DEFAULT_RULES)).toEqual({
+    expect(instance.layout).toEqual({
       tableBase: 9_000,
       rulePrefBase: 19_000,
       catchAllPrefBase: 28_000,

@@ -84,15 +84,44 @@ export const POOL_AGENT_INFO: Record<string, unknown> = {
   ]
 }
 
-/** The same agent with the binding daemon beside it, which binds over netlink. */
+/**
+ * The same agent with the binding daemon beside it, which binds over netlink.
+ *
+ * `apiVersion: 2` is the whole of packages 2.4.0 from this side: the daemon
+ * owns the instances, the one-to-one bindings and every ip rule, and the module
+ * writes none of them. It is what `hasBindingDaemon` measures against
+ * `WANBIND_API`, so a fixture left at 1 is a router this module refuses to
+ * drive - every binding surface reads "update the router packages" and no test
+ * about a table gets as far as a table.
+ */
 export const BINDING_AGENT_INFO: Record<string, unknown> = {
   ...AGENT_INFO,
-  release: '2.0.1',
+  release: '2.4.0',
   schema: 2,
   dataSchema: 2,
-  provides: ['binding'],
+  provides: ['binding', 'direct'],
   features: [
-    { name: 'bm-wanbind', version: '2.0.1', apiVersion: 1, provides: ['binding'] }
+    { name: 'bm-wanbind', version: '2.4.0', apiVersion: 2, provides: ['binding', 'direct'] }
+  ]
+}
+
+/**
+ * The release before it: it owns instances and one-to-one bindings, and speaks
+ * the contract generation this module has stopped driving.
+ *
+ * Kept because "the package is there and this module cannot drive it" is a
+ * router somebody will really have - it is every router that took 2.3.0 - and
+ * it is the only one that gets the "update the router packages" sentence rather
+ * than the "install them" one.
+ */
+export const OLD_BINDING_AGENT_INFO: Record<string, unknown> = {
+  ...AGENT_INFO,
+  release: '2.3.0',
+  schema: 2,
+  dataSchema: 2,
+  provides: ['binding', 'direct'],
+  features: [
+    { name: 'bm-wanbind', version: '2.3.0', apiVersion: 1, provides: ['binding', 'direct'] }
   ]
 }
 

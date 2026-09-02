@@ -4,74 +4,57 @@
  * The monitor is the only collector in this module that exists purely to be
  * looked at. Nothing reconciles against it and nothing acts on it, which is
  * what makes the gate in `tick` the most important line in the file: a router
- * nobody has the Monitor page open on must not be paying for an SSH round trip
- * every minute, forever, for a table no one will read. The readiness poller
- * gates itself on `streamActive('capabilities')` for exactly that reason and
- * this copies it - the page's own `{kind:'stream', event:'monitor'}` sources
- * are what arm it, and closing the page disarms it again.
+ * nobody has the Monitor page open on must not be paying for a round trip every
+ * minute, forever, for a table no one will read. The readiness poller gates
+ * itself on `streamActive('capabilities')` for exactly that reason and this
+ * copies it - the page's own `{kind:'stream', event:'monitor'}` sources are what
+ * arm it, and closing the page disarms it again.
  *
  * `scanNow()` is the button beside that: it forces a pass whether or not
  * anything is watching, because a person pressing it *is* the thing watching.
- * It still refuses politely on a disconnected machine, in the same words the
- * `sweepNow` handler uses, rather than putting a command on a wire with nothing
- * at the other end.
+ * It still refuses politely on a disconnected machine rather than putting a
+ * call on a wire with nothing at the other end.
+ *
+ * A pass is now one `bm.wanbind` call. There is no shell command here any more
+ * and there must not be one again: the daemon reads both netlink dumps in one
+ * place, holds the sections those rules were written against, and is therefore
+ * the only half that can say who owns a rule and be right.
  */
 import type { ModulePoller } from '@shared/modules'
 import type { OkResult } from '@shared/types'
-import { ENGINE_STOPPED } from '../binding'
+import { wanbindRules, type AgentDeps } from '../agent'
 import { RULE_BOUNDS } from '../config'
-import { classifyScan } from './classify'
-import { SCAN_COMMAND, SCAN_MAX_RULES, SCAN_TIMEOUT_MS } from './command'
-import { isKernelBaseline, parseScanOutput } from './parse'
-import type { ScanEngineOptions, ScanReadout, ScanSnapshot } from './types'
+import { bindingDaemonProblem } from '../requirements'
+import { buildScanRows, emptyScanSummary } from './rows'
+import type { ScanEngineOptions, ScanSnapshot } from './types'
 
 const NOT_CONNECTED =
   'not connected to a router - connect this machine entry, then scan again'
 
 /**
- * A scan the router could not complete is reported as a failure and never as
- * an empty table. "This router has no policy rules" is the one sentence this
- * feature must never say wrongly: it is the exact opposite of the answer a
- * person opened the page to get.
+ * The router went away, or the module was reset, while a pass was in flight.
  *
- * Both halves of the router's `else` are named, because the sentinel carries
- * one flag for two failures: `ip -4 rule show` exiting non-zero, and the
- * `mktemp` that holds its output failing first. Naming only the first sent a
- * reader whose /tmp had filled up looking at their `ip` command.
+ * Its own copy of the sentence the rest of the module uses for the same three
+ * causes. It reads like a module bug when it names an object nobody has heard
+ * of and gives no cause at all, which on a failed action is worse than useless.
  */
-const UNREADABLE =
-  'the router did not produce its ip rule table - either ip -4 rule show failed or the temporary file the scan captures it to could not be created - so this scan was discarded rather than reported as a router with no rules'
-
-const TRUNCATED =
-  'the scan reply exceeded the command output limit, so it was discarded rather than reported as a partial rule table'
-
-const NO_BASELINE =
-  'the rule table came back without the local/main/default rules every Linux router carries, so this scan was discarded rather than reported as a router with no rules'
+const SCAN_STOPPED =
+  'the router disconnected, or the module was reset, before this finished - reconnect and try again'
 
 /**
- * Whether the rule dump is a rule table at all, asked of the body rather than
- * of the sentinel.
+ * `read: false` from the daemon, which is not an empty router.
  *
- * `===SCANOK===` only says the router's `ip -4 rule show` exited zero into the
- * temporary file; it cannot say that what came back down the wire is what went
- * into it. A reply whose `===RULES===` body reads back as nothing - a section
- * eaten between the router and here, an `ip` that printed its table somewhere
- * this side never saw - would sail past the sentinel and be published as a
- * router with no policy rules, which is the single sentence this feature must
- * never say wrongly. Every Linux router alive carries `from all lookup
- * local/main/default`, so a dump holding none of those three is a read that
- * went wrong however clean it looks.
- *
- * A dump cut at the router's own cap is exempt, and has to be: the baseline
- * sits at preferences 32766 and 32767, so on a router with five hundred rules
- * below it the kernel's own three are exactly what `head` left behind. That
- * reply is reported as the truncated table it is, and refusing it here would
- * blind the monitor on the busiest routers it exists for.
+ * The one sentence this feature must never say wrongly is "this router has no
+ * policy rules": it is the exact opposite of the answer a person opened the
+ * page to get. The daemon answers `read: false` when a netlink dump would not
+ * come back, and it carries an empty rule list beside it - so the flag is read
+ * before the list, always, and a failed dump is published as a failed sweep.
  */
-export function scanRulesLookWhole(readout: ScanReadout): boolean {
-  if (readout.rulesTruncated) return true
-  return readout.rules.some(isKernelBaseline)
-}
+const UNREADABLE =
+  'the router could not read its own rule table - the kernel did not answer the dump - so this pass was discarded rather than reported as a router with no rules'
+
+/** The call worked and the daemon still refused. Rare, and worth its own words. */
+const REFUSED = 'the router refused the rule scan without saying why'
 
 /** Nothing scanned yet, which is not the same statement as a failed scan. */
 export function emptyScanSnapshot(): ScanSnapshot {
@@ -80,18 +63,10 @@ export function emptyScanSnapshot(): ScanSnapshot {
     ok: true,
     lastError: '',
     rows: [],
-    summary: {
-      total: 0,
-      byOwner: {},
-      foreign: 0,
-      unreachable: 0,
-      selectors: 0,
-      // Nothing has been read, so nothing has been cut. The cap still travels,
-      // because a surface bound to it should not have to render a blank the
-      // one time the stream arrives before the first scan lands.
-      rulesTruncated: false,
-      rulesCap: SCAN_MAX_RULES
-    }
+    // Nothing has been read, so nothing has been cut and no cap has been named:
+    // the ceiling on one reply is the daemon's number, and it travels in the
+    // reply rather than being guessed at here.
+    summary: emptyScanSummary()
   }
 }
 
@@ -109,10 +84,10 @@ export class ScanEngine {
   private appliedMs: number | null = null
   private flight: Promise<string> | null = null
   /**
-   * Bumped by every reset and by dispose. A scan takes seconds over SSH, and a
-   * host change arriving in that window used to let the reply land anyway -
-   * rows classified against the previous router's records, published onto the
-   * `monitor` stream as though they described the one now connected.
+   * Bumped by every reset and by dispose. A pass is a round trip, and a host
+   * change arriving in that window used to let the reply land anyway - rows
+   * published onto the `monitor` stream as though they described the router now
+   * connected.
    */
   private generation = 0
   private disposed = false
@@ -131,7 +106,7 @@ export class ScanEngine {
   }
 
   async scanNow(): Promise<OkResult> {
-    if (this.disposed) return { ok: false, error: ENGINE_STOPPED }
+    if (this.disposed) return { ok: false, error: SCAN_STOPPED }
     if (!this.options.ctx.connected) return { ok: false, error: NOT_CONNECTED }
     const error = await this.sweep()
     return error ? { ok: false, error } : { ok: true }
@@ -149,6 +124,11 @@ export class ScanEngine {
    * that wakes up to decide it has no work. `readiness.startPollers` calls
    * this again on the far side of every probe, so a router that becomes usable
    * arms the monitor without waiting for the next tab switch.
+   *
+   * A router with no `bm-wanbind` still arms it, and that is deliberate: the
+   * pass costs no round trip there - it stops at the capability verdict and
+   * publishes the requirement's own sentence - and that sentence, on the page
+   * somebody has open, is the whole of what they need to be told.
    */
   applyPollers(): void {
     const caps = this.options.capabilities()
@@ -184,7 +164,7 @@ export class ScanEngine {
   private async tick(): Promise<void> {
     const ctx = this.options.ctx
     if (this.disposed || !ctx.connected) return
-    // No Monitor surface open, no command. See the file header.
+    // No Monitor surface open, no call. See the file header.
     if (!ctx.streamActive('monitor')) return
     // A router the module has already judged unusable will answer this the
     // same way it answers everything else, and the capabilities card is
@@ -198,8 +178,8 @@ export class ScanEngine {
    * One pass, shared by whoever asks for it first.
    *
    * A button press arriving while a poller tick is in flight joins that tick
-   * rather than opening a second SSH command against the same router - and,
-   * more to the point, rather than racing it to publish a snapshot.
+   * rather than opening a second call against the same router - and, more to
+   * the point, rather than racing it to publish a snapshot.
    */
   private sweep(): Promise<string> {
     const existing = this.flight
@@ -211,46 +191,37 @@ export class ScanEngine {
     return pending
   }
 
+  /**
+   * What a daemon call takes, built per pass.
+   *
+   * The capability is read inside the closure rather than captured, so an `apk
+   * add` or an `apk del` on the router changes what this module can do at the
+   * next tick rather than at the next reconnect.
+   */
+  private deps(): AgentDeps {
+    return { ctx: this.options.ctx, capability: this.options.agent }
+  }
+
   /** Returns the failure sentence, or an empty string when the pass landed. */
   private async run(): Promise<string> {
-    const ctx = this.options.ctx
     const generation = this.generation
-    let result
-    try {
-      result = await ctx.exec('sh -s', { stdin: SCAN_COMMAND, timeoutMs: SCAN_TIMEOUT_MS })
-    } catch (error) {
-      // The executor's own message, not the router's output: a timeout or a
-      // dropped connection is worth reporting, and a rule table is not.
-      const detail = error instanceof Error ? error.message : String(error)
-      return this.fail(generation, `the binding scan did not complete (${detail.slice(0, 120)})`)
-    }
-    if (!this.current(generation)) return ENGINE_STOPPED
-    if (result.code === 125 || result.stderr.includes('[overflow]')) {
-      return this.fail(generation, TRUNCATED)
-    }
+    // The requirement's own words, not invented ones. No agent, no bm-wanbind
+    // and a package too old to drive are three different things to go and do,
+    // and one sentence saying "the scan failed" would send somebody to
+    // reinstall an agent they can see running.
+    const problem = bindingDaemonProblem(this.options.agent())
+    if (problem) return this.fail(generation, problem)
 
-    const readout = parseScanOutput(result.stdout)
-    if (!readout.ok) return this.fail(generation, UNREADABLE)
-    if (!scanRulesLookWhole(readout)) return this.fail(generation, NO_BASELINE)
+    const reply = await wanbindRules(this.deps())
+    if (!this.current(generation)) return SCAN_STOPPED
+    if (!reply.ok || !reply.data) return this.fail(generation, reply.error ?? REFUSED)
+    // Before the list, always. An empty `rules` beside `read: false` is the
+    // kernel declining to answer, and publishing it as a table would say the
+    // one thing this feature must never say wrongly.
+    if (!reply.data.read) return this.fail(generation, UNREADABLE)
 
-    const { rows, summary } = classifyScan({
-      readout,
-      rules: this.options.rules(),
-      model: this.options.latestModel(),
-      direct: this.options.direct(),
-      instances: this.options.instances(),
-      assignments: this.options.assignments(),
-      // What the one-to-one pass has actually got standing on the router, read
-      // here rather than derived from the records: a binding that names a MAC
-      // keeps its rule at the last address it was seen at for the whole of
-      // Lease release grace (s), and the records and the leases between them
-      // cannot say that. Read per pass like everything else, so a scan never
-      // classifies against a memory the reconcile has already moved on from.
-      installed: this.options.installed?.() ?? [],
-      routerHeld: this.options.routerHeld?.() ?? [],
-      capabilities: this.options.capabilities()
-    })
-    if (!this.current(generation)) return ENGINE_STOPPED
+    const { rows, summary } = buildScanRows(reply.data)
+    if (!this.current(generation)) return SCAN_STOPPED
     this.publish({ t: Date.now(), ok: true, lastError: '', rows, summary })
     return ''
   }

@@ -2,11 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { ModuleCheckReport } from '@shared/check'
 import type { ModuleExecResult } from '@shared/modules'
 import activate from '../../openwrt/main/index'
-import { BindingEngine } from '../../openwrt/main/binding'
-import { DEFAULT_RULES } from '../../openwrt/main/config'
-import { HostStore } from '../../openwrt/main/store'
-import type { IfaceState, RouterModel } from '../../openwrt/main/types'
 import { moduleHarness, sharedModuleConfig } from '../helpers/module-harness'
+import { BINDING_AGENT_INFO, OLD_BINDING_AGENT_INFO } from '../helpers/router'
 
 /**
  * What the module says when it will not do the thing. A refusal that names no
@@ -14,6 +11,14 @@ import { moduleHarness, sharedModuleConfig } from '../helpers/module-harness'
  * and told nothing they can act on. Several of these pointed at controls that
  * do not exist ("Run Refresh"), or reported a missing package as a router
  * misconfiguration, or - sixteen times over - named an internal object.
+ *
+ * Every refusal below now comes through `activate()` and the requirement table
+ * in `requirements.ts`, which is the only thing left that refuses a WAN Binding
+ * create on this side: the engine that used to do its own gating is gone, and
+ * `wanbind/plan.ts` behind it asks the router. The table's first entry for both
+ * halves of binding is the daemon itself, so a router carrying the packages is
+ * what makes every gate underneath it reachable at all - which is why the
+ * fixtures below hand one over.
  */
 
 const ok = (stdout = '', stderr = '', code = 0): ModuleExecResult => ({ code, stdout, stderr })
@@ -42,8 +47,32 @@ interface RouterShape {
   uid?: string
   /** The package database the probe finds, if any. */
   pkg?: string
-  /** Whether the Bored Manager agent and the 2.x pool daemon are installed. */
-  agent?: boolean
+  /**
+   * What `bm.agent info` answers, or nothing for a router with no agent at all.
+   *
+   * It matters far more than it used to. `bindingDaemon` is the first entry in
+   * the binding create's requirement list and `pppoePool` is in the pool's, so
+   * a router with no packages is refused about the packages and never reaches
+   * the gate a test is about.
+   */
+  agent?: Record<string, unknown>
+}
+
+/**
+ * A router carrying both feature packages, so the firmware-level gates
+ * underneath them are the ones that answer.
+ *
+ * Spelled out rather than reached for from `BINDING_AGENT_INFO` alone because
+ * both create forms are checked side by side below, and each wants its own
+ * daemon there before it will discuss anything else.
+ */
+const BOTH_DAEMONS: Record<string, unknown> = {
+  ...BINDING_AGENT_INFO,
+  provides: ['binding', 'direct', 'pppoe'],
+  features: [
+    { name: 'bm-wanbind', version: '2.4.0', apiVersion: 2, provides: ['binding', 'direct'] },
+    { name: 'bm-pppoe-pool', version: '2.0.0', apiVersion: 2, provides: ['pppoe'] }
+  ]
 }
 
 /**
@@ -77,22 +106,7 @@ function probeOutput(without: string[] = [], shape: RouterShape = {}): string {
     '===IPRULE===',
     ...ipRule,
     '===AGENT===',
-    ...(shape.agent
-      ? [
-          JSON.stringify({
-            name: 'bm-agent',
-            release: '2.0.0',
-            apiVersion: 3,
-            schema: 2,
-            dataSchema: 2,
-            provides: ['pppoe'],
-            features: [
-              { name: 'bm-pppoe-pool', version: '2.0.0', apiVersion: 2, provides: ['pppoe'] }
-            ],
-            guard: { armed: false }
-          })
-        ]
-      : []),
+    ...(shape.agent ? [JSON.stringify(shape.agent)] : []),
     // The sentinel that tells a router which answered from one which never
     // did. Without it every capability reads unknown, and both create gates
     // answer "The router has not been checked yet" whatever the router said.
@@ -148,7 +162,7 @@ const text = (report: ModuleCheckReport): string =>
 
 describe('a missing package is not a router misconfiguration', () => {
   it('sends a router without dnsmasq to the installer, not to /etc/config/dhcp', async () => {
-    const module = await moduleWith(['dnsmasq'])
+    const module = await moduleWith(['dnsmasq'], { agent: BINDING_AGENT_INFO })
 
     const report = await module.bindingCheck()
 
@@ -160,14 +174,20 @@ describe('a missing package is not a router misconfiguration', () => {
     module.dispose()
   })
 
-  it('still gates on the two capabilities it always did', async () => {
-    const noRules = await moduleWith(['ip-full'])
-    expect(text(await noRules.bindingCheck())).toContain('steer traffic by routing table')
-    noRules.dispose()
-
-    const noFw4 = await moduleWith(['fw4'])
+  it('still gates on the firewall, and no longer on the ip binary', async () => {
+    const noFw4 = await moduleWith(['fw4'], { agent: BINDING_AGENT_INFO })
+    // The daemon writes the firewall forwarding through fw4 exactly as this
+    // module used to, so the router needing it did not change with who writes.
     expect(text(await noFw4.bindingCheck())).toContain('Firewall4 is required')
     noFw4.dispose()
+
+    // What did change: with bm-wanbind installed no ip rule is written from
+    // here at all - every bind is a ubus call and the daemon writes netlink -
+    // so a router whose `ip` fails the numeric-table test must not have a
+    // create refused over a binary nothing on this path uses.
+    const noRules = await moduleWith(['ip-full'], { agent: BINDING_AGENT_INFO })
+    expect(text(await noRules.bindingCheck())).not.toContain('steer traffic by routing table')
+    noRules.dispose()
   })
 })
 
@@ -201,11 +221,15 @@ describe('where to install a missing package', () => {
   }
 
   it('offers to do it when the router can take it', async () => {
-    expect(await hint(await moduleWith(['dnsmasq']))).toContain('Install missing packages')
+    expect(
+      await hint(await moduleWith(['dnsmasq'], { agent: BINDING_AGENT_INFO }))
+    ).toContain('Install missing packages')
   })
 
   it('names root as the reason, rather than sending a root problem to a shell', async () => {
-    const detail = await hint(await moduleWith(['dnsmasq'], { uid: '1000' }))
+    const detail = await hint(
+      await moduleWith(['dnsmasq'], { uid: '1000', agent: BINDING_AGENT_INFO })
+    )
 
     expect(detail).toContain('needs root')
     expect(detail).toContain('Connect this machine entry as root')
@@ -215,14 +239,16 @@ describe('where to install a missing package', () => {
     // A router with no apk database cannot be talked into installing anything,
     // so this is a blocking problem rather than an install hint - and the one
     // thing that would fix it is a release, not a command in a shell.
-    const detail = await hint(await moduleWith(['dnsmasq', 'apk'], { pkg: '' }))
+    const detail = await hint(
+      await moduleWith(['dnsmasq', 'apk'], { pkg: '', agent: BINDING_AGENT_INFO })
+    )
 
     expect(detail).toContain('No apk package database on this router')
     expect(detail).toContain('25.12')
   })
 
   it('points at the blocking problem first when there is one', async () => {
-    const detail = await hint(await moduleWith(['dnsmasq', 'ubus']))
+    const detail = await hint(await moduleWith(['dnsmasq', 'ubus'], { agent: BINDING_AGENT_INFO }))
 
     expect(detail).toContain('Something more basic is in the way first')
     // The blocker itself, and the fact that no install flow can supply it.
@@ -233,7 +259,7 @@ describe('where to install a missing package', () => {
 
 describe('one missing firewall, one explanation', () => {
   it('says the same thing on both create forms, and that it is not installable', async () => {
-    const module = await moduleWith(['fw4'])
+    const module = await moduleWith(['fw4'], { agent: BOTH_DAEMONS })
 
     const binding = text(await module.bindingCheck())
     const pppoe = text(await module.pppoeCheck())
@@ -250,20 +276,39 @@ describe('one missing firewall, one explanation', () => {
 })
 
 describe('refusals name a control that exists', () => {
-  function engine(): BindingEngine {
-    const harness = moduleHarness('openwrt', () => ok())
-    const store = new HostStore(harness.ctx, () => DEFAULT_RULES)
-    return new BindingEngine(harness.ctx, store, { rules: () => DEFAULT_RULES })
-  }
+  it('sends a router with no binding daemon to the page that installs one', async () => {
+    // The first gate on both binding forms, and the one every router without
+    // the packages meets. It has to name somewhere a person can go: there is no
+    // control called "Refresh" anywhere in the four specs, and a refusal that
+    // named the object doing the refusing was worth even less.
+    const module = await moduleWith()
 
-  it('points at "Refresh now", which is the label the button really carries', async () => {
-    // There is no control called "Refresh" anywhere in the four specs; the two
-    // that run a sweep are labelled "Refresh now" and "Check again".
-    const report = await engine().check(CREATE)
+    const detail = text(await module.bindingCheck())
 
-    expect(report.ok).toBe(false)
-    expect(text(report)).toContain('Refresh now')
-    expect(text(report)).not.toMatch(/Run Refresh(?! now)/)
+    expect(detail).toContain('The binding daemon this module drives is not on this router')
+    expect(detail).toContain('Router packages')
+    expect(detail).toContain('Module settings')
+    // Nothing internal reaches a person: not the object, not the folder, not
+    // the transport it would have used.
+    expect(detail).not.toMatch(/binding engine|BindingManager|ubus/)
+    module.dispose()
+  })
+
+  it('tells a router on the older packages to update them, not to install them', async () => {
+    // The one router that has the package and still cannot be driven: 2.3.0
+    // owns instances and one-to-one bindings and speaks the contract before
+    // this one. Telling somebody to install a package they can see installed is
+    // how a sentence stops being read.
+    const module = await moduleWith([], { agent: OLD_BINDING_AGENT_INFO })
+
+    const detail = text(await module.bindingCheck())
+
+    expect(detail).toContain('speaks version 1 of its contract')
+    expect(detail).toContain('Update the router packages')
+    // And it says what is still happening meanwhile, because the rules on the
+    // router are standing and being maintained by the daemon either way.
+    expect(detail).toContain('keep working meanwhile')
+    module.dispose()
   })
 
   it('tells a disconnected user what to do, on every page that can say it', async () => {
@@ -271,7 +316,7 @@ describe('refusals name a control that exists', () => {
     // The pool daemon is on this router, so the pool gate lets the check
     // through to the one refusal this test is about: the connection.
     harness.exec.mockImplementation(async (command) =>
-      command.includes("echo '===REL==='") ? ok(probeOutput([], { agent: true })) : ok()
+      command.includes("echo '===REL==='") ? ok(probeOutput([], { agent: BOTH_DAEMONS })) : ok()
     )
     // Probe a healthy router first, then pull the link. Capabilities keep the
     // last good answer, so these two gates are reachable - which is the only
@@ -315,167 +360,5 @@ describe('a missing pool daemon points at Router packages', () => {
     expect(text(report)).toContain('The pool daemon this module drives is not on this router')
     expect(text(report)).toContain('Router packages')
     module.dispose()
-  })
-})
-
-describe('the engine never names itself to a user', () => {
-  it('says what actually happened instead of "binding engine stopped"', async () => {
-    const harness = moduleHarness('openwrt', () => ok())
-    const store = new HostStore(harness.ctx, () => DEFAULT_RULES)
-    const binding = new BindingEngine(harness.ctx, store, { rules: () => DEFAULT_RULES })
-    await binding.onSample({
-      t: 1_700_000_000_000,
-      sys: { uptimeSec: 4_000, load1: 0, memTotal: 512_000, memFree: 200_000 },
-      ifaces: [
-        {
-          name: 'lan',
-          proto: 'static',
-          device: 'br-lan',
-          l3Device: 'br-lan',
-          up: true,
-          pending: false,
-          autostart: true,
-          uptimeSec: 4_000,
-          ipv4: { addr: '192.168.1.1', mask: 24 }
-        }
-      ],
-      poolDev: { count: 0, rx: 0, tx: 0 },
-      leases: [],
-      rules: [],
-      rates: {}
-    })
-    // A module the host revoked mid-check: the sample is still in hand, so the
-    // probe is what refuses. This message reaches the user as a check finding
-    // detail and, on the apply path, as a job item message.
-    binding.dispose()
-
-    const report = await binding.check(CREATE)
-
-    expect(report.ok).toBe(false)
-    expect(text(report)).toContain('Router preparation state could not be read')
-    expect(text(report)).not.toContain('binding engine')
-    expect(text(report)).toContain('the router disconnected, or the module was reset')
-  })
-})
-
-/**
- * A tagged uplink is a carrier of its own. Plenty of ISPs hand the WAN over on
- * a VLAN, so `eth1.835` and `eth1.836` are two separate uplinks on one wire -
- * while `eth1` is every one of them at once, which is what makes it clash with
- * both rather than sit beside them.
- */
-describe('a carrier can be a VLAN on a device', () => {
-  const iface = (name: string, device: string, over: Partial<IfaceState> = {}): IfaceState => ({
-    name,
-    proto: 'static',
-    device,
-    l3Device: device,
-    up: true,
-    pending: false,
-    autostart: true,
-    uptimeSec: 4_000,
-    ...over
-  })
-
-  const SAMPLE: RouterModel = {
-    t: 1_700_000_000_000,
-    sys: { uptimeSec: 4_000, load1: 0, memTotal: 512_000, memFree: 200_000 },
-    ifaces: [
-      iface('lan', 'br-lan', { ipv4: { addr: '192.168.1.1', mask: 24 } }),
-      iface('guest', 'br-guest', { ipv4: { addr: '192.168.2.1', mask: 24 } }),
-      iface('office', 'br-office', { ipv4: { addr: '192.168.3.1', mask: 24 } }),
-      iface('wan835', 'eth1.835', { proto: 'dhcp', ipv4: { addr: '198.51.100.5', mask: 24 } }),
-      iface('wan836', 'eth1.836', { proto: 'dhcp', ipv4: { addr: '198.51.100.6', mask: 24 } })
-    ],
-    poolDev: { count: 0, rx: 0, tx: 0 },
-    leases: [],
-    rules: [],
-    // The ISP VLAN on the LAN bridge, seen on the wire before anything gave it
-    // an interface section of its own.
-    rates: { 'br-lan.10': { rx: 0, tx: 0 } }
-  }
-
-  const held = (name: string, lan: string, carrier: string, slot: number): unknown => ({
-    id: `bind_${slot}`,
-    name,
-    lan,
-    carrier,
-    running: false,
-    sticky: true,
-    remap: true,
-    createdAt: 1,
-    slot
-  })
-
-  /** The create gate, on a router that already carries `instances`. */
-  async function checkWith(
-    instances: unknown[],
-    values: Record<string, unknown>
-  ): Promise<ModuleCheckReport> {
-    const harness = moduleHarness('openwrt', () => ok(), {
-      hostData: {
-        version: 1,
-        nextSeq: 1,
-        batches: [],
-        instances,
-        extraTables: [],
-        stickyMap: [],
-        events: [],
-        moduleEvents: [],
-        jobs: []
-      }
-    })
-    const store = new HostStore(harness.ctx, () => DEFAULT_RULES)
-    const binding = new BindingEngine(harness.ctx, store, { rules: () => DEFAULT_RULES })
-    await binding.onSample(SAMPLE)
-    const report = await binding.check(values)
-    binding.dispose()
-    return report
-  }
-
-  it('lets two VLANs on one wire be two instances', async () => {
-    const report = await checkWith([held('ISP A', 'guest', 'eth1.835', 0)], {
-      name: 'ISP B',
-      lan: 'lan',
-      carrier: 'eth1.836'
-    })
-
-    expect(text(report)).toContain('Exactly two exclusive interfaces: lan + eth1.836')
-    expect(text(report)).not.toContain('already owned by another binding instance')
-  })
-
-  it('refuses the bare device beneath them, which is both of them at once', async () => {
-    const report = await checkWith(
-      [held('ISP A', 'guest', 'eth1.835', 0), held('ISP B', 'office', 'eth1.836', 1)],
-      { name: 'ISP C', lan: 'lan', carrier: 'eth1' }
-    )
-
-    expect(report.ok).toBe(false)
-    const detail = text(report)
-    expect(detail).toContain('An interface is already owned by another binding instance')
-    // Both holders, so the user is not sent to find the second one afterwards.
-    expect(detail).toContain('ISP A')
-    expect(detail).toContain('ISP B')
-  })
-
-  it('takes a VLAN on a bridge, but never the bridge itself', async () => {
-    const bridge = await checkWith([], { name: 'X', lan: 'guest', carrier: 'br-lan' })
-    expect(bridge.ok).toBe(false)
-    expect(text(bridge)).toContain('Carrier "br-lan" is not a device an instance can bind to')
-
-    const tagged = await checkWith([], { name: 'X', lan: 'guest', carrier: 'br-lan.10' })
-    expect(text(tagged)).not.toContain('is not a device an instance can bind to')
-    expect(text(tagged)).toContain('Exactly two exclusive interfaces: guest + br-lan.10')
-  })
-
-  it('still refuses a name netifd would truncate', async () => {
-    const report = await checkWith([], {
-      name: 'X',
-      lan: 'lan',
-      carrier: 'eth1234567890.10'
-    })
-
-    expect(report.ok).toBe(false)
-    expect(text(report)).toContain('within the 15 characters Linux allows')
   })
 })

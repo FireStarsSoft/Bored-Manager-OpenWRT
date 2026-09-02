@@ -13,9 +13,8 @@
  */
 import type { ModuleContext } from '@shared/modules'
 import { AgentManager, guardedJobs } from '../agent'
-import { BindingEngine } from '../binding'
+import { BindingManager } from '../wanbind'
 import { ConfigStore, RulesEditor } from '../config'
-import { DirectEngine } from '../direct'
 import { EventLog } from '../events'
 import { Jobs } from '../jobs'
 import { LimitsManager } from '../limits'
@@ -42,8 +41,7 @@ export interface OpenWrtRuntime {
   jobs: Jobs<OwrtHostData>
   service: FastSweep
   pppoe: PppoeManager
-  binding: BindingEngine
-  direct: DirectEngine
+  binding: BindingManager
   scan: ScanEngine
   queries: Queries
   rules: RulesEditor
@@ -59,8 +57,7 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
   const jobs = new Jobs<OwrtHostData>(ctx, store)
 
   let pppoe!: PppoeManager
-  let binding!: BindingEngine
-  let direct!: DirectEngine
+  let binding!: BindingManager
   let latch!: CapabilityLatch
 
   // Every job that changes the router's network configuration runs under the
@@ -75,34 +72,25 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
   // exist.
   const guarded = guardedJobs(jobs, { ctx, capability: () => latch.capabilities.agent })
   const service = new FastSweep(ctx, config, store, {
-    async onSample() {
+    onSample() {
       pppoe.onSample()
-      const model = service.latest
-      if (!model) return
-      await binding.onSample(model)
-      // After the instance half, not before: both fold their own writes back
-      // into `model.rules` so an action arriving between ticks plans against
-      // what the router now holds, and the second one to run has to see the
-      // first one's result. The two bands are disjoint, so this is about the
-      // freshness of the snapshot rather than about who wins.
-      await direct.onSample(model)
-    },
-    async onSlowSample(sample) {
-      // Only against a map the router answered for on this tick. The audit
-      // repairs and refuses on the strength of what is missing from it, and a
-      // probe that came back without its UCI section would have every managed
-      // WAN missing and no conflict visible at all.
-      if (sample.uciTablesOk) await binding.reconcileWanTables(sample.uciTables)
+      // One read of the router, and nothing written back into the sample.
+      //
+      // The two halves this replaced each folded their own rule writes into
+      // `model.rules` so that whichever ran second planned against what the
+      // router now held. Neither writes any more - the daemon owns every rule -
+      // so there is nothing to fold and no ordering to get right.
+      binding.onSample()
     },
     onRouterReboot() {
       events.record(
         'router',
         'reboot',
-        'Router reboot detected; ip rules and bindings are reapplied on the next reconcile'
+        'Router reboot detected; bm-wanbind reapplies its rules on its next pass'
       )
     },
     bindingTotals() {
-      return binding.snapshot().instances.reduce(
+      return binding.list().reduce(
         (total, instance) => ({
           bound: total.bound + instance.devices.bound,
           waiting: total.waiting + instance.devices.waiting,
@@ -121,7 +109,7 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
       )
     },
     directTotals() {
-      return direct.totals()
+      return binding.directTotals()
     },
     pppoeTotals() {
       const latest = pppoe.latest
@@ -161,43 +149,30 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
   // readiness row saying to install it.
   pppoe = new PppoeManager(ctx, config, guarded, sharedService, () => latch.capabilities.agent)
 
-  binding = new BindingEngine(ctx, store, {
-    rules: () => config.effectiveRules(),
-    jobs: guarded,
-    // Which half binds. Read per pass, never captured: `bm-wanbind` arriving or
-    // being removed lands between two readiness cycles, and the engine has to
-    // change over on the next tick rather than on the next reconnect. Hoisted
-    // like the two automations for the same reason - the latch is built from
-    // the collector, which is built from these.
-    agent: () => latch.capabilities.agent,
-    wanTables: () => service.uciTables,
-    requestDump: () => service.forceDumpNextTick(),
-    // Addresses a hand-placed one-to-one binding has already claimed. The
-    // instance planner leaves them alone entirely - it does not seat them, does
-    // not preserve a rule it finds for them and does not hold a WAN open for
-    // one - because a device carrying both rules would read as bound to a WAN
-    // its traffic never uses. Read per pass, like everything else here.
-    reservedIps: () => {
-      const model = service.latest
-      return model ? direct.reservedIps(model) : []
-    },
-    // The routing-table audit belongs to the router, not to any one binding
-    // instance, so it goes to the module ring rather than an instance's own.
-    event: (kind: string, text: string) => events.record('router', kind, text)
-  })
-
-  direct = new DirectEngine({
+  // One object for both halves of WAN Binding, because on the router they are
+  // one thing: an instance is a generator of the same address-to-table bindings
+  // somebody places by hand. Two engines here would be two caches of one
+  // daemon, able to disagree about the same router between ticks.
+  //
+  // The capability is read per call and never captured, exactly as the pool
+  // manager reads its own: `bm-wanbind` arriving or being removed lands between
+  // two readiness cycles, and that is what makes the changeover a tick rather
+  // than a reconnect.
+  binding = new BindingManager(
     ctx,
+    config,
+    guarded,
+    {
+      forceDump: () => service.forceDumpNextTick(),
+      latestModel: () => service.latest,
+      // The router's own events, not any one instance's: which half of the
+      // router a change belongs to is the daemon's business now, and this ring
+      // is what a page shows when it asks what happened while nobody looked.
+      event: (kind: string, text: string) => events.record('router', kind, text)
+    },
     store,
-    rules: () => config.effectiveRules(),
-    jobs: guarded,
-    agent: () => latch.capabilities.agent,
-    wanTables: () => service.uciTables,
-    latestModel: () => service.latest,
-    requestDump: () => service.forceDumpNextTick(),
-    event: (kind: string, text: string) => events.record('router', kind, text)
-  })
-
+    () => latch.capabilities.agent
+  )
 
   const queries = new Queries(
     () => service.latest,
@@ -205,14 +180,13 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
     config,
     store
   )
-  const rules = new RulesEditor(ctx, config, () => {
-    // The records are per-machine, the rules are global. Read off a context
-    // with no host - disconnected, or a machine entry that is not this router -
-    // "no records" is not evidence that the router has none, so the lock has to
-    // stay closed rather than open on a guess.
-    if (!ctx.connected || ctx.hostKey == null) return 'unknown'
-    return store.read().instances.length > 0 ? 'present' : 'none'
-  })
+  // No topology lock any more, and nothing to lock. The settings this editor
+  // holds were once the priority bands the rules on the router had been written
+  // against, so moving one under a live instance made the next pass fail to
+  // recognise its own work. Those numbers belong to the daemon now and are
+  // edited on Connection, under WAN Binding; what is left here is this module's
+  // own housekeeping, which no rule on any router was written against.
+  const rules = new RulesEditor(ctx, config)
 
   // Whether the fast sweep is worth its full rate on this router. Anything
   // automated here has to be reconciled every tick whether or not a surface is
@@ -227,54 +201,30 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
     ctx,
     service,
     () => {
-      if (store.read().instances.length > 0 || pppoe.poolCount() > 0) return true
+      if (binding.instanceCount() > 0 || pppoe.poolCount() > 0) return true
       return ctx.streamActive('overview') || ctx.tabActive
     },
-    // Read per probe rather than captured, because the Rules editor moves both
-    // bands while the module is running - and a probe holding the shipped
-    // defaults would report this module's own rules as competing ones.
-    () => config.effectiveRules().rulePrefBase,
-    () => config.effectiveRules().directPrefBase,
+    // Read off the daemon rather than out of this module's settings, because
+    // they are the daemon's numbers now: a probe holding the shipped defaults
+    // on a router whose bands had been moved would report the daemon's own
+    // rules as competing ones, which is the readiness card telling somebody to
+    // go and remove the thing that is working.
+    () => binding.settings().rule_pref_base,
+    () => binding.settings().direct_pref_base,
     // The monitor's own poller follows the same verdict, and is built just
     // below - so it is reached lazily, like the two automations above.
     () => scan.applyPollers()
   )
-  // The monitor reads the router's whole rule table rather than the window the
-  // collector filters to, which is the only way a rule somebody else wrote can
-  // be seen at all. Everything it needs to tell those apart from this module's
-  // own is handed to it as a closure, so it never holds a copy that could go
-  // stale between scans.
+  // The monitor asks the daemon for the router's whole rule table rather than
+  // the window the collector filters to, which is the only way a rule somebody
+  // else wrote can be seen at all - and it asks rather than works it out,
+  // because the daemon is the half that knows which sections exist and which
+  // priority bands they own. Two classifiers would be two answers about one
+  // rule.
   const scan = new ScanEngine({
     ctx,
     rules: () => config.effectiveRules(),
-    latestModel: () => service.latest,
-    direct: () => store.read().direct,
-    instances: () => store.read().instances,
-    assignments: () =>
-      binding
-        .snapshot()
-        .instances.flatMap((instance) =>
-          binding
-            .rows(instance.id)
-            .map((row) => ({ ip: row.ip, wan: row.wan, instance: instance.id }))
-        ),
-    // What the one-to-one pass actually has standing on the router, which is
-    // not what the records and the leases say between them: a binding naming a
-    // MAC keeps its rule at the last address it was seen at for the whole of
-    // Lease release grace (s). Without this the monitor files that rule - at a
-    // preference in this module's own band - under "written outside this
-    // module" for the length of every grace, and tells the reader to go and
-    // remove a rule this module owns and is about to withdraw itself.
-    installed: () => direct.rows().map((row) => ({ id: row.id, ip: row.address })),
-    // And the bindings this module holds no record of at all, because the
-    // router holds them. `store.read().direct` is empty on such a router by
-    // design, so without this the monitor called every rule the daemon wrote
-    // foreign - in this module's own voice, about its own daemon's work.
-    routerHeld: () =>
-      direct
-        .rows()
-        .filter((row) => row.pref > 0)
-        .map((row) => ({ name: row.name, wan: row.wan, ip: row.address, pref: row.pref })),
+    agent: () => latch.capabilities.agent,
     capabilities: () => latch.capabilities
   })
 
@@ -293,25 +243,28 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
     // started between reading an uninstall report and pressing the button, and
     // the refusal exists precisely so that nothing is removed from underneath
     // one.
-    // Instances from the stored records; pools from the daemon cache, which
-    // is the only record of them this side holds. A router that has not been
-    // fetched yet reports no pools, and the uninstall's own check re-reads
-    // the router before anything is removed.
-    blockers: () => {
-      const data = store.read()
+    // Both halves are read off the router, and both are read *now* rather
+    // than out of whatever the last page left behind.
+    //
+    // Neither list is this module's own record any more - instances live in
+    // /etc/config/bm_wanbind and pools in the pool daemon - so the cache
+    // backing them is filled by a page nobody need have opened. Answering from
+    // a cold one said "nothing is running" about a router carrying a live
+    // instance, and the check that exists to stop `apk del` under one let it
+    // through. Two fetches on the one screen where somebody is about to remove
+    // packages is not a cost worth optimising.
+    blockers: async () => {
+      await Promise.all([binding.refresh(), pppoe.refresh()])
       return {
-        instances: data.instances
-          .filter((instance) => instance.running)
-          .map((instance) => instance.name),
+        instances: binding.runningInstanceNames(),
         batches: pppoe.poolNames(),
-        // On a router that keeps its own bindings these live in the router's
-        // configuration and nowhere else: the handover deletes this module's
-        // record once the router confirms, deliberately, because two records of
-        // one binding is the state nothing can reason about. The cost of that
-        // choice is exactly here - `apk del bm-wanbind` takes the sections with
-        // it and this module cannot put them back - so the names have to reach
-        // the uninstall check that is the mitigation for it.
-        bindings: direct.rows().map((row) => row.name)
+        // These live in the router's own configuration and nowhere else. That
+        // is the whole shape of this release and it has one cost, which lands
+        // exactly here: `apk del bm-wanbind` takes the sections with it and
+        // this module cannot put them back, because it keeps no copy -
+        // two records of one binding is the state nothing can reason about. So
+        // the names have to reach the uninstall check, which is the mitigation.
+        bindings: binding.directNames()
       }
     }
   })
@@ -351,7 +304,6 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
     service,
     pppoe,
     binding,
-    direct,
     scan,
     queries,
     rules,
@@ -377,7 +329,7 @@ export function snapshots(runtime: OpenWrtRuntime): Record<string, unknown> {
     series: runtime.service.series,
     pppoe: runtime.pppoe.snapshot(),
     binding: runtime.binding.snapshot(),
-    direct: runtime.direct.snapshot(),
+    direct: runtime.binding.directSnapshot(),
     monitor: runtime.scan.snapshot(),
     jobs: runtime.jobs.snapshot()
   }
@@ -394,7 +346,6 @@ export function resetRuntime(runtime: OpenWrtRuntime): void {
   runtime.jobs.reset()
   runtime.pppoe.reset()
   runtime.binding.reset()
-  runtime.direct.reset()
   // The rows described one router's rule table, and nothing about them
   // survives the machine behind this context changing.
   runtime.scan.reset()
@@ -420,7 +371,6 @@ export function disposeRuntime(runtime: OpenWrtRuntime): void {
   runtime.jobs.dispose()
   runtime.pppoe.dispose()
   runtime.binding.dispose()
-  runtime.direct.dispose()
   // Its own poller, so its own stop: the host's backstop only fires when the
   // module is deactivated, not when this context changes machine.
   runtime.scan.dispose()

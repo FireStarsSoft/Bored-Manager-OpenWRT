@@ -50,11 +50,11 @@ export class AgentManager {
     return applyInstall(this.runtime, payload)
   }
 
-  uninstallCheck(values: unknown): ModuleCheckReport {
+  uninstallCheck(values: unknown): Promise<ModuleCheckReport> {
     return checkUninstall(this.runtime, values)
   }
 
-  uninstallApply(payload: unknown): OkResult {
+  uninstallApply(payload: unknown): Promise<OkResult> {
     return applyUninstall(this.runtime, payload)
   }
 

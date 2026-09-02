@@ -3,14 +3,24 @@ import { describe, expect, it } from 'vitest'
 import type { ModuleExecResult } from '@shared/modules'
 import type { OkResult } from '@shared/types'
 import activate from '../../openwrt/main/index'
-import { BindingEngine } from '../../openwrt/main/binding'
-import { ConfigStore, DEFAULT_RULES } from '../../openwrt/main/config'
-import { buildRow, type DirectState } from '../../openwrt/main/direct'
+import { ConfigStore } from '../../openwrt/main/config'
 import { FastSweep } from '../../openwrt/main/service'
-import { HostStore, type DirectBindingRecord } from '../../openwrt/main/store'
+import { HostStore } from '../../openwrt/main/store'
 import type { OpenWrtOverview, OpenWrtSeriesPoint } from '../../openwrt/main/types'
+import type { DirectRow } from '../../openwrt/main/wanbind'
 import { moduleHarness, sharedModuleConfig } from '../helpers/module-harness'
-import { isProbeCommand, routerProbeOutput } from '../helpers/router'
+import { BINDING_AGENT_INFO, isProbeCommand, routerProbeOutput } from '../helpers/router'
+import {
+  assignment,
+  binding,
+  fakeWanbind,
+  instanceConfig,
+  instanceState,
+  routerModel,
+  waiting,
+  wanbindClient,
+  type RouterBinding
+} from '../helpers/wanbind'
 
 /**
  * What the four JSON specs promise, checked against what the module can
@@ -337,37 +347,15 @@ describe('the create form table base', () => {
 
 // ----------------------------------------------------------- what a handler answers
 
-const ROUTER_TOOLS = [
-  '/sbin/ubus',
-  '/sbin/uci',
-  '/sbin/ip',
-  '/sbin/fw4',
-  '/sbin/logread',
-  '/usr/sbin/nft',
-  '/sbin/netifd',
-  '/usr/sbin/pppd',
-  '/usr/sbin/dnsmasq'
-]
-
-function probeOutput(): string {
-  return [
-    '===REL===',
-    "DISTRIB_ID='OpenWrt'",
-    "DISTRIB_RELEASE='25.12.0'",
-    '===BOARD===',
-    JSON.stringify({
-      model: 'Test Router',
-      release: { distribution: 'OpenWrt', version: '25.12.0' }
-    }),
-    '===TOOLS===',
-    ...ROUTER_TOOLS,
-    '===PPP===',
-    'plugin',
-    'kmod',
-    '===PKG===',
-    'apkdb',
-    '===DONE==='
-  ].join('\n')
+/**
+ * The capability probe, with the router-side packages on it.
+ *
+ * Every WAN Binding surface below reads through `bm.wanbind`, and the module
+ * will not open that door at all without the daemon: no packages means an empty
+ * cache and a table that is empty for a reason none of these cases are about.
+ */
+function probeAnswer(): ModuleExecResult {
+  return ok(routerProbeOutput({ agent: BINDING_AGENT_INFO }))
 }
 
 interface SweepShape {
@@ -391,31 +379,6 @@ function sweepOutput(shape: SweepShape = {}): string {
   ].join('\n')
 }
 
-const BATCH = {
-  id: 'b1',
-  name: 'Pool',
-  prefix: 'pd',
-  carrier: 'eth1',
-  createdAt: 1,
-  count: 2,
-  seqFrom: 1,
-  seqTo: 2
-}
-
-function instance(id: string, name: string, lan: string, slot: number): unknown {
-  return {
-    id,
-    name,
-    lan,
-    carrier: 'eth1',
-    running: true,
-    sticky: true,
-    remap: true,
-    createdAt: 1,
-    slot
-  }
-}
-
 function lanIface(name: string, third: number): unknown {
   return {
     interface: name,
@@ -427,32 +390,44 @@ function lanIface(name: string, third: number): unknown {
   }
 }
 
-/** A live router with two LANs, four leases and not one WAN to hand out. */
+/**
+ * A router with two instances and four clients none of them can seat.
+ *
+ * The queue is the router's: the daemon holds who is waiting, in what order and
+ * why, and answers `waiting` when its own counters say somebody is unseated -
+ * so the counts on the instance states are not decoration, they are what makes
+ * the module ask at all.
+ */
+function waitingDaemon(): ReturnType<typeof fakeWanbind> {
+  const queued = (mac: string, ip: string, host: string, instance: string, order: number) =>
+    waiting({ instance, mac, ip, host, order, why: 'queued', reason: 'no WAN is free' })
+  return fakeWanbind({
+    configured: [
+      instanceConfig({ id: 'bind1', name: 'Front of house', lan: 'lan' }),
+      instanceConfig({ id: 'bind2', name: 'Back office', lan: 'lan2', slot: 1 })
+    ],
+    instances: [
+      instanceState({ id: 'bind1', waiting: 2, devices: 2 }),
+      instanceState({ id: 'bind2', waiting: 2, devices: 2 })
+    ],
+    waiting: [
+      queued('aa:bb:cc:dd:ee:01', '192.168.1.20', 'desk', 'bind1', 1),
+      queued('aa:bb:cc:dd:ee:02', '192.168.1.21', 'phone', 'bind1', 2),
+      queued('aa:bb:cc:dd:ee:03', '192.168.2.20', 'till', 'bind2', 1),
+      queued('aa:bb:cc:dd:ee:04', '192.168.2.21', 'kiosk', 'bind2', 2)
+    ]
+  })
+}
+
 function waitingHarness(): ReturnType<typeof moduleHarness> {
   const dump = JSON.stringify({ interface: [lanIface('lan', 1), lanIface('lan2', 2)] })
-  const leases = [
-    '0 aa:bb:cc:dd:ee:01 192.168.1.20 desk *',
-    '0 aa:bb:cc:dd:ee:02 192.168.1.21 phone *',
-    '0 aa:bb:cc:dd:ee:03 192.168.2.20 till *',
-    '0 aa:bb:cc:dd:ee:04 192.168.2.21 kiosk *'
-  ].join('\n')
-  const harness = moduleHarness('openwrt', () => ok(), {
-    hostData: {
-      version: 1,
-      nextSeq: 3,
-      batches: [BATCH],
-      instances: [instance('bind1', 'Front of house', 'lan', 0), instance('bind2', 'Back office', 'lan2', 1)],
-      extraTables: [],
-      stickyMap: [],
-      events: [],
-      moduleEvents: [],
-      jobs: []
-    },
-    config: sharedModuleConfig(null)
-  })
+  const daemon = waitingDaemon()
+  const harness = moduleHarness('openwrt', () => ok(), { config: sharedModuleConfig(null) })
   harness.exec.mockImplementation(async (command) => {
-    if (command.includes("echo '===REL==='")) return ok(probeOutput())
-    if (command.includes("echo '===SYS==='")) return ok(sweepOutput({ dump, leases }))
+    if (isProbeCommand(command)) return probeAnswer()
+    const answered = daemon.answer(command)
+    if (answered) return answered
+    if (command.includes("echo '===SYS==='")) return ok(sweepOutput({ dump }))
     return ok()
   })
   return harness
@@ -464,6 +439,11 @@ function waitingHarness(): ReturnType<typeof moduleHarness> {
 
 describe('the assignments a binding drawer asks for', () => {
   it('narrows to the devices whose WAN stopped working', async () => {
+    // A dead WAN is never handed out in the first place, so the only way a row
+    // carries a status other than `bound` is a link that dropped after the
+    // daemon put the device on it. Which is why the seat comes from the daemon
+    // and the WAN's condition comes from the sweep: the daemon answers for its
+    // own rules, not for the state of a line.
     const wan = (up: boolean): unknown => ({
       interface: 'pd00001',
       up,
@@ -473,40 +453,33 @@ describe('the assignments a binding drawer asks for', () => {
       l3_device: 'pppoe-pd00001',
       ip4table: 10_001,
       uptime: 3_000,
-      'ipv4-address': [{ address: '198.51.100.1', mask: 32 }]
+      ...(up ? { 'ipv4-address': [{ address: '198.51.100.1', mask: 32 }] } : {})
     })
     let healthy = true
-    const harness = moduleHarness('openwrt', () => ok(), {
-      hostData: {
-        version: 1,
-        nextSeq: 3,
-        batches: [BATCH],
-        instances: [instance('bind1', 'Front of house', 'lan', 0)],
-        extraTables: [],
-        stickyMap: [],
-        events: [],
-        moduleEvents: [],
-        jobs: []
-      },
-      config: sharedModuleConfig(null)
-    })
-    harness.exec.mockImplementation(async (command) => {
-      if (command.includes("echo '===REL==='")) return ok(probeOutput())
-      if (command.includes("echo '===SYS==='")) {
-        const sections = sweepOutput({
-          dump: JSON.stringify({ interface: [lanIface('lan', 1), wan(healthy)] }),
-          leases: '0 aa:bb:cc:dd:ee:01 192.168.1.20 desk *'
+    const daemon = fakeWanbind({
+      configured: [instanceConfig({ id: 'bind1', name: 'Front of house', lan: 'lan' })],
+      instances: [instanceState({ id: 'bind1', bound: 1, devices: 1 })],
+      assignments: [
+        assignment({
+          instance: 'bind1',
+          mac: 'aa:bb:cc:dd:ee:01',
+          ip: '192.168.1.20',
+          host: 'desk',
+          wan: 'pd00001'
         })
-        // Once the rule is on the router the reconcile recognises its own
-        // assignment and keeps it, which is what leaves a bound device sitting
-        // on a WAN that has since failed.
+      ]
+    })
+    const harness = moduleHarness('openwrt', () => ok(), { config: sharedModuleConfig(null) })
+    harness.exec.mockImplementation(async (command) => {
+      if (isProbeCommand(command)) return probeAnswer()
+      const answered = daemon.answer(command)
+      if (answered) return answered
+      if (command.includes("echo '===SYS==='")) {
         return ok(
-          healthy
-            ? sections
-            : sections.replace(
-                '===RULES===',
-                '===RULES===\n20000:\tfrom 192.168.1.20/32 lookup 10001'
-              )
+          sweepOutput({
+            dump: JSON.stringify({ interface: [lanIface('lan', 1), wan(healthy)] }),
+            leases: '0 aa:bb:cc:dd:ee:01 192.168.1.20 desk *'
+          })
         )
       }
       return ok()
@@ -540,13 +513,14 @@ describe('a device no binding instance manages', () => {
   it('is refused by name, with the thing to do next', async () => {
     const harness = moduleHarness(
       'openwrt',
-      (command) => (isProbeCommand(command) ? ok(routerProbeOutput()) : ok()),
+      (command) => (isProbeCommand(command) ? probeAnswer() : ok()),
       { config: sharedModuleConfig(null) }
     )
     const runtime = activate(harness.ctx)
-    // All three write an ip rule, so the requirements gate wants the router read
-    // first. It is read here, and passes - which is what leaves the refusal below
-    // free to be about the device rather than about the router.
+    // All three change a seat on the router, so the requirements gate wants the
+    // router read first - and the daemon that owns those seats installed. Both
+    // are true here, which is what leaves the refusal below free to be about the
+    // device rather than about the router.
     runtime.applyPollers?.()
     await settle()
 
@@ -580,8 +554,9 @@ describe('the waiting queue on the dashboard', () => {
       reason: string
     }>
 
-    // Why a device is waiting was computed on every pass and readable only by
-    // opening the right instance's drawer on the Connection page.
+    // Why a device is waiting is the daemon's `why` code, worded here - and it
+    // was readable only by opening the right instance's drawer on the
+    // Connection page.
     expect(rows.map((row) => row.host).sort()).toEqual(['desk', 'kiosk', 'phone', 'till'])
     expect(new Set(rows.map((row) => row.instance))).toEqual(
       new Set(['Front of house', 'Back office'])
@@ -658,54 +633,27 @@ describe('the interfaces the dashboard table cannot list', () => {
   })
 })
 
-describe('the columns the two binding tables name', () => {
-  /** One one-to-one row, built by the only builder either side of the module uses. */
-  function directRow(): Record<string, unknown> {
-    const record: DirectBindingRecord = {
-      id: 'dir_000001',
-      name: 'Till at the front counter',
-      target: { kind: 'ip', ip: '192.168.1.50' },
-      wan: 'wan',
-      enabled: true,
-      whenDown: 'hold',
-      pref: DEFAULT_RULES.directPrefBase,
-      table: 42,
-      lan: 'lan',
-      slot: 0,
-      createdAt: 1
-    }
-    const entry = {
-      id: record.id,
-      ip: '192.168.1.50',
-      missingSince: 0,
-      state: 'bound' as const,
-      since: 1
-    }
-    return buildRow(record, entry, 2, DEFAULT_RULES.catchAllTable) as unknown as Record<
-      string,
-      unknown
-    >
-  }
+/** One binding as the daemon reports it, and the row this module makes of it. */
+async function directRowFor(over: Partial<RouterBinding> = {}): Promise<DirectRow> {
+  const client = wanbindClient({ daemon: fakeWanbind({ bindings: [binding(over)] }) })
+  await client.tick()
+  const row = client.manager.directSnapshot().rows[0]!
+  client.dispose()
+  return row
+}
 
-  /** One instance row, from a store holding one instance and nothing else. */
-  function instanceRow(): Record<string, unknown> {
-    const harness = moduleHarness('openwrt', () => ok(), {
-      hostData: {
-        version: 3,
-        instances: [instance('bind1', 'Front of house', 'lan', 0)],
-        direct: [],
-        extraTables: [],
-        stickyMap: [],
-        events: [],
-        moduleEvents: [],
-        jobs: []
-      },
-      config: sharedModuleConfig(null)
+describe('the columns the two binding tables name', () => {
+  /** One instance row, from a router keeping one instance and nothing else. */
+  async function instanceRow(): Promise<Record<string, unknown>> {
+    const client = wanbindClient({
+      model: routerModel(),
+      daemon: fakeWanbind({
+        configured: [instanceConfig({ id: 'bind1', name: 'Front of house', lan: 'lan' })]
+      })
     })
-    const store = new HostStore(harness.ctx, () => DEFAULT_RULES)
-    const binding = new BindingEngine(harness.ctx, store, { rules: () => DEFAULT_RULES })
-    const row = binding.list()[0] as unknown as Record<string, unknown>
-    binding.dispose()
+    await client.tick()
+    const row = client.manager.list()[0] as unknown as Record<string, unknown>
+    client.dispose()
     return row
   }
 
@@ -728,15 +676,15 @@ describe('the columns the two binding tables name', () => {
     return [...out]
   }
 
-  it('are keys the one-to-one row actually publishes', () => {
-    const row = directRow()
+  it('are keys the one-to-one row actually publishes', async () => {
+    const row = (await directRowFor()) as unknown as Record<string, unknown>
     const named = columnKeys((source) => source['method'] === 'directRows')
     expect(named.filter((key) => !(key in row))).toEqual([])
     expect(named.length).toBeGreaterThan(0)
   })
 
-  it('are keys the instance row actually publishes', () => {
-    const row = instanceRow()
+  it('are keys the instance row actually publishes', async () => {
+    const row = await instanceRow()
     const named = columnKeys(
       (source) => source['event'] === 'binding' && source['path'] === 'rows'
     )
@@ -744,12 +692,12 @@ describe('the columns the two binding tables name', () => {
     expect(named.length).toBeGreaterThan(0)
   })
 
-  it('opens the When that WAN is down select on the stored value, not on its label', () => {
+  it('opens the When that WAN is down select on the stored value, not on its label', async () => {
     // The row's edit form is initialised from a key on the row. Pointing it at
     // the human wording would leave the select matching none of its own
     // options, so it would open blank and a Save would rewrite the choice the
     // user never touched. The column renders the wording under another key.
-    const row = directRow()
+    const row = (await directRowFor()) as unknown as Record<string, unknown>
     const selects = nodes(specNamed('pages/connection.json')).filter(
       (node) => node['key'] === 'whenDown' && node['input'] === 'select'
     )
@@ -765,76 +713,68 @@ describe('the columns the two binding tables name', () => {
 })
 
 describe('the two stranded rows on the one-to-one table', () => {
+  /** The unreachable table a parked address is pointed at. */
+  const BLACKHOLE = 29_999
+  /** The kernel's main table, which `ip rule show` prints as a word. */
+  const MAIN = 254
+
   /**
-   * One one-to-one binding in a given state, with `When that WAN is down` set
-   * either way and everything else held identical - which is the whole point:
-   * these two rows differ by one stored word and by nothing else a person can
-   * see, so whatever the State column says about them has to carry it.
+   * One binding in a given state, with `When that WAN is down` set either way
+   * and everything else held identical - which is the whole point: these two
+   * rows differ by one stored word and by nothing else a person can see, so
+   * whatever the State column says about them has to carry it.
+   *
+   * The daemon points a parked binding's rule at the blackhole and a fallen-back
+   * one at main, exactly as it does for a hold, so the table each row names is
+   * part of the fixture rather than something this side works out.
    */
-  function stateRow(state: DirectState, whenDown: 'hold' | 'fallback'): ReturnType<typeof buildRow> {
-    const record: DirectBindingRecord = {
-      id: 'dir_000001',
-      name: 'Till at the front counter',
-      target: { kind: 'ip', ip: '192.168.1.50' },
-      wan: 'wan',
-      enabled: true,
+  const stateRow = (
+    state: RouterBinding['state'],
+    whenDown: 'hold' | 'fallback'
+  ): Promise<DirectRow> =>
+    directRowFor({
+      ip: '192.168.1.50',
+      state,
       whenDown,
-      pref: DEFAULT_RULES.directPrefBase,
-      table: 42,
-      lan: 'lan',
-      slot: 0,
-      createdAt: 1
-    }
-    return buildRow(
-      record,
-      {
-        id: record.id,
-        ip: '192.168.1.50',
-        missingSince: 0,
-        state,
-        since: 1
-      },
-      2,
-      DEFAULT_RULES.catchAllTable
-    )
-  }
+      table: whenDown === 'hold' ? BLACKHOLE : MAIN,
+      parkedBy: whenDown === 'hold' ? 'catch-all' : ''
+    })
 
   /** The State column as it is actually read: a row of words, left to right. */
-  const chips = (row: ReturnType<typeof buildRow>): string[] =>
-    row.stateBadges.map((badge) => badge.label)
+  const chips = (row: DirectRow): string[] => row.stateBadges.map((badge) => badge.label)
 
-  it('do not look alike, because they are opposites', () => {
+  it('do not look alike, because they are opposites', async () => {
     // Parked, the device is off the internet. Fallen back, it is on the
     // internet through the router's ordinary WAN - which for a device pinned
     // to a metered or whitelisted line is exactly what its owner was paying to
     // prevent. The row used to print the same two red chips for both.
-    expect(chips(stateRow('stranded', 'hold'))).not.toEqual(
-      chips(stateRow('stranded', 'fallback'))
+    expect(chips(await stateRow('stranded', 'hold'))).not.toEqual(
+      chips(await stateRow('stranded', 'fallback'))
     )
   })
 
-  it('say `no way out` for the parked one, in the words the held row uses', () => {
-    expect(chips(stateRow('stranded', 'hold'))).toEqual(['moved off its LAN', 'no way out'])
-    expect(chips(stateRow('held', 'hold'))).toContain('no way out')
+  it('say `no way out` for the parked one, in the words the held row uses', async () => {
+    expect(chips(await stateRow('stranded', 'hold'))).toEqual(['moved off its LAN', 'no way out'])
+    expect(chips(await stateRow('held', 'hold'))).toContain('no way out')
   })
 
-  it('say `on the main table` for the other, in the words the fallback row uses', () => {
-    expect(chips(stateRow('stranded', 'fallback'))).toEqual([
+  it('say `on the main table` for the other, in the words the fallback row uses', async () => {
+    expect(chips(await stateRow('stranded', 'fallback'))).toEqual([
       'moved off its LAN',
       'on the main table'
     ])
-    expect(chips(stateRow('fallback', 'fallback'))).toContain('on the main table')
+    expect(chips(await stateRow('fallback', 'fallback'))).toContain('on the main table')
     // The chip that would be read as "this device is offline" must not be on
     // the row of a device that is very much online.
-    expect(chips(stateRow('stranded', 'fallback'))).not.toContain('no way out')
+    expect(chips(await stateRow('stranded', 'fallback'))).not.toContain('no way out')
   })
 
-  it('name the table their own Table cell names, so the two cells cannot drift', () => {
-    const parked = stateRow('stranded', 'hold')
-    expect(parked.rule).toContain(`lookup ${DEFAULT_RULES.catchAllTable}`)
+  it('name the table their own Table cell names, so the two cells cannot drift', async () => {
+    const parked = await stateRow('stranded', 'hold')
+    expect(parked.rule).toContain(`lookup ${BLACKHOLE}`)
     expect(chips(parked)).toContain('no way out')
 
-    const fellBack = stateRow('stranded', 'fallback')
+    const fellBack = await stateRow('stranded', 'fallback')
     expect(fellBack.rule).toContain('lookup main')
     expect(chips(fellBack)).toContain('on the main table')
   })

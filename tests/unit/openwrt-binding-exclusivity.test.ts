@@ -1,293 +1,96 @@
 import { describe, expect, it } from 'vitest'
 import type { ModuleCheckReport } from '@shared/check'
-import type { ModuleExecResult } from '@shared/modules'
-import { BindingEngine } from '../../openwrt/main/binding'
-import { DEFAULT_RULES } from '../../openwrt/main/config'
-import { HostStore } from '../../openwrt/main/store'
-import type { IfaceState, RouterModel } from '../../openwrt/main/types'
-import { moduleHarness } from '../helpers/module-harness'
+import { fakeWanbind, instanceConfig, wanbindClient } from '../helpers/wanbind'
 
 /**
- * An instance owns exactly two interfaces, and it owns them alone.
+ * The two things the create form still decides for itself about an instance,
+ * and the one thing it deliberately no longer decides.
  *
  * Binding steers a client by source address only, so two instances that can see
- * the same addresses cannot be told apart: the second one's rules match the
- * first one's clients and hand them to WANs their own instance knows nothing
- * about. That makes overlapping LANs as fatal as a shared interface, and the
- * subnets are what decide it - not the interface names, which two different
- * bridges on one address range would happily disagree about.
+ * the same addresses cannot be told apart. That has not changed and it never
+ * will - what changed is who answers it. Until 3.4.0 this module worked out
+ * which interfaces an instance owned, which subnets they covered and whether a
+ * carrier was a VLAN riding on somebody else's bridge, all from a sample of
+ * device names, and refused on its own reading. The router reads its own
+ * interfaces now, with evidence per interface, and it refuses on the thing that
+ * actually collides: **overlapping address ranges on one LAN**, which is a
+ * different rule in kind from the one this file used to describe and is proved
+ * against the real daemon by `wanbind-range` in `packages/ci/probes/` - "a
+ * third that straddles them is refused", "a whole-LAN instance beside a scoped
+ * one is refused", "switching one off moves the refusal to the next one it
+ * overlaps".
  *
- * The exclusivity is checked in three places, because the check and the job are
- * minutes apart and another surface can create an instance in between.
+ * So what is left here is exactly what needs no router to answer, and both of
+ * them would otherwise have no test at all: a name another instance already
+ * carries, measured against the list the daemon last gave us, and one interface
+ * named as both ends. Everything else is asked, and the answer is shown rather
+ * than argued with.
  */
 
-const ok = (stdout = '', stderr = '', code = 0): ModuleExecResult => ({ code, stdout, stderr })
-
-const iface = (name: string, device: string, over: Partial<IfaceState> = {}): IfaceState => ({
-  name,
-  proto: 'static',
-  device,
-  l3Device: device,
-  up: true,
-  pending: false,
-  autostart: true,
-  uptimeSec: 4_000,
-  ...over
-})
-
-/**
- * Three LANs and three uplinks. `office` is the interesting one: a different
- * bridge, a different name, and a /25 sitting inside `lan`'s /24.
- */
-const SAMPLE: RouterModel = {
-  t: 1_700_000_000_000,
-  sys: { uptimeSec: 4_000, load1: 0, memTotal: 512_000, memFree: 200_000 },
-  ifaces: [
-    iface('lan', 'br-lan', { ipv4: { addr: '192.168.1.1', mask: 24 } }),
-    iface('guest', 'br-guest', { ipv4: { addr: '192.168.9.1', mask: 24 } }),
-    iface('office', 'br-office', { ipv4: { addr: '192.168.1.129', mask: 25 } }),
-    iface('wan835', 'eth1.835', { proto: 'dhcp', ipv4: { addr: '198.51.100.5', mask: 24 } }),
-    iface('wan836', 'eth1.836', { proto: 'dhcp', ipv4: { addr: '198.51.100.6', mask: 24 } }),
-    iface('wan2', 'eth2', { proto: 'dhcp', ipv4: { addr: '198.51.100.7', mask: 24 } })
-  ],
-  poolDev: { count: 0, rx: 0, tx: 0 },
-  leases: [],
-  rules: [],
-  rates: { 'br-lan.10': { rx: 0, tx: 0 } }
-}
-
-const held = (name: string, lan: string, carrier: string, slot: number): unknown => ({
-  id: `bind_${slot}`,
-  name,
-  lan,
-  carrier,
-  running: true,
-  sticky: true,
-  remap: true,
-  createdAt: 1,
-  slot
-})
+const HELD = instanceConfig({ id: 'bmi_held01', name: 'ISP A', lan: 'lan', carrier: 'eth1.835' })
 
 async function checkWith(
-  instances: unknown[],
+  configured: ReturnType<typeof instanceConfig>[],
   values: Record<string, unknown>
-): Promise<ModuleCheckReport> {
-  const harness = moduleHarness('openwrt', () => ok(), {
-    hostData: {
-      version: 1,
-      nextSeq: 1,
-      batches: [],
-      instances,
-      extraTables: [],
-      stickyMap: [],
-      events: [],
-      moduleEvents: [],
-      jobs: []
-    }
-  })
-  const store = new HostStore(harness.ctx, () => DEFAULT_RULES)
-  const binding = new BindingEngine(harness.ctx, store, { rules: () => DEFAULT_RULES })
-  await binding.onSample(SAMPLE)
-  const report = await binding.check(values)
-  binding.dispose()
-  return report
+): Promise<{ report: ModuleCheckReport; asked: Array<Record<string, unknown>> }> {
+  const daemon = fakeWanbind({ configured })
+  const client = wanbindClient({ daemon })
+  // The list a name is measured against is the router's own - this module keeps
+  // no record of an instance - so the check has to happen after a tick that
+  // read one.
+  await client.tick()
+  const report = await client.manager.createCheck(values)
+  client.dispose()
+  return { report, asked: daemon.payloads('instance_check') }
 }
 
 const text = (report: ModuleCheckReport): string =>
   report.findings.map((finding) => `${finding.label} ${finding.detail ?? ''}`).join('\n')
 
-const OWNED = 'An interface is already owned by another binding instance'
-
-describe('two binding instances cannot claim the same interface', () => {
-  it('refuses a second instance on a LAN that is already spoken for, and names the holder', async () => {
-    const report = await checkWith([held('ISP A', 'lan', 'eth1.835', 0)], {
-      name: 'ISP B',
-      lan: 'lan',
-      carrier: 'eth2'
-    })
-
-    expect(report.ok).toBe(false)
-    expect(text(report)).toContain(OWNED)
-    // The holder, so the user is not left to work out which of their instances
-    // is in the way.
-    expect(text(report)).toContain('ISP A: lan + eth1.835')
-  })
-
-  it('refuses a carrier that is a VLAN on another instance LAN bridge', async () => {
-    // `br-lan.10` is a tagged uplink an ISP might genuinely hand over, and it
-    // rides the same wire as the LAN that instance is serving. Nothing about
-    // the two names says so; `carrierScopesOverlap` on the LAN device does.
-    const report = await checkWith([held('ISP A', 'lan', 'eth1.835', 0)], {
-      name: 'ISP B',
-      lan: 'guest',
-      carrier: 'br-lan.10'
-    })
-
-    expect(report.ok).toBe(false)
-    expect(text(report)).toContain(OWNED)
-  })
-
-  it('refuses a carrier that is a VLAN on the instance own LAN bridge', async () => {
-    // No other instance involved at all: the pool would be carried on the wire
-    // it is meant to serve, so every client would be steered onto its own LAN.
-    const report = await checkWith([], { name: 'X', lan: 'lan', carrier: 'br-lan.10' })
-
-    expect(report.ok).toBe(false)
-    expect(text(report)).toContain('The LAN physical device and WAN carrier overlap')
-    expect(text(report)).toContain('br-lan')
-  })
-
-  it('refuses one interface used as both ends', async () => {
-    const report = await checkWith([], { name: 'X', lan: 'lan', carrier: 'lan' })
-
-    expect(report.ok).toBe(false)
-    expect(text(report)).toContain('The LAN logical interface and WAN carrier must be different')
-  })
-
+describe('what the create form refuses without asking the router', () => {
   it('refuses a name another instance already carries', async () => {
-    // The name reaches job labels, event rows and the app log, and it is how
-    // every refusal on this page identifies the instance in the way.
-    const report = await checkWith([held('ISP A', 'guest', 'eth1.835', 0)], {
+    // The name reaches job labels, event rows and `ctx.log` on this side before
+    // it is ever a UCI value on the router, and it is how every refusal on this
+    // page identifies the instance in the way.
+    const { report, asked } = await checkWith([HELD], {
       name: 'isp a',
-      lan: 'lan',
+      lan: 'guest',
       carrier: 'eth2'
     })
 
     expect(report.ok).toBe(false)
     expect(text(report)).toContain('An instance named "isp a" already exists')
+    // And nothing was sent. A blocking finding on this side stops before the
+    // round trip, which is what keeps a form that cannot be saved from asking
+    // the router to weigh up its interfaces first.
+    expect(asked).toHaveLength(0)
   })
 
-  it('lets two instances that share nothing exist side by side', async () => {
-    // The positive control. Without it every assertion above would pass on a
-    // check that refuses everything.
-    const report = await checkWith([held('ISP A', 'lan', 'eth1.835', 0)], {
-      name: 'ISP B',
-      lan: 'guest',
-      carrier: 'eth2'
-    })
-
-    expect(text(report)).toContain('Exactly two exclusive interfaces: guest + eth2')
-    expect(text(report)).not.toContain(OWNED)
-    expect(text(report)).not.toContain('The LAN physical device and WAN carrier overlap')
-  })
-})
-
-describe('two binding instances cannot serve overlapping LAN subnets', () => {
-  it('refuses a LAN whose subnet sits inside one another instance already has', async () => {
-    // Two different bridges, two different interface names, one address range.
-    // Every rule this module writes is "from <source> lookup <table>", so the
-    // second instance's rules would match the first instance's clients and send
-    // them out WANs the first one is not managing.
-    const report = await checkWith([held('ISP A', 'lan', 'eth1.835', 0)], {
-      name: 'ISP B',
-      lan: 'office',
-      carrier: 'eth2'
-    })
+  it('refuses one interface used as both ends', async () => {
+    // The pool would be carried on the wire it is meant to serve, so every
+    // client would be steered onto its own LAN. Nothing about the router is
+    // needed to see it: it is the same name twice.
+    const { report, asked } = await checkWith([], { name: 'X', lan: 'lan', carrier: 'lan' })
 
     expect(report.ok).toBe(false)
-    expect(text(report)).toContain('192.168.1.128/25 overlaps 192.168.1.0/24 used by "ISP A"')
-    expect(text(report)).toContain('cannot distinguish clients in overlapping LAN subnets')
+    expect(text(report)).toContain('The LAN logical interface and WAN carrier must be different')
+    expect(asked).toHaveLength(0)
   })
 
-  it('says nothing about subnets that merely sit next to each other', async () => {
-    const report = await checkWith([held('ISP A', 'lan', 'eth1.835', 0)], {
+  it('asks the router about everything else, rather than deciding it here', async () => {
+    // The positive control, and the boundary in one: a form with a free name
+    // and two different interfaces is not refused here - it is sent, with the
+    // pair named, for the router to weigh against its own zones, subnets and
+    // priorities. Without this every assertion above would pass on a gate that
+    // had simply stopped accepting anything.
+    const { report, asked } = await checkWith([HELD], {
       name: 'ISP B',
       lan: 'guest',
       carrier: 'eth2'
     })
 
-    expect(text(report)).toContain('LAN guest is scoped to 192.168.9.0/24')
-    expect(text(report)).not.toContain('overlaps')
-  })
-})
-
-// ---------------------------------------------------- the same rules at apply
-
-const PREPARATION_PROBE = [
-  '===DHCP===',
-  'dhcp.@dnsmasq[0]=dnsmasq',
-  "dhcp.@dnsmasq[0].dhcpleasemax='150'",
-  'dhcp.lan=dhcp',
-  "dhcp.lan.interface='lan'",
-  "dhcp.lan.limit='150'",
-  'dhcp.office=dhcp',
-  "dhcp.office.interface='office'",
-  "dhcp.office.limit='100'",
-  '===NETWORK===',
-  'network.lan=interface',
-  "network.lan.device='br-lan'",
-  'network.office=interface',
-  "network.office.device='br-office'",
-  'network.wan2=interface',
-  "network.wan2.device='eth2'",
-  "network.wan2.ip4table='202'",
-  '===FIREWALL===',
-  'firewall.@zone[0]=zone',
-  "firewall.@zone[0].name='lan'",
-  "firewall.@zone[0].network='lan'",
-  "firewall.@zone[0].network='guest'",
-  "firewall.@zone[0].network='office'",
-  'firewall.@zone[1]=zone',
-  "firewall.@zone[1].name='wan'",
-  "firewall.@zone[1].network='wan2'",
-  "firewall.@zone[1].masq='1'",
-  '===SYSCTL===',
-  'net.netfilter.nf_conntrack_max=65536'
-].join('\n')
-
-function preparedEngine(): { engine: BindingEngine; store: HostStore } {
-  const harness = moduleHarness('openwrt', () => ok())
-  harness.exec.mockImplementation(async (command, options) => {
-    const stdin = options?.stdin ?? ''
-    if (command === 'sh -s' && stdin.includes("echo '===DHCP==='")) return ok(PREPARATION_PROBE)
-    return ok()
-  })
-  const store = new HostStore(harness.ctx, () => DEFAULT_RULES)
-  return { engine: new BindingEngine(harness.ctx, store, { rules: () => DEFAULT_RULES }), store }
-}
-
-describe('an instance claimed between the check and the job', () => {
-  it('is refused at apply, not overwritten', async () => {
-    // Ten minutes can pass between a check and Save, and every connected
-    // surface shares one set of records. The check that approved this form
-    // cannot speak for the router any more.
-    const { engine, store } = preparedEngine()
-    await engine.onSample(SAMPLE)
-    const values = { name: 'ISP B', lan: 'lan', carrier: 'eth2' }
-    const report = await engine.check(values)
     expect(report.ok).toBe(true)
-    if (!report.ok) return
-
-    store.update((data) => {
-      data.instances.push(held('ISP A', 'lan', 'eth1.835', 0) as never)
-    })
-
-    const applied = await engine.apply({ token: report.token, values })
-    expect(applied).toMatchObject({
-      ok: false,
-      error: expect.stringContaining('now owned by another instance')
-    })
-    // And the instance that was refused left no record behind.
-    expect(store.read().instances.map((entry) => entry.name)).toEqual(['ISP A'])
-  })
-
-  it('refuses an overlapping LAN subnet at apply as well', async () => {
-    const { engine, store } = preparedEngine()
-    await engine.onSample(SAMPLE)
-    const values = { name: 'ISP B', lan: 'office', carrier: 'eth2' }
-    const report = await engine.check(values)
-    expect(report.ok).toBe(true)
-    if (!report.ok) return
-
-    // A different interface, so the interface guard above says nothing; only
-    // the subnets do.
-    store.update((data) => {
-      data.instances.push(held('ISP A', 'lan', 'eth1.835', 0) as never)
-    })
-
-    expect(await engine.apply({ token: report.token, values })).toMatchObject({
-      ok: false,
-      error: expect.stringContaining('overlaps another binding instance')
-    })
+    expect(asked).toHaveLength(1)
+    expect(asked[0]).toMatchObject({ lan: 'guest', carrier: 'eth2', name: 'ISP B' })
   })
 })

@@ -1,117 +1,84 @@
 /**
- * The vocabulary of the binding monitor: what one round trip read back, what
- * one policy rule turns into, and what the `monitor` stream carries.
+ * The vocabulary of the binding monitor: what one rule on the router turns
+ * into, and what the `monitor` stream carries.
  *
- * Everything below the parse is plain JSON on purpose. A row travels through
- * `ctx.emit` to a renderer that has no imports, so a `Map` or a class instance
- * here would arrive on the other side as `{}` and the detail panel would render
- * an empty table with nothing anywhere saying why.
+ * Everything below is plain JSON on purpose. A row travels through `ctx.emit`
+ * to a renderer that has no imports, so a `Map` or a class instance here would
+ * arrive on the other side as `{}` and the detail panel would render an empty
+ * table with nothing anywhere saying why.
+ *
+ * There is no readout, no rule line and no classifier here any more. From
+ * packages 2.4.0 the daemon owns the sections, the bands and every rule, so it
+ * is the only half that can say who wrote one and be right - and a second
+ * classifier on this side would be two halves able to reach different verdicts
+ * about the same rule, which is the failure this release exists to end. This
+ * file is now the shape of a reply after it has been turned into rows, and
+ * nothing else.
  */
 import type { ValueBadge } from '@shared/module-ui'
 import type { ModuleContext } from '@shared/modules'
-import type { OwrtRules } from '../config'
-import type { OpenWrtCapabilities } from '../probe'
-import type { BindingInstanceRecord, DirectBindingRecord } from '../store'
-import type { RouterModel } from '../types'
-
-/** One line of `ip -4 rule show`, kept whole rather than filtered to a band. */
-export interface ScanRuleLine {
-  pref: number
-  /**
-   * The lookup token exactly as `ip` printed it - `42`, `main`, `vpn`. A
-   * string because `/etc/iproute2/rt_tables` lets a table have a name, and a
-   * parser that insisted on digits is precisely how a named-table rule became
-   * invisible to this module.
-   */
-  table: string
-  /**
-   * The rule names a table whose token this reader would not accept, so `table`
-   * is empty for a rule that plainly has one.
-   *
-   * The two cases have to stay apart because the sentence for them is
-   * different and only one of them is true of each rule: a rule with no table
-   * is one the kernel acts on directly, and saying that about a rule pointing
-   * at a table nobody here could read is inventing a fact about the router.
-   */
-  tableUnread: boolean
-  /** The `from` selector as printed: an address, a CIDR, or `all`. */
-  from: string
-  /** The source address with a `/32` dropped; empty for `from all` and no `from`. */
-  ip: string
-  /** What this rule selects on besides the table, for a rule with no source. */
-  selector: string
-  /** The line as the router printed it, trimmed and capped. */
-  text: string
-}
+import type { WanbindRulesReply } from '../agent'
+import type { AgentCapability, OpenWrtCapabilities } from '../probe'
 
 /**
- * One bounded read of the router's whole policy-routing state.
+ * Who put a rule on the router, in the daemon's own spelling.
  *
- * `ok` is the fail-closed sentinel. False means the router could not read its
- * own rule table, which must never be reported as "this router has no rules" -
- * that is the one answer that would make the monitor say the opposite of the
- * truth.
+ * Read off the reply rather than restated, and that is deliberate: a union
+ * hand-copied from the contract still compiles the day the daemon learns a
+ * seventh owner, and every rule carrying the new one would silently land in
+ * whichever branch this side happens to fall through to. Spelled the daemon's
+ * way - `catch-all`, not `catchAll` - for the same reason the reply's own field
+ * names are: one spelling for one thing, so nothing has to be translated on the
+ * way past.
  */
-export interface ScanReadout {
-  ok: boolean
-  rules: ScanRuleLine[]
-  /**
-   * The rule table came back at the command's cap, so `rules` holds the start
-   * of it and not the whole of it.
-   *
-   * `ip -4 rule show` prints in ascending preference, so the rules that went
-   * missing are the ones *above* the cut - this module's own catch-alls among
-   * them, and any foreign rule numbered above the band. This module writes one
-   * rule per bound client, which makes a router past the cap ordinary rather
-   * than exotic, and a count of what survived stated as the size of the table
-   * is the one error a monitor cannot be allowed to make quietly.
-   */
-  rulesTruncated: boolean
-  /** Default routes in the main table, as printed. */
-  mainDefaults: string[]
-  /** Routes captured per lookup token, at most a handful each. */
-  routes: Record<string, string[]>
-  /**
-   * The lookup tokens the routes pass actually ran `ip route show table` over,
-   * as the router itself listed them.
-   *
-   * The router states this rather than the parser inferring it, because the
-   * two answers are allowed to disagree: the token list is harvested with awk
-   * over the *whole* rule file and cut with `sort -u | head` in lexicographic
-   * order, so once the rule table is capped the router can spend every slot on
-   * tokens that only the unprinted rules named. Inferring the list from the
-   * parsed rules is precisely how a table nobody had ever queried came to be
-   * reported as having no way out, red badge and all, while its default route
-   * sat there working.
-   */
-  queried: string[]
-}
+export type ScanOwnerKind = WanbindRulesReply['rules'][number]['owner']
 
-/** Who put a rule on the router, decided by evidence rather than by trust. */
-export type ScanOwnerKind =
-  | 'direct'
-  | 'instance'
-  | 'catchAll'
-  | 'agent'
-  | 'mwan3'
-  | 'foreign'
-
-/** What each verdict is called in front of a user. */
+/**
+ * What each verdict is called in front of a user.
+ *
+ * `netifd` gets a phrase rather than the daemon's word because the word is
+ * jargon and the fact is not: every interface carrying `option ip4table` gets
+ * three rules from netifd without anybody asking, so a router dialling
+ * thirty-two PPPoE sessions carries ninety-six of them. They are the most
+ * numerous rows on any multi-WAN router, and a column calling them a stranger's
+ * work would bury the handful actually worth looking at under a page of alarm
+ * about the router doing its job.
+ *
+ * `hold` is worded as a variant of `foreign` because that is what the daemon
+ * means by it: nothing on the router claims the rule, and the table it names is
+ * one this daemon parks addresses in - so whatever wrote it has parked that
+ * traffic rather than routed it.
+ */
 export const OWNER_LABEL: Readonly<Record<ScanOwnerKind, string>> = {
-  direct: 'one-to-one binding',
-  instance: 'binding instance',
-  catchAll: 'safety catch-all',
-  agent: 'router agent',
-  mwan3: 'mwan3',
+  manual: 'one-to-one binding',
+  client: 'binding instance',
+  'catch-all': 'safety catch-all',
+  hold: 'outside this module, parked',
+  netifd: 'the router routing itself',
+  kernel: 'kernel baseline',
   foreign: 'outside this module'
 }
 
-/** The verdicts this module is responsible for, for the "bound here" tile. */
+/** The rules this module's own feature is responsible for. */
 export const MANAGED_OWNERS: ReadonlySet<ScanOwnerKind> = new Set<ScanOwnerKind>([
-  'direct',
-  'instance',
-  'catchAll',
-  'agent'
+  'manual',
+  'client',
+  'catch-all'
+])
+
+/**
+ * The rules the router writes for itself, which belong to neither side.
+ *
+ * `netifd` is in here rather than in the foreign count, and that is the whole
+ * point of the set existing. Those rules are the router routing itself - the
+ * plumbing that makes `option ip4table` work at all - so counting them as
+ * "written outside this module" would put ninety-six on the tile whose entire
+ * job is to say how many rules somebody should go and look at. `kernel` is here
+ * for the same reason and never reaches a row at all; see `ScanSummary.total`.
+ */
+export const ROUTER_OWNERS: ReadonlySet<ScanOwnerKind> = new Set<ScanOwnerKind>([
+  'netifd',
+  'kernel'
 ])
 
 export interface ScanRow {
@@ -121,24 +88,45 @@ export interface ScanRow {
   /** False when `ip` describes a selector rather than naming an address. */
   sourceRouted: boolean
   pref: number
-  /** The lookup token as printed, which is what the detail panel must show. */
-  table: string
-  /** `main (254)`, `42`, `vpn` - the token with its well-known name resolved. */
+  /**
+   * The table the rule looks up, as the number the kernel holds. 0 is a rule
+   * that looks nothing up: it answers the packet itself, which is a different
+   * fact from a rule pointing at a table nobody can read.
+   */
+  table: number
+  /** `main (254)`, `42`, `no table` - the number with its well-known name. */
   tableLabel: string
   /** The WAN interface the table's default route actually leaves through. */
   wan: string
+  /**
+   * The gateway that default route leaves via, not the interface's own address.
+   *
+   * The daemon reports a table by what its default route says - a device and a
+   * next hop - and nothing in the rules reply carries the WAN's own IPv4. The
+   * next hop is the evidence that exists, and it answers the question the row is
+   * really asked ("where does this actually go"), so it travels under the key
+   * the page already binds. The label beside it on the Monitor page still reads
+   * "That WAN's address" and wants changing to say gateway.
+   */
   wanIp: string
   ownerKind: ScanOwnerKind
   owner: string
   ownerBadges: ValueBadge[]
-  /** One plain-English sentence built from the evidence beside it. */
+  /**
+   * The daemon's own sentence about this rule, passed through untouched.
+   *
+   * This is the whole feature. Anybody can list `ip rule show`; what somebody
+   * standing in front of a router needs is a sentence saying why *this* address
+   * is not on the default connection, built from the sections and the route
+   * dumps by the half that holds both.
+   */
   reason: string
-  /** The rule exactly as `ip -4 rule show` printed it. */
+  /** The rule as `ip -4 rule show` would have printed it. */
   rule: string
-  /** Every route captured for this rule's table, for the detail panel. */
+  /** What the daemon says about the table this rule points at. */
   routes: string[]
   /**
-   * The same routes as one block of text.
+   * The same lines as one block of text.
    *
    * A `keyValue` row prints whatever it is given through `String()`, so the
    * array arrived as a comma-run with no spaces and an empty one arrived as
@@ -148,17 +136,24 @@ export interface ScanRow {
   routesText: string
   /** The main table's default, so a reader has something to compare against. */
   mainDefault: string
-  /** The table this rule points at offers no way out. */
+  /**
+   * The table this rule points at offers no way out.
+   *
+   * Both false on the daemon's table row: it has no default route at all. A
+   * table answering `unreachable` is not this - that one is an address parked on
+   * purpose, and calling it a fault sends somebody to fix the thing that is
+   * working.
+   */
   unreachable: boolean
   /**
-   * This rule is consulted before every rule this module writes, *and* it could
+   * This rule is consulted before every rule the daemon writes, *and* it could
    * take traffic from one of them.
    *
    * Both halves, because the badge this flag raises is an accusation: a low
-   * preference on a router where this module writes no rules at all outranks
-   * nothing, and neither does one whose source selector cannot cover a single
-   * address this module has placed. Flagged on the preference alone it put a red
-   * chip on rules that were doing nothing to anybody.
+   * preference on a router where the daemon has written no rule at all outranks
+   * nothing, and neither does one whose selector cannot cover a single address
+   * the daemon has placed. Flagged on the preference alone it put a red chip on
+   * rules that were doing nothing to anybody.
    */
   outranksModule: boolean
 }
@@ -173,9 +168,12 @@ export interface ScanSummary {
   total: number
   byOwner: Record<string, number>
   /**
-   * Rules this module did not write - mwan3's included. `byOwner` still keeps
-   * mwan3 apart, because "another manager owns it" and "nobody knows who owns
-   * it" call for different things from the person reading the page.
+   * Rules nothing on this router claims. The daemon's own three owners are not
+   * in it, and neither is netifd: those are the router routing itself, and the
+   * tile this feeds is the one that says how many rules somebody should go and
+   * look at. `byOwner` still keeps every owner apart, because "the router wrote
+   * it", "something else parked this address" and "nobody knows who owns it"
+   * call for different things from the person reading the page.
    */
   foreign: number
   /** Rules pointing at a table with no way out. */
@@ -183,27 +181,28 @@ export interface ScanSummary {
   /** Rules that select on something other than a source address. */
   selectors: number
   /**
-   * `total` counts the rules below the command's cap, not the rules on the
-   * router. It rides in the summary rather than staying in the readout because
-   * the summary is what the page states as fact - "Rules seen: 500" beside a
-   * table that was cut at 500 is a sentence nobody would question, and the
-   * rules it hides are the high-preference ones this module writes itself.
+   * `total` counts the rules the reply carried, not the rules on the router.
+   * It rides in the summary rather than staying in the reply because the
+   * summary is what the page states as fact - "Rules seen: 2000" beside a table
+   * that was cut at 2000 is a sentence nobody would question, and the rules it
+   * hides are the high-preference ones the daemon writes itself.
    */
   rulesTruncated: boolean
   /**
-   * The cap that did the cutting, carried beside the flag so a surface can say
-   * how far the scan got without hard-coding a number that would drift the day
-   * `SCAN_MAX_RULES` moves.
+   * The cap that did the cutting, as the daemon echoed it back.
+   *
+   * Its number, not this side's: the ceiling on one ubus reply is the daemon's
+   * to move, and a constant here would be a second answer that goes wrong
+   * silently the day the two releases differ.
    */
-  rulesCap: number
+  cap: number
 }
 
 export interface ScanSnapshot {
   /**
-   * When the rows were last built from a scan the module could act on. A
-   * failed sweep leaves it where it was, for the reason `BindingSnapshot`
-   * does: rows stamped with the time of a failure report fresh data about a
-   * router the module has in fact lost sight of.
+   * When the rows were last built from a pass the module could act on. A failed
+   * sweep leaves it where it was: rows stamped with the time of a failure
+   * report fresh data about a router the module has in fact lost sight of.
    */
   t: number
   /** False when the last sweep failed; `lastError` then says what failed. */
@@ -214,88 +213,28 @@ export interface ScanSnapshot {
   summary: ScanSummary
 }
 
-/** One address this module believes it has placed, and where. */
-export interface ScanAssignment {
-  ip: string
-  wan: string
-  instance: string
-}
-
 /**
- * The address one stored one-to-one binding currently has a rule standing for.
+ * The one setting the monitor has of its own.
  *
- * Kept apart from the record because the record cannot answer it. A binding
- * that names a MAC is written for whatever that MAC answers to, and the leases
- * stop answering the instant the device drops off - while the one-to-one pass
- * deliberately keeps the rule installed at the last address it saw for the whole
- * of Lease release grace (s), so that a laptop closed for thirty seconds does not
- * lose and regain its WAN. Only the pass's own memory knows that address, and
- * without it the monitor reads a rule this module wrote, and is about to remove
- * itself, as one written outside this module.
+ * Narrowed to the field it reads rather than taking the whole rules record,
+ * because everything else in that record is about writing to a router this
+ * folder never writes to - and a monitor that could see the binding settings is
+ * a monitor somebody will eventually make decisions with.
  */
-export interface ScanInstalledAddress {
-  /** The `DirectBindingRecord` id this rule belongs to. */
-  id: string
-  /** The address the last pass wrote a rule for; empty when it wrote none. */
-  ip: string
+export interface ScanRules {
+  scanIntervalSec: number
 }
 
 export interface ScanEngineOptions {
   ctx: ModuleContext
-  rules: () => OwrtRules
-  latestModel: () => RouterModel | null
-  /** Records this module holds, read lazily so the engine never captures a stale copy. */
-  direct: () => readonly DirectBindingRecord[]
-  instances: () => readonly BindingInstanceRecord[]
-  /** Every address the binding half currently believes it has placed, and where. */
-  assignments: () => ReadonlyArray<ScanAssignment>
+  rules: () => ScanRules
   /**
-   * What the one-to-one pass last wrote a rule for, per record; see
-   * `ScanInstalledAddress`. Optional so that a container which has not wired it
-   * yet still compiles - an absent memory only costs the grace window its
-   * attribution, which is exactly the state this option was added to end, and
-   * never makes the classifier claim a rule it did not write.
+   * The router-side agent verdict, read per pass and never captured: an `apk
+   * del` on the router lands between two readiness cycles, and a call built on
+   * a verdict that was true a moment ago fails as a shell error rather than as
+   * a sentence somebody can act on.
    */
-  installed?: () => ReadonlyArray<ScanInstalledAddress>
-  /** The bindings a router-owned daemon holds; see `ScanRouterHeld`. */
-  routerHeld?: () => ReadonlyArray<ScanRouterHeld>
+  agent: () => AgentCapability
+  /** The readiness latch, which decides whether the poller runs at all. */
   capabilities: () => OpenWrtCapabilities
-}
-
-/** Everything the classifier needs, gathered once so it stays a pure function. */
-/**
- * One binding a router keeps for itself.
- *
- * The module holds no record of these - the handover deletes its copy once the
- * daemon confirms, because two records of one binding is the state nothing can
- * reason about - so they reach the monitor as rows read back off the router
- * rather than as stored records. Without them every rule bm-wanbind wrote read
- * as somebody else's, and the page's advice about a foreign rule in this
- * module's own band is to go and remove it.
- */
-export interface ScanRouterHeld {
-  name: string
-  wan: string
-  /** The address the daemon has a rule standing for, already resolved. */
-  ip: string
-  pref: number
-}
-
-export interface ScanClassifyInput {
-  readout: ScanReadout
-  rules: OwrtRules
-  model: RouterModel | null
-  direct: readonly DirectBindingRecord[]
-  instances: readonly BindingInstanceRecord[]
-  assignments: readonly ScanAssignment[]
-  /** The rule each one-to-one binding actually has standing; see `ScanInstalledAddress`. */
-  installed?: readonly ScanInstalledAddress[]
-  /** The bindings the router holds itself, which this module keeps no record of. */
-  routerHeld?: readonly ScanRouterHeld[]
-  capabilities: OpenWrtCapabilities
-}
-
-export interface ScanClassifyResult {
-  rows: ScanRow[]
-  summary: ScanSummary
 }

@@ -953,119 +953,20 @@
                   "lines": [
                     "Every field opens filled in with the value this router is using right now, so each form doubles as the list of rules in force. Saving one group leaves the others exactly as they are.",
                     "A field left empty means keep the current value. The placeholder still names the documented default; to put one rule back, type that default, and to put all of them back use Reset every rule.",
-                    "Changing the rule-priority bases while binding instances exist is refused: the old and new ownership ranges cannot safely overlap.",
-                    "The one-to-one band is the exception, and it may be moved while bindings exist: each binding carries the priority it was stamped with, so an existing rule stays where it was written and only new ones come from the new base.",
-                    "PPPoE Dialer pools carry their own numbering and firewall on the router - each pool records its table base and zone when it is created - so nothing here describes them. The pool daemon's own settings are on Connection, PPPoE Dialer."
+                    "What is left on this page is the module’s own housekeeping - how often it re-reads the router’s rule table, how often it writes a chart point, and how much it keeps. None of it changes anything on the router.",
+                    "PPPoE Dialer pools carry their own numbering and firewall on the router - each pool records its table base and zone when it is created - so nothing here describes them either. The pool daemon’s own settings are on Connection, PPPoE Dialer."
                   ]
                 }
               ]
             },
             {
-              "type": "section",
-              "title": "Numbering and firewall layout",
-              "columns": 2,
-              "blocks": [
-                {
-                  "type": "checkForm",
-                  "checkMethod": "rulesCheck",
-                  "applyMethod": "rulesApply",
-                  "checkLabel": "Check this group",
-                  "applyLabel": "Save this group",
-                  "fields": [
-                    {
-                      "key": "tableBase",
-                      "label": "Routing-table base",
-                      "input": "number",
-                      "placeholder": "10000",
-                      "initialFrom": {
-                        "kind": "invoke",
-                        "method": "rulesEffective",
-                        "path": "tableBase"
-                      }
-                    },
-                    {
-                      "key": "directPrefBase",
-                      "label": "One-to-one rule priority base",
-                      "input": "number",
-                      "placeholder": "19000",
-                      "initialFrom": {
-                        "kind": "invoke",
-                        "method": "rulesEffective",
-                        "path": "directPrefBase"
-                      }
-                    },
-                    {
-                      "key": "rulePrefBase",
-                      "label": "Client-rule priority base",
-                      "input": "number",
-                      "placeholder": "20000",
-                      "initialFrom": {
-                        "kind": "invoke",
-                        "method": "rulesEffective",
-                        "path": "rulePrefBase"
-                      }
-                    },
-                    {
-                      "key": "catchAllPrefBase",
-                      "label": "Safety-rule priority base",
-                      "input": "number",
-                      "placeholder": "29900",
-                      "initialFrom": {
-                        "kind": "invoke",
-                        "method": "rulesEffective",
-                        "path": "catchAllPrefBase"
-                      }
-                    },
-                    {
-                      "key": "catchAllTable",
-                      "label": "Unreachable routing table",
-                      "input": "number",
-                      "placeholder": "29999",
-                      "initialFrom": {
-                        "kind": "invoke",
-                        "method": "rulesEffective",
-                        "path": "catchAllTable"
-                      }
-                    },
-                    {
-                      "key": "zoneName",
-                      "label": "Binding firewall zone",
-                      "input": "text",
-                      "placeholder": "bmwanpool",
-                      "initialFrom": {
-                        "kind": "invoke",
-                        "method": "rulesEffective",
-                        "path": "zoneName"
-                      }
-                    }
-                  ]
-                },
-                {
-                  "type": "conditional",
-                  "when": {
-                    "source": {
-                      "kind": "stream",
-                      "event": "ui",
-                      "path": "hintsOn"
-                    },
-                    "op": "eq",
-                    "value": true
-                  },
-                  "blocks": [
-                    {
-                      "type": "note",
-                      "title": "What each field means",
-                      "lines": [
-                        "Routing-table base - default 10000. WAN Binding numbers the extra tables it assigns to DHCP and static WANs from here; it is also the default table base a new pool's create form offers. A pool records its own base on the router when it is created.",
-                        "One-to-one rule priority base - default 19000, and the range is 1000 to 28000. A binding somebody placed by hand takes one priority out of the band of 1000 that starts here. The band sits below the client-rule base on purpose: the lowest priority wins, so a hand-placed binding beats the assignment an instance handed the same device, and an instance never sees the rule to delete it. The two bands may not overlap, and a value that would run this one into the client-rule base is discarded the next time the rules are read rather than written to the router.",
-                        "Client-rule priority base - default 20000. Client source rules occupy the range from here up to, but not including, the safety-rule base.",
-                        "Safety-rule priority base - default 29900. Each binding instance gets one subnet catch-all priority from this base; it must be above every client rule. Cannot change while binding instances exist.",
-                        "Unreachable routing table - default 29999. This table contains an unreachable default and prevents waiting clients from leaking through another WAN. A one-to-one binding set to hold is pointed at this same table while its WAN is down, because a rule whose table has no route falls through to the main table and leaves by the router's default connection. Cannot change while binding instances exist.",
-                        "Binding firewall zone - default bmwanpool. The zone WAN Binding keeps its masqueraded WANs in. Pools name their own zone per pool - the same name by default, shared and reconciled by the router's pool daemon."
-                      ]
-                    }
-                  ]
-                }
+              "type": "note",
+              "title": "The numbering and the timers are the router’s now",
+              "lines": [
+                "The routing-table base, the three rule-priority bases, the unreachable table, the pass interval and the WAN and lease timers were set here until 3.4.0. They are bm-wanbind’s own configuration on the router now, and they are edited on Connection, WAN Binding, Daemon settings.",
+                "They moved because both halves were writing one priority band. This module wrote ip rules there from these fields while the daemon wrote its own from its file, and each removed what the other had just put down - thirty-four rules deleted every thirty seconds on a real router, written back a second later, for ever, with every surface green because each half was doing exactly what it had been told. One copy, kept where the rules are written, is what stops that.",
+                "The binding firewall zone went with them and has no field anywhere. The daemon writes a forwarding between the firewall zones the router already has, so there is no zone of this module’s left to name.",
+                "A number changed over there is the default an instance is stamped with when it is created afterwards. An instance already on the router keeps the numbers it has, because those are what its ip rules were written against."
               ]
             },
             {
@@ -1110,9 +1011,9 @@
                       "type": "note",
                       "title": "What each field means",
                       "lines": [
-                        "Binding scan interval - 15 to 3600 seconds, default 60. How often the Monitor under Connection, WAN Binding re-reads the router's whole ip rule table and follows each routing table those rules point at, which is what lets it name a rule this module never wrote.",
+                        "Binding scan interval - 15 to 3600 seconds, default 60. How often the Monitor under Connection, WAN Binding asks the router for its whole ip rule table, with what each routing table those rules point at actually does with a packet - which is what lets it name a rule this module never wrote.",
                         "It only runs while somebody has the Connection page open - any tab of it, not just Monitor, because that is the granularity the app can answer. Nothing reconciles against the Monitor and nothing acts on what it finds, so a router nobody is watching pays nothing for it at all, and leaving the page stops the scan. This is the cost of watching, not a standing cost.",
-                        "One SSH round trip per pass whatever the router carries, capped on the router at 500 rule lines, 64 routing tables and 8 route lines each. Lowering it to watch one change land is the wrong trade for a router that is then read that often forever - the Monitor can be told to scan again by hand, and that is what to reach for instead."
+                        "One call to the router’s own bm-wanbind per pass whatever the table holds, and the daemon caps its reply at two thousand rules. Lowering the interval to watch one change land is the wrong trade for a router that is then read that often forever - the Monitor can be told to scan again by hand, and that is what to reach for instead."
                       ]
                     }
                   ]

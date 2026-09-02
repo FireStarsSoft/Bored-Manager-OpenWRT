@@ -3,7 +3,8 @@ import type { ModuleCheckReport } from '@shared/check'
 import type { ModuleExecResult } from '@shared/modules'
 import activate from '../../openwrt/main/index'
 import { moduleHarness, sharedModuleConfig, type ModuleHarness } from '../helpers/module-harness'
-import { AGENT_INFO, isProbeCommand, routerProbeOutput } from '../helpers/router'
+import { AGENT_INFO, BINDING_AGENT_INFO, isProbeCommand, routerProbeOutput } from '../helpers/router'
+import { fakeWanbind, instanceConfig } from '../helpers/wanbind'
 import {
   PINNED_BASE,
   PINNED_PACKAGES,
@@ -373,24 +374,23 @@ describe('a bundle from the machine running the app', () => {
 
 describe('taking the packages off again', () => {
   it('refuses while a binding instance is running, and names it', async () => {
+    // The name and the count come off the router now, not out of this module's
+    // own records, and that is the whole reason this case had to be rewritten.
+    //
+    // Until 3.4.0 the uninstall blocker read `hostData.instances` - a list this
+    // module kept - so it would happily refuse on a machine whose router had
+    // been reflashed since, and happily allow on one whose instances this
+    // module had never heard of. `bm.wanbind info` is the only thing that knows
+    // what is actually running, and taking the package off is exactly the
+    // moment that distinction matters: what is at stake is a fail-closed
+    // catch-all going away under a LAN that is relying on it.
+    const daemon = fakeWanbind({
+      configured: [instanceConfig({ id: 'bind_1', name: 'Office LAN', enabled: true })]
+    })
+
     const owrt = await router({
-      agent: AGENT_INFO,
-      hostData: {
-        ...HOST,
-        instances: [
-          {
-            id: 'bind_1',
-            name: 'Office LAN',
-            lan: 'lan',
-            carrier: 'eth1',
-            running: true,
-            sticky: true,
-            remap: true,
-            createdAt: 1,
-            slot: 0
-          }
-        ]
-      }
+      agent: BINDING_AGENT_INFO,
+      answer: (command) => daemon.answer(command)
     })
 
     const result = await owrt.call('agentUninstallCheck', {})

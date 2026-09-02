@@ -70,7 +70,18 @@ export interface AgentDomainDeps {
   jobs: { readonly busy: boolean; start(spec: JobSpec): OpenWrtJob }
   event: (kind: string, text: string) => void
   /** Named things that would have to be stopped before packages can go. */
-  blockers: () => { instances: string[]; batches: string[]; bindings: string[] }
+  /**
+   * What must not be removed from underneath, asked of the router.
+   *
+   * A promise rather than a value, and the reason is the one thing this refusal
+   * exists to prevent. Both lists come from a cache the page fills, so on a
+   * machine where nobody has opened Connection since connecting - which is most
+   * machines, most of the time - reading it synchronously answered "nothing is
+   * running" about a router with a live instance on it, and `apk del
+   * bm-wanbind` went ahead. What that costs is the instance's ip rules and its
+   * fail-closed catch-all left standing with nothing maintaining them.
+   */
+  blockers: () => Promise<{ instances: string[]; batches: string[]; bindings: string[] }>
 }
 
 export interface AgentRuntime {

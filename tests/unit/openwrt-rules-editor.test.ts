@@ -5,8 +5,7 @@ import {
   ConfigStore,
   DEFAULT_RULES,
   RULE_BOUNDS,
-  RulesEditor,
-  type RulesTopology
+  RulesEditor
 } from '../../openwrt/main/config'
 import { moduleHarness, sharedModuleConfig } from '../helpers/module-harness'
 
@@ -30,12 +29,18 @@ interface Editor {
   saved(): { rules: Record<string, unknown> }
 }
 
-function editor(topology: RulesTopology = 'none', stored: unknown = null): Editor {
+// `topology` is gone from the editor's constructor and from this signature.
+//
+// It existed to keep three numbers locked while a binding instance's rules
+// stood on the router written against them. The router stamps each section with
+// its own numbers now and re-reads them itself, so there is nothing here for a
+// rule on any router to have been written against, and nothing to lock.
+function editor(stored: unknown = null): Editor {
   const config = sharedModuleConfig(stored)
   const harness = moduleHarness('openwrt', ok, { config })
   const store = new ConfigStore(harness.ctx)
   return {
-    rules: new RulesEditor(harness.ctx, store, () => topology),
+    rules: new RulesEditor(harness.ctx, store),
     config: store,
     saved: () => (config.get() ?? { rules: {} }) as { rules: Record<string, unknown> }
   }
@@ -113,69 +118,80 @@ describe('a value the form cannot accept', () => {
   })
 })
 
-describe('the values that say where the binding rules live', () => {
-  const LOCKED = { catchAllTable: '31000' }
+describe('the values that used to say where the binding rules live', () => {
+  // The lock is gone, and its going is the point.
+  //
+  // Three of these numbers - the two priority bases and the catch-all table -
+  // were refused while any binding instance existed, because the rules standing
+  // on the router had been written against them: move one and the next pass
+  // failed to recognise its own work and wrote a second copy of everything. So
+  // the editor had to know whether this router had records, and a context that
+  // could not say refused outright, which meant the grace periods and the lease
+  // file could not be reset either.
+  //
+  // From 3.4.0 those numbers are not this module's. `bm-wanbind` stamps each
+  // section with the band it was created under, keeps it, and re-reads it
+  // itself; the defaults for the next one are edited on Connection, under WAN
+  // Binding, and reach the router through `settings_set`. There is nothing left
+  // here that a rule on any router was written against, so there is nothing to
+  // lock and no topology to ask about.
+  const ONCE_LOCKED = { catchAllTable: '31000' }
 
-  it('may be changed on a router with no records of its own', () => {
-    const run = editor('none')
+  it('are editable with no router connected at all', () => {
+    const run = editor()
 
-    apply(run, LOCKED)
+    apply(run, ONCE_LOCKED)
 
     expect(run.config.effectiveRules().catchAllTable).toBe(31_000)
   })
 
-  it('are refused while binding instances exist, and say what to delete', () => {
-    const report = editor('present').rules.check(LOCKED)
-
-    expect(errors(report)).toEqual([
-      'Numbering rules cannot change while binding instances exist'
-    ])
-    expect(report.findings.find((finding) => finding.level === 'error')?.detail).toContain(
-      'catchAllTable'
-    )
-  })
-
-  it('are refused when nothing can say whether this router has records', () => {
-    // The records are per-machine and the rules are global, so "no records"
-    // read off a disconnected context is not evidence. Answering `none` there
-    // unlocked the preference range of a router carrying live binding rules.
-    const report = editor('unknown').rules.check(LOCKED)
-
-    expect(errors(report)).toEqual([
-      'Numbering and firewall-layout rules cannot change while no router is connected'
-    ])
-    expect(report.findings.find((finding) => finding.level === 'error')?.detail).toContain(
-      'Connect the router'
-    )
-  })
-
-  it('lock nothing when the submission leaves them where they are', () => {
-    // The lock is measured against what is in force, not against the presence
-    // of the field: every group of this form posts its own fields whether or
-    // not the user touched them.
-    for (const topology of ['none', 'present', 'unknown'] as RulesTopology[]) {
-      const report = editor(topology).rules.check({
-        catchAllTable: String(DEFAULT_RULES.catchAllTable),
-        stickyCap: '2000'
-      })
-      expect(errors(report)).toEqual([])
-    }
-  })
-
-  it('are not writable through a rule that is not locked', () => {
-    // A sanity check on the list itself: the unlocked rules stay editable on a
-    // router that is carrying records, which is the whole reason the lock is
-    // three values rather than all of them. The pool numbering that used to be
-    // locked here lives on the router now, per pool.
-    const run = editor('present')
-
-    apply(run, { stickyCap: '2000', releaseGraceSec: '600', tableBase: '11000' })
-
-    expect(run.config.effectiveRules()).toMatchObject({
-      stickyCap: 2_000,
-      releaseGraceSec: 600,
-      tableBase: 11_000
+  it('are editable with binding instances on the router', () => {
+    // The stored document below is the shape the lock used to read: a machine
+    // carrying binding records. It is not consulted any more, and this is the
+    // assertion that says so out loud.
+    const run = editor({
+      version: 3,
+      instances: [{ id: 'bmi_home', lan: 'lan', running: true }],
+      direct: [],
+      extraTables: [],
+      stickyMap: [],
+      events: [],
+      moduleEvents: [],
+      jobs: []
     })
+
+    apply(run, ONCE_LOCKED)
+
+    expect(run.config.effectiveRules().catchAllTable).toBe(31_000)
+  })
+
+  it('still refuse an arrangement no router could act on', () => {
+    // Dropping the lock is not dropping the arithmetic. The client band has to
+    // end before the catch-all band starts, whoever owns the numbers, and a
+    // reader that let this through would be offering the daemon a setting it
+    // would refuse silently on the next create.
+    const report = editor().rules.check({
+      rulePrefBase: '30000',
+      catchAllPrefBase: '20000'
+    })
+
+    expect(errors(report)).toContain(
+      'Assignment rule priorities must end before the catch-all priority range'
+    )
+  })
+
+  it('reset every rule now that none of them is held back', () => {
+    // The old reset refused wholesale on a router with one record, so the lease
+    // file and the grace periods - none of which describe where anything lives
+    // - could not be put back without deleting the instance first.
+    const run = editor()
+
+    apply(run, { catchAllTable: '31000', releaseGraceSec: '600' })
+    expect(run.rules.reset().ok).toBe(true)
+
+    expect(run.config.effectiveRules().catchAllTable).toBe(DEFAULT_RULES.catchAllTable)
+    expect(run.config.effectiveRules().releaseGraceSec).toBe(DEFAULT_RULES.releaseGraceSec)
+    expect(run.saved().rules).toEqual({})
   })
 })
 
