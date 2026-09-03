@@ -811,7 +811,8 @@ export function run(ctx) {
 	let options = objectOr(ctx);
 	let now = intOr(options.now, time());
 
-	let ifaces = wans.dump(options.bus);
+	let ifaces = (type(options.ifaces) == 'array') ? options.ifaces : wans.dump(options.bus);
+
 	if (ifaces === null) {
 		state.ready = false;
 		state.reason = 'netifd did not answer, so nothing was changed';
@@ -827,8 +828,12 @@ export function run(ctx) {
 
 	// One reading of netifd, shared. `layout.read()` would dump it a second
 	// time, and two dumps a few milliseconds apart are two different routers as
-	// far as anything comparing them is concerned.
-	let view = layout.classify(ifaces, layout.statements());
+	// far as anything comparing them is concerned. The pass classifies once and
+	// hands the verdicts down; a caller with nothing to hand over classifies
+	// here, off the list it was given.
+	let view = (type(options.view) == 'object' && type(options.view.byName) == 'object')
+		? options.view
+		: layout.classify(ifaces, layout.statements());
 	let verdicts = objectOr(view.byName);
 	let snap = (type(ctx) == 'object' && type(ctx.snap) == 'object') ? ctx.snap : cfg.snapshot();
 	let bindings = cfg.directConfigured(snap);

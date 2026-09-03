@@ -181,8 +181,25 @@ let state = {
 	// Held rather than dropped on the floor. A uloop timer whose only reference
 	// has gone out of scope is a timer that may not be there when it is due,
 	// which is why every uloop script in the OpenWrt tree keeps one too.
-	timer: null
+	timer: null,
+
+	// Whether netifd is answering, and for how long it has not been.
+	//
+	// A dump that fails is the one failure this daemon cannot work around: every
+	// decision it makes is about interfaces, and a pass that read "no answer" as
+	// "this router has no interfaces" would take every rule off. So the pass
+	// stops instead - and stopping quietly is its own fault, because the rows go
+	// on reading the way they read at the last good pass while nothing is
+	// maintaining them. This is what says so.
+	//
+	// `loggedAt` is not reported. It exists so that a router whose netifd has
+	// been gone for an hour writes one line a minute rather than one line every
+	// thirty seconds.
+	netifd: { ok: true, failures: 0, lastFailureAt: 0, reason: '', loggedAt: 0 }
 };
+
+// How often a netifd that is not answering is worth another line in syslog.
+const NETIFD_LOG_EVERY = 60;
 
 /** Resident set size in kilobytes, or -1 when /proc did not say. */
 function rssKb() {
@@ -383,25 +400,95 @@ export function pass() {
 	let now = time();
 	let out = [];
 
+	// One read of the configuration for the whole pass, and the only place that
+	// asks for the refusals to be written to syslog: a bad section is a sentence
+	// somebody has to act on, and it belongs in the log once a pass rather than
+	// once per question anybody asks this daemon.
+	let snap = cfg.snapshot({ log: true });
+
+	// One read of netifd for the whole pass, for the same reason. Every instance
+	// and the binding half all need the interface list; asking once per half was
+	// five dumps on a router with four instances, each one a reply that grows
+	// with every session dialled.
+	let ifaces = wans.dump(state.bus);
+
+	if (ifaces === null) {
+		state.netifd.ok = false;
+		state.netifd.failures = state.netifd.failures + 1;
+		state.netifd.lastFailureAt = now;
+		state.netifd.reason = sprintf('netifd did not answer, so every binding and every instance was left exactly as it was (%d time(s) since it last did)',
+			state.netifd.failures);
+
+		// Said out loud, but not thirty times a minute. A netifd that has been
+		// gone for an hour is one fault, not a hundred and twenty.
+		if (now - state.netifd.loggedAt >= NETIFD_LOG_EVERY) {
+			state.netifd.loggedAt = now;
+			err(state.netifd.reason);
+		}
+
+		// Every instance says it for itself as well. `info` is where somebody
+		// looks when a page has stopped changing, and a row that reads exactly
+		// as it did at the last good pass with nothing anywhere saying why is
+		// the failure this whole block exists to deny.
+		for (let st in each())
+			st.lastReason = state.netifd.reason;
+
+		state.ticks = state.ticks + 1;
+		return out;
+	}
+
+	if (!state.netifd.ok) {
+		notice(sprintf('netifd is answering again after %d failed dump(s)', state.netifd.failures));
+		state.netifd.failures = 0;
+		state.netifd.reason = '';
+	}
+
+	state.netifd.ok = true;
+	state.netifd.loggedAt = 0;
+
+	// Classified once as well. `layout.classify` is what decides which
+	// interfaces are this router's own LANs and which are ways out of it, and
+	// two passes over one dump answer the same question twice.
+	let view = layout.classify(ifaces, layout.statements());
+
 	// Read before the instances run, from the rows the last binding pass left,
 	// so that every instance on the router is told the same thing about which
 	// addresses are already spoken for.
 	let reserved = reservedAddresses();
 
+	let ctx = {
+		bus: state.bus,
+		now: now,
+		ifaces: ifaces,
+		view: view,
+		snap: snap,
+		reserved: reserved
+	};
+
 	if (state.main.enabled) {
 		for (let st in each())
-			push(out, reconcile.run(st, { bus: state.bus, now: now, reserved: reserved }));
+			push(out, reconcile.run(st, ctx));
 	}
 
 	// Deliberately after the instances. A binding's priority is below every
 	// instance's client range, so the kernel reads it first whatever order they
 	// were written in - but a pass that put bindings first would be writing
 	// rules from a device list the instances are about to refresh.
-	direct.run({ bus: state.bus, now: now });
+	direct.run(ctx);
 
 	state.ticks = state.ticks + 1;
 	return out;
 };
+
+/** Whether netifd is answering, as every surface reads it. */
+function netifdState() {
+	return {
+		ok: state.netifd.ok,
+		failures: state.netifd.failures,
+		lastFailureAt: state.netifd.lastFailureAt,
+		reason: state.netifd.reason
+	};
+}
 
 /**
  * The reconcile timer: one object, re-armed from inside its own callback.
@@ -709,7 +796,12 @@ export function info() {
 		// two calls to draw one row or quietly leave the hand-placed bindings
 		// out of its counts, which is what the first draft of the page did.
 		core: direct.summary(),
-		netlink: netlinkCounters()
+		netlink: netlinkCounters(),
+
+		// Whether the daemon can see the router at all. Everything above is a
+		// decision made from netifd's interface list, so a page that drew them
+		// without this would be showing the last good pass as though it were now.
+		netifd: netifdState()
 	};
 };
 
@@ -774,7 +866,14 @@ export function stats() {
 			unverified: unverified,
 			removed: count(core.removed),
 			lastUnverified: (type(core.lastUnverified) == 'array') ? core.lastUnverified : []
-		}
+		},
+
+		// The same verdict `info` carries, because this is the call a watchdog
+		// makes: every number above is a count of decisions taken from netifd's
+		// interface list, and one that stopped moving because nothing can be
+		// read is not the same as one that stopped moving because nothing
+		// changed.
+		netifd: netifdState()
 	};
 };
 
@@ -1652,8 +1751,8 @@ function routedTables(list, snap) {
  * because a binding written against a router that could not be read is one
  * whose rule simply does not appear until it can be.
  */
-function wanRoleRefusal(wan) {
-	let live = wans.dump(state.bus);
+function wanRoleRefusal(wan, given) {
+	let live = (type(given) == 'array') ? given : wans.dump(state.bus);
 
 	if (live === null)
 		return null;
@@ -1752,7 +1851,7 @@ function allocateWanTable(wan, snap) {
 	// writes the option. `live` is already in hand, so the classification costs
 	// nothing, and what it prevents is the one write in this file that can take
 	// a subnet off the router.
-	let refusal = wanRoleRefusal(wan);
+	let refusal = wanRoleRefusal(wan, live);
 
 	if (refusal) {
 		err(sprintf('%s was not given a routing table: %s', wan, refusal));

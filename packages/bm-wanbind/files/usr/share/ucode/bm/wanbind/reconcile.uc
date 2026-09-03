@@ -342,7 +342,13 @@ export function run(st, ctx) {
 	let started = millis();
 	let now = ctx.now;
 
-	let list = wans.dump(ctx.bus);
+	// The pass reads netifd once and hands the same list to every instance and
+	// to the binding half. Four instances used to mean four dumps of the same
+	// router a few milliseconds apart, which is four different routers as far as
+	// anything comparing them is concerned - and at five hundred sessions each
+	// one is a reply of a few hundred kilobytes.
+	let list = (type(ctx.ifaces) == 'array') ? ctx.ifaces : wans.dump(ctx.bus);
+
 	if (list === null)
 		return { ok: false, reason: 'netifd did not answer, so nothing was changed' };
 

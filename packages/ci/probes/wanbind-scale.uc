@@ -19,7 +19,7 @@ import * as uciLib from 'uci';
 import * as service from 'bm.wanbind.service';
 import * as cfg from 'bm.wanbind.config';
 
-import { check, report } from 'probe';
+import { check, report, says } from 'probe';
 
 let uci = cursor();
 
@@ -255,5 +255,60 @@ check('and answers about all five hundred', length(rows.bindings), 500);
 uciLib.resetCounters();
 let verdict = service.bindCheck({ id: 'newone', ip: '10.9.0.200', wan: 'p001' });
 check('a create check reads twice', uciLib.opened(), 2);
+
+// ===========================================================================
+// One reading of netifd per pass, and a pass that says so when there is none.
+//
+// Every instance and the binding half all need the interface list. Asking once
+// per half was five dumps on a router with four instances - five replies that
+// grow with every session dialled, and five different routers as far as
+// anything comparing them is concerned.
+
+scale.resetBusCounts();
+uciLib.resetCounters();
+
+let ran = service.pass();
+
+check('one dump for the whole pass', scale.busCounts().dump, 1);
+
+// Counted as walks of this package's own file rather than as cursors, because a
+// pass legitimately opens others: /etc/config/network, /etc/config/firewall and
+// /etc/config/dhcp are read by the layout, and none of them is what the
+// snapshot holds. What the snapshot holds is this, and it is read once.
+check('the instances are walked once', uciLib.foreachCount('bm_wanbind', 'instance'), 1);
+check('and the bindings once', uciLib.foreachCount('bm_wanbind', 'direct'), 1);
+check('every instance ran', length(ran), 4);
+check('netifd is answering', service.info().netifd.ok, true);
+
+// A netifd that will not answer is the one failure this daemon cannot work
+// around: every decision it makes is about interfaces, and reading "no answer"
+// as "this router has no interfaces" would take every rule off. So the pass
+// stops - and a pass that stopped quietly would leave every row reading exactly
+// as it did before with nothing anywhere saying why.
+service.attach(scale.busFor(router, { dumpNull: true }));
+scale.resetBusCounts();
+
+service.pass();
+service.pass();
+
+let noAnswer = service.info();
+
+check('the failures are counted', noAnswer.netifd.failures, 2);
+check('and it is not pretending otherwise', noAnswer.netifd.ok, false);
+check('it tried once per pass', scale.busCounts().dump, 2);
+says('the daemon says what stopped', noAnswer.netifd.reason, /netifd did not answer/);
+says('and every instance says it too', noAnswer.instances[0].reason, /netifd did not answer/);
+check('nothing was reconciled', length(service.pass()), 0);
+
+// And when it comes back, it says that as well rather than leaving a router
+// reading "not answering" for ever because nobody restarted anything.
+service.attach(scale.busFor(router, {}));
+service.pass();
+
+let back = service.info();
+
+check('netifd is answering again', back.netifd.ok, true);
+check('and the count starts over', back.netifd.failures, 0);
+check('the pass runs every instance again', length(service.pass()), 4);
 
 report();
