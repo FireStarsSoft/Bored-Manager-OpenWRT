@@ -1282,7 +1282,12 @@ export function carriersList() {
 	return { ok: true, carriers: sort(out, (a, b) => a.name < b.name ? -1 : (a.name > b.name ? 1 : 0)) };
 };
 
-export function info() {
+export function info(members) {
+	// The member lists are eighty bytes a session, so twenty pools of five
+	// hundred is most of the megabyte a ubus reply has. A caller that only wants
+	// the counts asks for none: `members: false`. Absent means yes, because that
+	// is what every caller written before this key did.
+	let withMembers = (members !== false);
 	let out = [];
 
 	for (let st in each()) {
@@ -1297,6 +1302,10 @@ export function info() {
 		one.stopped = counts.stopped;
 		one.unwritten = counts.unwritten;
 		one.createdAt = st.pool.created;
+
+		if (!withMembers)
+			delete one.memberList;
+
 		one.rate = state.rates.pools[st.pool.id]
 			? state.rates.pools[st.pool.id]
 			: { rxBps: 0, txBps: 0 };
@@ -1456,7 +1465,7 @@ function method(args, fn) {
 };
 
 export const methods = {
-	info: method({}, () => info()),
+	info: method({ members: true }, (args) => info(args.members)),
 	stats: method({}, () => stats()),
 
 	// `offset` because the cap is per call and not per router: two pools of

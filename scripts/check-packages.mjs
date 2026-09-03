@@ -881,6 +881,81 @@ for (const name of LUCI_APPS) {
     }
   }
 
+  // 5. The catalogue matches the source.
+  //
+  //    A string wrapped in `_()` that is not in the template is a string that
+  //    ships untranslated however complete the .po looks, and a msgid the
+  //    scanner no longer finds is one somebody is still maintaining a
+  //    translation for. Neither shows up anywhere else: `msgfmt --check` is
+  //    happy with both.
+  //
+  //    A leading or trailing space inside `_()` is called out on its own,
+  //    because it produces a msgid that differs from the one every other
+  //    catalogue has by an invisible character.
+  const pot = join(dir, 'po', 'templates', `${name.replace(/^luci-[a-z]+-/, '')}.pot`)
+
+  if (existsSync(pot)) {
+    const literals = new Map()
+
+    for (const file of scripts) {
+      const source = readFileSync(file, 'utf8')
+      for (const match of source.matchAll(/\b_\(\s*(['"])((?:\\.|(?!\1)[^\\])*)\1/g)) {
+        const raw = match[2]
+          .replace(/\\n/g, '\n')
+          .replace(/\\t/g, '\t')
+          .replace(/\\(['"\\])/g, '$1')
+
+        if (raw !== raw.trim()) {
+          failures.push(
+            `${rel(file)}: _('${raw}') has a space at one end, which makes a msgid nothing else matches`
+          )
+        }
+
+        const collapsed = raw.replace(/[\t\n]+/g, ' ').replace(/ {2,}/g, ' ').trim()
+        if (collapsed) literals.set(collapsed, rel(file))
+      }
+    }
+
+    const ids = new Set()
+    const potText = readFileSync(pot, 'utf8')
+
+    for (const block of potText.split(/\n\n+/)) {
+      const match = block.match(/^msgid ((?:"(?:[^"\\]|\\.)*"\s*)+)/m)
+      if (!match) continue
+      const joined = [...match[1].matchAll(/"((?:[^"\\]|\\.)*)"/g)]
+        .map((one) => one[1].replace(/\\n/g, '\n').replace(/\\(["\\])/g, '$1'))
+        .join('')
+      if (joined) ids.add(joined.replace(/[\t\n]+/g, ' ').replace(/ {2,}/g, ' ').trim())
+    }
+
+    for (const [text, where] of literals) {
+      if (!ids.has(text)) {
+        failures.push(
+          `${rel(pot)}: does not carry "${text.slice(0, 60)}" from ${where} - re-run i18n-scan.pl`
+        )
+      }
+    }
+
+    for (const lang of existsSync(join(dir, 'po')) ? readdirSync(join(dir, 'po')) : []) {
+      if (lang === 'templates') continue
+      const po = join(dir, 'po', lang, `${name.replace(/^luci-[a-z]+-/, '')}.po`)
+      if (!existsSync(po)) continue
+
+      const text = readFileSync(po, 'utf8')
+      let empty = 0
+
+      for (const block of text.split(/\n\n+/)) {
+        if (!/^msgid "/m.test(block)) continue
+        if (/^msgid ""\s*$/m.test(block) && /Project-Id-Version/.test(block)) continue
+        if (/^msgstr ""\s*$/m.test(block) && !/^msgstr ""\n"/m.test(block)) empty += 1
+      }
+
+      if (empty > 0) {
+        console.warn(`warn  ${rel(po)}: ${empty} string(s) with no translation`)
+      }
+    }
+  }
+
   for (const file of scripts) {
     const source = readFileSync(file, 'utf8')
     for (const match of source.matchAll(/declare\((AGENT|WANBIND|PPPOE),\s*'([\w]+)'/g)) {

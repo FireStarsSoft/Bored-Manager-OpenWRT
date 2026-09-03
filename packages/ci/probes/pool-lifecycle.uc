@@ -313,6 +313,14 @@ let fptTold = poolTold(told, 'fpt1');
 // files, so a version bump left this the only red thing in the tree and said
 // nothing about why.
 check('info release', told.release, pppoe.RELEASE);
+
+// The member lists are eighty bytes a session and twenty pools of five hundred
+// is most of the megabyte a ubus reply has, so a caller that wants the counts
+// alone says so. Absent means yes, because that is what every caller written
+// before the key did.
+check('info lists the members by default', type(fptTold.memberList), 'array');
+check('and leaves them out when asked to', type(poolTold(pppoe.info(false), 'fpt1').memberList), null);
+check('while still counting them', poolTold(pppoe.info(false), 'fpt1').members, fptTold.members);
 check('info api version', told.apiVersion, 4);
 check('info lists every pool', length(told.pools), 3);
 check('info never carries a password', exists(fptTold, 'password'), false);

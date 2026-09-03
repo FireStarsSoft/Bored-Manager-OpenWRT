@@ -117,6 +117,12 @@ const calls = {
 
 	// The router-wide limits that decide whether thousands of sessions fit:
 	// conntrack, the neighbour-cache thresholds, and fw4's flow offload.
+	// What this router has against what its configuration needs, worked out on
+	// the router. Read-only; every fix it names is one of the write calls already
+	// declared above. `refresh` skips the agent's own ten-second cache, which is
+	// what a person pressing Re-check means.
+	capacity: declare(AGENT, 'capacity', { refresh: false }),
+
 	tuneGet: declare(AGENT, 'tune_get'),
 	tuneSet: declare(AGENT, 'tune_set', {
 		conntrack_max: 0, gc_thresh1: 0, gc_thresh2: 0, gc_thresh3: 0, flow_offload: false
@@ -174,13 +180,23 @@ const calls = {
 	wanbindSettingsSet: declare(WANBIND, 'settings_set', {
 		enabled: false, interval: 0, direct_pref_base: 0, rule_pref_base: 0,
 		catch_all_pref_base: 0, catch_all_table: 0, wan_table_base: 0,
-		wan_warn_uptime: 0, wan_error_grace: 0, release_grace: 0
+		wan_warn_uptime: 0, wan_error_grace: 0, release_grace: 0,
+		// rpc.declare filters by the template, so a key missing here is a key the
+		// browser cannot send however carefully the form fills it in.
+		lan_local: false, local_pref_base: 0
 	}),
 
-	poolInfo: declare(PPPOE, 'info'),
+	// `members` because the member lists are eighty bytes a session: a page
+	// polling every five seconds does not want twenty pools of five hundred.
+	poolInfo: declare(PPPOE, 'info', { members: true }),
 	poolStats: declare(PPPOE, 'stats'),
-	poolSessions: declare(PPPOE, 'sessions', { id: '', scope: '' }),
-	poolAction: declare(PPPOE, 'action', { action: '', sections: [] }),
+	// `offset` because the cap is per call and not per router: two pools of five
+	// hundred are a thousand rows, and the page pages until the daemon says it
+	// has sent the last of them.
+	poolSessions: declare(PPPOE, 'sessions', { id: '', scope: '', offset: 0 }),
+	// `id` addresses a whole pool without naming five hundred sections, which is
+	// both the payload and the round trip that used to grow with the pool.
+	poolAction: declare(PPPOE, 'action', { action: '', sections: [], id: '' }),
 	poolCarriers: declare(PPPOE, 'carriers'),
 	// The full spec shape, shared by check, create and set. Only the keys a
 	// form actually sends travel - rpc.declare with an object filters by
@@ -214,7 +230,7 @@ function describe(error) {
 	// A method the running agent has never heard of: the packages predate it.
 	// Said as the fix rather than as a fault, because the router is fine.
 	if (/ubus code 3\b/.test(text))
-		return _('The bm-agent on this router does not have that call yet. Update the router packages to 2.1.0 or newer.');
+		return _('The bm-agent on this router does not have that call yet. Update the router packages from the Maintenance tab.');
 	if (/ubus code 7\b/.test(text))
 		return _('The router took too long to answer.');
 	// What a handler that threw replies with, immediately before the exception

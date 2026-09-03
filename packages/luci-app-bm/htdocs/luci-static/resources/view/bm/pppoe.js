@@ -190,22 +190,46 @@ return view.extend({
 		const content = E('div', {});
 		const self = this;
 
+		/**
+		 * Every member of every pool, page by page.
+		 *
+		 * One call carries five hundred rows and that is a cap on the call, not
+		 * on the router: two pools of five hundred are a thousand members, and
+		 * the page used to show the first five hundred with a banner saying the
+		 * rest were "shown incomplete". It pages until the daemon says it has
+		 * sent the last of them.
+		 */
+		function walkSessions(collected, offset, pages) {
+			return api.ask(api.calls.poolSessions, { id: '', scope: 'all', offset: offset })
+				.then(function(result) {
+					if (!result.ok) {
+						state.rowsError = result.error;
+						return null;
+					}
+
+					const data = result.data || {};
+					const rows = Array.isArray(data.sessions) ? data.sessions : [];
+					const seen = collected.concat(rows);
+					const total = (data.total == null) ? seen.length : (data.total | 0);
+					const done = !rows.length || seen.length >= total || pages + 1 >= 8;
+
+					if (!done)
+						return walkSessions(seen, seen.length, pages + 1);
+
+					state.rows = seen;
+					state.limitHit = seen.length < total;
+					state.rowsError = null;
+					return null;
+				});
+		}
+
 		function refresh() {
 			return Promise.all([
-				api.ask(api.calls.poolInfo),
-				api.ask(api.calls.poolSessions, { id: '', scope: 'all' })
+				api.ask(api.calls.poolInfo, { members: true }),
+				walkSessions([], 0, 0)
 			]).then(answers => {
 				if (answers[0].ok) {
 					state.info = answers[0].data;
-				}
-
-				if (answers[1].ok) {
-					state.rows = answers[1].data.sessions ?? [];
-					state.limitHit = state.rows.length >= (answers[1].data.limit | 0);
-					state.rowsError = null;
-				}
-				else {
-					state.rowsError = answers[1].error;
 				}
 
 				self.paint(content);
@@ -283,9 +307,19 @@ return view.extend({
 		for (const pool of pools)
 			blocks.push(this.poolCard(pool));
 
+		// Only after the paging above has given up, which on this router means
+		// more than four thousand members.
 		if (state.limitHit) {
 			blocks.push(E('p', { 'class': 'alert-message warning' },
-				_('The router capped the row list at 500, so the largest pools are shown incomplete here. The Bored Manager app pages through them.')));
+				_('This router has more members than this page will list. The ones above are the first of them; "bmpppoe list" at a console reads the rest.')));
+		}
+
+		// The pool daemon running on events alone. Every state below is the last
+		// thing netifd said, so a session that dropped since still reads up.
+		if (info.blind) {
+			blocks.push(bmui.riskNote(
+				_('netifd is not answering this daemon\'s interface dump (%d failed attempts). Every state below is the last one it saw: a session that has dropped since would still read up here.').format(
+					(info.blind.failures | 0))));
 		}
 
 		blocks.push(this.settingsBlock(info.settings ?? {}));
@@ -309,8 +343,36 @@ return view.extend({
 					return api.run(api.calls.poolReconcile, {}, _('The router has re-read netifd and the counters.'))
 						.then(() => self.refresh());
 				})
-			}, _('Refresh from netifd'))
+			}, _('Refresh from netifd')),
+			offloadButton()
 		]);
+
+		/**
+		 * The switch the create check refuses past sixty-four members without.
+		 *
+		 * Rendered only where the router says it is off, because a button that
+		 * turns on something already on is a button that teaches somebody the
+		 * page does not know what the router is doing. The daemon never writes
+		 * the firewall itself, deliberately - this is the one place it is
+		 * offered, and it is a person pressing it.
+		 */
+		function offloadButton() {
+			const router = (state.info || {}).router || {};
+
+			if (router.flowOffload !== false) return '';
+
+			return E('button', {
+				'class': 'btn cbi-button-apply',
+				'click': ui.createHandlerFn(self, function() {
+					if (!confirm(_('Turn on fw4 software flow offload? The firewall config is committed and fw4 reloaded, which briefly interrupts new connections. Above 64 sessions the router otherwise evaluates every policy rule for every packet.')))
+						return Promise.resolve();
+
+					return api.run(api.calls.tuneSet, { flow_offload: true },
+						_('Flow offload is on and the firewall was reloaded.'))
+						.then(() => self.refresh());
+				})
+			}, _('Enable flow offload'));
+		}
 	},
 
 	/** The pools the old model wrote: shown, explained, and only deletable. */
@@ -495,7 +557,7 @@ return view.extend({
 		const labelInput = bmui.textInput(creating ? '' : (pool.label ?? ''), _('optional'), '18em');
 		const prefixInput = bmui.textInput(creating ? '' : pool.prefix, 'fpt', '6em', !creating);
 
-		const carrierOptions = carriers.map(one => [one.name, '%s%s'.format(one.name, one.up ? '' : _(' (down)'))]);
+		const carrierOptions = carriers.map(one => [one.name, '%s%s'.format(one.name, one.up ? '' : ' ' + _('(down)'))]);
 		const currentCarrier = creating ? (carrierOptions.length ? carrierOptions[0][0] : '') : pool.carrier;
 		if (currentCarrier && !carrierOptions.some(entry => entry[0] === currentCarrier))
 			carrierOptions.unshift([currentCarrier, currentCarrier]);

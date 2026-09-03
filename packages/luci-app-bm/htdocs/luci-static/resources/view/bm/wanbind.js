@@ -86,6 +86,10 @@ const OWNERS = {
 	// fallback would render the commonest rule on the router as an untranslated
 	// word nobody chose.
 	'netifd': ['idle', _('the router itself')],
+	// One rule per LAN, consulted before every binding rule, so a bound address
+	// still reaches the network beside it. Ours, and neutral: it is doing
+	// nothing to anybody and there is nothing to go and look at.
+	'local': ['idle', _('LAN-local escape')],
 	'kernel': ['idle', _('kernel')],
 	'foreign': ['bad', _('not ours')]
 };
@@ -567,10 +571,48 @@ return view.extend({
 				return Promise.resolve(null);
 			}
 
-			return api.ask(api.calls.wanbindRules, {}).then(result => {
-				state.rules = result.ok ? result.data : null;
-				state.rulesError = result.ok ? null : result.error;
+			// Page by page to the end of the table, without the sentences.
+			//
+			// One call carries five hundred rows. At five hundred sessions and
+			// five hundred bindings this router has about fifteen hundred, so a
+			// single call showed a third of them under a heading that did not
+			// say so. The sentences are asked for one at a time instead - see
+			// the Why column - because fifteen hundred paragraphs is most of the
+			// megabyte a ubus reply has.
+			const PAGE = 500;
+			const MAX_PAGES = 10;
 
+			function walk(collected, offset, pages) {
+				return api.ask(api.calls.wanbindRules, {
+					limit: PAGE, offset: offset, reasons: false, collapse: true
+				}).then(result => {
+					if (!result.ok) {
+						state.rules = null;
+						state.rulesError = result.error;
+						return null;
+					}
+
+					const data = result.data || {};
+					const rows = Array.isArray(data.rules) ? data.rules : [];
+					const seen = collected.concat(rows);
+					const total = data.count | 0;
+					const done = !rows.length || seen.length >= total || pages + 1 >= MAX_PAGES;
+
+					if (!done)
+						return walk(seen, seen.length, pages + 1);
+
+					data.rules = seen;
+					// Whether the table was cut is decided once, here: every
+					// page carries the daemon's `capped` about that page, and
+					// the first one always says yes on a large router.
+					data.capped = seen.length < total;
+					state.rules = data;
+					state.rulesError = null;
+					return null;
+				});
+			}
+
+			return walk([], 0, 0).then(() => {
 				self.paintRules(rules, refreshRules);
 				self.paintTiles(tiles);
 				return null;
@@ -1733,6 +1775,44 @@ return view.extend({
 
 		const rows = Array.isArray(data.rules) ? data.rules : [];
 
+		/** A button that fetches this rule's sentence and replaces itself with it. */
+		function explainCell(row) {
+			const cell = E('span', { 'class': 'bm-small' });
+
+			dom.content(cell, E('a', {
+				'href': '#',
+				'click': ui.createHandlerFn(this, function(ev) {
+					ev.preventDefault();
+					dom.content(cell, E('em', { 'class': 'spinning' }, _('Asking...')));
+
+					return api.ask(api.calls.wanbindRuleExplain, {
+						pref: row.pref | 0,
+						cidr: row.cidr || '',
+						dst: row.dst || '',
+						table: row.table | 0
+					}).then(function(result) {
+						if (!result.ok) {
+							dom.content(cell, E('span', { 'class': 'bm-muted' }, result.error));
+							return null;
+						}
+
+						const answer = result.data || {};
+
+						if (answer.found === false) {
+							dom.content(cell, E('span', { 'class': 'bm-muted' },
+								_('The router no longer has this rule. Something has removed it since this table was read.')));
+							return null;
+						}
+
+						dom.content(cell, String((answer.rule || {}).reason || ''));
+						return null;
+					});
+				})
+			}, _('Explain')));
+
+			return cell;
+		}
+
 		const table = new ui.Table([
 			_('Priority'), _('Matches'), _('Table'), _('Owner'), _('Binding'), _('Why')
 		], { id: 'bm-rules' },
@@ -1761,7 +1841,11 @@ return view.extend({
 				// anybody can list the rules, and what somebody standing in
 				// front of a router needs is why this address is not on the
 				// default connection.
-				E('span', { 'class': 'bm-small' }, row.reason ?? '')
+				//
+				// Asked for the one row somebody opens, rather than carried on
+				// every row: at fifteen hundred rules the prose is most of a
+				// megabyte, which is what a ubus reply has in total.
+				explainCell(row)
 			];
 		}));
 
@@ -1808,7 +1892,7 @@ return view.extend({
 					? E('p', { 'class': 'bm-small bm-muted' },
 						_('The router\'s own default route leaves by %s%s.').format(
 							main.device || '?',
-							main.gateway ? _(' via %s').format(main.gateway) : ''))
+							main.gateway ? ' ' + _('via %s').format(main.gateway) : ''))
 					: (answered
 						? E('p', { 'class': 'bm-small' }, bmui.dot('busy',
 							_('The router\'s main table has no default route. Every address this package does not claim - and every one it hands back when a WAN goes down - is looked up there and finds nothing.')))
@@ -1945,7 +2029,10 @@ return view.extend({
 		}
 
 		const settings = state.settings ?? {};
-		const band = settings.band ?? {};
+		// The band is the daemon's, and it travels on `settings_get` beside the
+		// numbers - reading it off `state.bindings` was reading a key that reply
+		// does not carry, so the sentence under this form printed two zeroes.
+		const band = settings.band ?? (state.bindings ?? {}).band ?? {};
 		const self = this;
 
 		const enabled = bmui.checkbox(settings.enabled !== false);
@@ -1956,6 +2043,11 @@ return view.extend({
 		const catchBase = bmui.textInput('%d'.format(settings.catch_all_pref_base | 0), '30000', '8em');
 		const catchTable = bmui.textInput('%d'.format(settings.catch_all_table | 0), '253', '8em');
 		const tableBase = bmui.textInput('%d'.format(settings.wan_table_base | 0), '10000', '8em');
+
+		// On by default, and off is a real answer rather than an unset one - so
+		// this is a checkbox and its base is a number sent beside it.
+		const lanLocal = bmui.checkbox(settings.lan_local !== false);
+		const localBase = bmui.textInput('%d'.format(settings.local_pref_base | 0), '18000', '8em');
 
 		const warnUptime = bmui.textInput('%d'.format(settings.wan_warn_uptime | 0), '5', '6em');
 		const errorGrace = bmui.textInput('%d'.format(settings.wan_error_grace | 0), '20', '6em');
@@ -1970,6 +2062,7 @@ return view.extend({
 				catch_all_pref_base: bmui.whole(catchBase, 1, 2147483647),
 				catch_all_table: bmui.whole(catchTable, 1, 65535),
 				wan_table_base: bmui.whole(tableBase, 1, 65535),
+				local_pref_base: bmui.whole(localBase, 1000, 27999),
 				wan_warn_uptime: bmui.whole(warnUptime, 0, 86400),
 				wan_error_grace: bmui.whole(errorGrace, 0, 86400),
 				release_grace: bmui.whole(releaseGrace, 0, 86400)
@@ -1978,10 +2071,22 @@ return view.extend({
 			for (const key of Object.keys(values)) {
 				if (values[key] === null) {
 					ui.addNotification(null, E('p', {},
-						_('The interval is 1-3600 seconds, priorities 1-2147483647, tables 1-65535 and the timers 0-86400 seconds.')), 'warning');
+						_('The interval is 1-3600 seconds, priorities 1-2147483647, the LAN-local base 1000-27999, tables 1-65535 and the timers 0-86400 seconds.')), 'warning');
 					return Promise.resolve();
 				}
 			}
+
+			// The escape rules are read before every binding rule, so their band
+			// has to end below where the bindings start. Refused here rather
+			// than by the daemon so the person is still looking at the box.
+			if (values.local_pref_base + 64 > values.direct_pref_base) {
+				ui.addNotification(null, E('p', {},
+					_('The LAN-local base %d opens a band 64 wide that reaches %d, which is not below the binding base %d. Every LAN escape has to be read before any binding rule, or a bound address stops reaching the printer beside it.').format(
+						values.local_pref_base, values.local_pref_base + 63, values.direct_pref_base)), 'warning');
+				return Promise.resolve();
+			}
+
+			values.lan_local = lanLocal.checked;
 
 			if (!values.enabled && !confirm(_('Switching the instance half off takes every instance\'s rules away first. Hand-placed bindings stay in force. Go on?')))
 				return Promise.resolve();
@@ -2003,12 +2108,17 @@ return view.extend({
 				bmui.field(_('Hand out WANs to clients'), enabled, _('Off stops every instance and takes their rules off. Bindings placed by hand are not an instance and stay in force.')),
 				bmui.field(_('Pass interval (s)'), interval, _('How often the router re-reads its leases and its rules. A lease arriving is acted on immediately whatever this says.')),
 
+				bmui.field(_('Keep LAN traffic local'), lanLocal,
+					_('On by default. One rule per LAN - "to <LAN subnet> lookup main" - read before every binding rule, so a bound device still reaches the devices beside it. Off, a binding sends every packet from that address out of its WAN, the ones for its own LAN included.')),
+
 				bmui.groupHeading(_('Numbering')),
 				bmui.field(_('Binding priority base'), directBase, _('Where hand-placed bindings are numbered from. They sit below every instance, so the kernel reads them first.')),
 				bmui.field(_('Client priority base'), ruleBase, _('Where the first instance\'s client rules start.')),
 				bmui.field(_('Catch-all priority base'), catchBase, _('Where the first instance\'s fail-closed rule sits.')),
 				bmui.field(_('Catch-all table'), catchTable, _('The first instance\'s "unreachable default" table.')),
 				bmui.field(_('WAN table base'), tableBase, _('Where routing tables are handed out from for WANs that have none.')),
+				bmui.field(_('LAN-local priority base'), localBase,
+					_('1000 to 27999, 18000 by default. The band is 64 wide and has to end below the binding priority base and below every instance\'s own.')),
 
 				bmui.groupHeading(_('Timers')),
 				bmui.field(_('WAN settle time'), warnUptime, _('Seconds a WAN has to have been up before it is handed to a client.')),

@@ -60,11 +60,6 @@ function updateSteps() {
 	];
 }
 
-/** The two tunings a preset fills in, sized by how many clients they seat. */
-const PRESETS = [
-	{ label: _('Up to 1,000 clients'), conntrack: 262144, thresh: [2048, 4096, 8192] },
-	{ label: _('Up to 4,000 clients'), conntrack: 524288, thresh: [4096, 8192, 16384] }
-];
 
 return view.extend({
 	load() {
@@ -581,18 +576,42 @@ return view.extend({
 		const thresh3 = bmui.textInput(values.gc_thresh3 != null ? '%d'.format(values.gc_thresh3) : '', '8192', '8em');
 		const offload = bmui.checkbox(values.flow_offload === true);
 
-		function preset(entry) {
-			return E('button', {
-				'class': 'btn cbi-button-neutral',
-				'click': function(ev) {
-					ev.preventDefault();
-					conntrack.value = '%d'.format(entry.conntrack);
-					thresh1.value = '%d'.format(entry.thresh[0]);
-					thresh2.value = '%d'.format(entry.thresh[1]);
-					thresh3.value = '%d'.format(entry.thresh[2]);
-				}
-			}, entry.label);
-		}
+		// One button, filled from the router's own arithmetic rather than from a
+		// table in this file. What it fills in is what `bm.agent capacity` says
+		// this configuration needs - the same figures the app's Capacity tab and
+		// `bmctl capacity` show, so a console and a page cannot give somebody two
+		// different numbers.
+		const sized = E('button', {
+			'class': 'btn cbi-button-neutral',
+			'click': ui.createHandlerFn(self, function() {
+				return api.ask(api.calls.capacity).then(function(result) {
+					if (!result.ok) {
+						ui.addNotification(null, E('p', {}, result.error), 'warning');
+						return null;
+					}
+
+					const needed = (result.data || {}).needed || {};
+
+					if (typeof needed.conntrackMax !== 'number') {
+						ui.addNotification(null, E('p', {},
+							_('The router did not work out a recommendation. Its capacity report says why.')), 'warning');
+						return null;
+					}
+
+					conntrack.value = '%d'.format(needed.conntrackMax);
+					thresh1.value = '%d'.format(needed.gcThresh1);
+					thresh2.value = '%d'.format(needed.gcThresh2);
+					thresh3.value = '%d'.format(needed.gcThresh3);
+
+					const note = needed.conntrackMemCapped === true
+						? _('Filled in from what this router says it needs. The table is held down by this router\'s memory: a full one at 320 bytes an entry would be an eighth of its RAM.')
+						: _('Filled in from what this router says it needs. Press Apply and persist to write them.');
+
+					ui.addNotification(null, E('p', {}, note), 'info');
+					return null;
+				});
+			})
+		}, _('Sized for this router'));
 
 		const headroom = usage === null
 			? bmui.pill('idle', _('unknown'))
@@ -618,8 +637,7 @@ return view.extend({
 			bmui.field(_('Software flow offload'), offload,
 				_('fw4 fastpath for established flows. Cuts per-packet rule lookups at thousands of linear fib rules; committed to the firewall config and reloaded.')),
 			bmui.toolbar([
-				preset(PRESETS[0]),
-				preset(PRESETS[1]),
+				sized,
 				E('button', {
 					'class': 'btn cbi-button-apply',
 					'click': ui.createHandlerFn(self, function() {

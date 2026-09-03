@@ -76,7 +76,10 @@ function daemonCard(title, what, info, stats, missingText, extra) {
 	}
 
 	const now = api.routerNow(info);
-	const off = info.enabled === false;
+	// bm.pppoe puts its switch under `settings` and has no top-level `enabled`,
+	// so a card reading only the top level called a switched-off pool daemon on.
+	const off = info.enabled === false
+		|| (info.settings && info.settings.enabled === false);
 
 	// `enabled` does not mean the same thing on all three daemons, and on one of
 	// them it is only half a switch. A card whose daemon has a truer sentence
@@ -359,7 +362,7 @@ return view.extend({
 									E('span', {}, api.when(entry.at)),
 									' - ',
 									E('span', {}, activityText(entry)),
-									entry.baseline ? E('em', {}, _(' (baseline)')) : ''
+									entry.baseline ? E('em', {}, ' ' + _('(baseline)')) : ''
 								])))
 								: E('p', {}, _('No snapshot has been taken on this router yet.')))));
 
@@ -371,7 +374,7 @@ return view.extend({
 		poll.add(refresh, 5);
 		refresh();
 
-		dom.content(health, [this.requirementsCard(), this.updatesCard(first.data)]);
+		dom.content(health, [this.requirementsCard(), this.capacityCard(), this.updatesCard(first.data)]);
 
 		return E([], [
 			banner,
@@ -432,6 +435,272 @@ return view.extend({
 				})
 			}, _('Re-check'))
 		});
+	},
+
+	/**
+	 * What this router has, against what its configuration needs.
+	 *
+	 * The whole report is worked out on the router - `bm.agent capacity` - and
+	 * this card is a rendering of one reply. Nothing here sizes anything: a
+	 * second model in the browser would be a second answer, and the two would
+	 * differ on the day somebody most needed one of them.
+	 *
+	 * Polled at thirty seconds rather than the page's five. The report reads a
+	 * dozen files, four uci packages and up to six ubus calls, and the agent
+	 * holds an answer for ten seconds of its own - so a five-second poll would
+	 * be four wasted round trips out of every six.
+	 */
+	capacityCard() {
+		const body = E('div', {}, E('p', { 'class': 'spinning' }, _('Asking the router...')));
+		const head = E('div', {});
+		const self = this;
+
+		function refresh(force) {
+			return api.ask(api.calls.capacity, { refresh: force === true }).then(result => {
+				if (!result.ok) {
+					dom.content(head, bmui.pill('idle', _('unknown')));
+					dom.content(body, E('p', { 'class': 'alert-message warning' }, result.error));
+					return null;
+				}
+
+				self.paintCapacity(head, body, result.data ?? {}, refresh);
+				return null;
+			});
+		}
+
+		poll.add(function() { return refresh(false); }, 30);
+		refresh(false);
+
+		return bmui.card({
+			title: _('Capacity'),
+			pill: head,
+			sub: _('What this router has, against what its configuration needs, and roughly where it stops. Every number is an estimate worked out on the router.'),
+			body: body,
+			footer: E('button', {
+				'class': 'btn cbi-button-neutral',
+				'click': ui.createHandlerFn(this, function() {
+					dom.content(body, E('p', { 'class': 'spinning' }, _('Asking the router...')));
+					return refresh(true);
+				})
+			}, _('Re-check'))
+		});
+	},
+
+	/**
+	 * Every field the report is read through, in one place.
+	 *
+	 * The daemon owns these names. Reading them in one function is what makes a
+	 * rename on the router one edit here rather than six places quietly reading
+	 * undefined and rendering a dash.
+	 */
+	readCapacity(data) {
+		const ceiling = data.ceiling || {};
+		const load = data.load || {};
+		const stability = data.stability || {};
+		const tiers = (data.tiers || {}).sessions || {};
+
+		return {
+			level: String(stability.level || 'unknown'),
+			reason: String(stability.reason || ''),
+			sessions: (load.configured || {}).members,
+			bindings: (load.configured || {}).bindings,
+			ceilingSessions: ceiling.sessions,
+			ceilingBindings: ceiling.bindings,
+			limitedBy: (ceiling.limitedBy || {}).sessions,
+			neededMemKb: (data.needed || {}).memKb,
+			haveMemKb: (data.hardware || {}).memAvailableKb,
+			tierLabel: String(tiers.label || ''),
+			tierNextAt: tiers.next ? tiers.next.at : null,
+			rows: (data.requirements || []).concat(data.issues || [])
+		};
+	},
+
+	paintCapacity(head, body, data, refresh) {
+		const self = this;
+		const read = this.readCapacity(data);
+		const pills = {
+			stable: ['ok', _('stable')],
+			'at-risk': ['warn', _('at risk')],
+			unstable: ['bad', _('unstable')]
+		};
+		const chosen = pills[read.level] || ['idle', _('unknown')];
+
+		dom.content(head, bmui.pill(chosen[0], chosen[1]));
+
+		function mb(kb) {
+			return (typeof kb === 'number') ? '%d MB'.format(kb / 1024) : '-';
+		}
+
+		function about(value) {
+			return (typeof value === 'number') ? '~%d'.format(value) : '-';
+		}
+
+		const tiles = bmui.tiles([
+			[_('Sessions'), '%s / %s'.format(read.sessions == null ? '-' : read.sessions, about(read.ceilingSessions))],
+			[_('Bindings'), '%s / %s'.format(read.bindings == null ? '-' : read.bindings, about(read.ceilingBindings))],
+			[_('Memory needed'), mb(read.neededMemKb)],
+			[_('Memory available'), mb(read.haveMemKb)],
+			[_('Tier'), read.tierLabel || '-'],
+			[_('Next tier at'), read.tierNextAt == null ? '-' : String(read.tierNextAt)]
+		]);
+
+		const lines = [tiles];
+
+		if (read.reason)
+			lines.push(E('p', { 'class': 'bm-small' }, read.reason));
+
+		if (read.limitedBy)
+			lines.push(E('p', { 'class': 'bm-small' }, _('Limited first by %s.').format(read.limitedBy)));
+
+		// Errors first, then warnings, then the rest: the list is what somebody
+		// scans, and a row that is merely a note has no business above one that
+		// says the router is over its ceiling.
+		const order = { error: 0, warning: 1, info: 2, pass: 3 };
+		const seen = {};
+		const rows = [];
+
+		read.rows.forEach(function(row) {
+			const key = String((row || {}).key || '');
+			if (!key || seen[key]) return;
+			seen[key] = true;
+			rows.push(row);
+		});
+
+		rows.sort(function(a, b) {
+			return (order[a.level] == null ? 4 : order[a.level]) - (order[b.level] == null ? 4 : order[b.level]);
+		});
+
+		rows.forEach(function(row) {
+			lines.push(self.capacityRow(row, refresh));
+		});
+
+		dom.content(body, lines);
+	},
+
+	/**
+	 * One finding, with a Fix button where this page has a call that writes it.
+	 *
+	 * The arguments are checked here rather than passed through, and that is the
+	 * point of the function: the report arrives over a wire, and the fixes in it
+	 * name write calls on somebody's router. A settings fix may carry exactly
+	 * the one switch it is allowed to throw; a tune fix may carry only figures
+	 * inside the tunable's own bounds. Anything else renders as a row with no
+	 * button and its own detail still saying what to do by hand.
+	 */
+	capacityRow(row, refresh) {
+		const level = String(row.level || 'info');
+		const pill = level === 'error'
+			? bmui.pill('bad', _('problem'))
+			: (level === 'warning'
+				? bmui.pill('warn', _('warning'))
+				: (level === 'pass' ? bmui.pill('ok', _('ok')) : bmui.pill('idle', _('note'))));
+
+		const parts = [
+			E('div', {}, pill),
+			E('div', { 'class': 'bm-req-body' }, [
+				E('div', { 'class': 'bm-req-label' }, String(row.label || '')),
+				E('div', { 'class': 'bm-req-detail bm-small' }, String(row.detail || ''))
+			])
+		];
+
+		const fix = this.capacityFix(row);
+
+		if (fix) {
+			parts.push(E('div', {}, E('button', {
+				'class': 'btn cbi-button-apply',
+				'click': ui.createHandlerFn(this, function() {
+					if (!confirm(_('Apply this fix on the router now? %s').format(fix.what)))
+						return Promise.resolve();
+
+					return api.run(fix.call, fix.args, _('Applied. Asking the router again.'))
+						.then(function() { return refresh(true); });
+				})
+			}, _('Fix'))));
+		}
+
+		return E('div', { 'class': 'bm-req-row' }, parts);
+	},
+
+	/** The call and arguments for one finding, or null when there is no button. */
+	capacityFix(row) {
+		const fix = row.fix;
+
+		if (!fix || typeof fix !== 'object') return null;
+
+		const kind = String(fix.kind || '');
+		const args = (fix.args && typeof fix.args === 'object') ? fix.args : {};
+
+		if (kind === 'wanbind_reconcile') {
+			return {
+				call: api.calls.wanbindReconcile,
+				args: { instance: '', wait: true },
+				what: _('bm-wanbind runs a full pass and puts back every rule it decided and the kernel does not have.')
+			};
+		}
+
+		if (kind === 'pool_reconcile') {
+			return {
+				call: api.calls.poolReconcile,
+				args: {},
+				what: _('bm-pppoe-pool re-reads netifd, its counters and its firewall zones. The firewall reloads only if something changed.')
+			};
+		}
+
+		if (kind === 'wanbind_settings_set') {
+			// One switch, and nothing else. A reply asking for `enabled: false`
+			// under this kind would be asking this page to stop the daemon
+			// through a button labelled Fix.
+			if (args.lan_local !== true) return null;
+
+			return {
+				call: api.calls.wanbindSettingsSet,
+				args: { lan_local: true },
+				what: _('LAN-local rules go back on, so a bound address still reaches this router\'s other networks.')
+			};
+		}
+
+		if (kind === 'tune_set') {
+			const bounds = {
+				conntrack_max: [16384, 4194304],
+				gc_thresh1: [128, 1048576],
+				gc_thresh2: [128, 1048576],
+				gc_thresh3: [128, 1048576]
+			};
+			const wanted = {};
+			let named = [];
+			let key;
+
+			for (key in args) {
+				if (!Object.prototype.hasOwnProperty.call(args, key)) continue;
+
+				if (key === 'flow_offload') {
+					if (args[key] !== true) return null;
+					wanted.flow_offload = true;
+					named.push(_('fw4 software flow offload on, and the firewall reloaded'));
+					continue;
+				}
+
+				const range = bounds[key];
+				const value = args[key];
+
+				if (!range || typeof value !== 'number' || value < range[0] || value > range[1])
+					return null;
+
+				wanted[key] = value;
+				named.push('%s = %d'.format(key, value));
+			}
+
+			if (!named.length) return null;
+
+			return { call: api.calls.tuneSet, args: wanted, what: named.join(', ') + '.' };
+		}
+
+		// `wanbind_instance_set` is deliberately not here. Raising a LAN's lease
+		// ceiling goes through `instance_set`, which takes the whole instance -
+		// so a button on this card would have to resend a LAN and a carrier it
+		// has not read, and getting either wrong rewrites the instance. The
+		// row's own detail says the two `uci set` lines instead.
+		return null;
 	},
 
 	requirementRow(row, refresh) {
