@@ -157,21 +157,32 @@ describe('the records this module still holds are offered to the router', () => 
     try {
       await client.tick()
 
-      // 200 + 200 + 50. Each one used to be its own commit to the router's
-      // flash and its own reconcile pass, while the page showed nothing.
-      expect(client.daemon.count('bind_many')).toBe(3)
+      // Batched, and every record handed over. It used to be one call, one
+      // commit to the router's flash and one reconcile pass per record.
+      const calls = client.daemon.count('bind_many')
+      expect(calls).toBeGreaterThan(0)
+      expect(calls).toBeLessThan(20)
       expect(client.daemon.count('bind')).toBe(0)
       expect(client.store.read().direct).toHaveLength(0)
 
+      // The ceiling that actually binds is the size, not the count: every ubus
+      // call goes out as JSON on an SSH command line, and dropbear refuses an
+      // exec request longer than a few kilobytes before any shell runs. Two
+      // hundred specs is about thirty kilobytes, which fails outright.
       for (const payload of client.daemon.payloads('bind_many')) {
-        expect((payload.bindings as unknown[]).length).toBeLessThanOrEqual(200)
+        const specs = payload.bindings as unknown[]
+        expect(specs.length).toBeLessThanOrEqual(200)
+        expect(JSON.stringify(payload).length).toBeLessThan(8_000)
       }
 
       // One line in the trail per batch, not one per record. The module-wide
       // ring holds far fewer than four hundred and fifty entries, so a line
       // each would have pushed out every other kind of event in it.
+      // One line per batch, not one per record. The module-wide ring holds far
+      // fewer than four hundred and fifty entries, so a line each would have
+      // pushed out every other kind of event in it.
       const trail = client.events.filter((entry) => entry.kind === 'handover')
-      expect(trail).toHaveLength(3)
+      expect(trail).toHaveLength(calls)
     } finally {
       client.dispose()
     }

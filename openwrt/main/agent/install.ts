@@ -52,6 +52,16 @@ const DOWNLOAD_TIMEOUT_MS = 180_000
  * cost of waiting is a few seconds on a step nobody watches and the cost of not
  * waiting is an install that worked being reported as broken.
  */
+/**
+ * The guard window the module asks `bmctl update` for.
+ *
+ * Its own default is 120 seconds, which has to cover the install, the schema
+ * migration, the agent's deferred restart and this module reading the router
+ * back before the confirm can be sent. Five minutes is comfortably inside what
+ * the agent will accept and comfortably outside what any of that takes.
+ */
+const GUARD_WINDOW_SEC = 300
+
 const RESTART_GRACE_MS = 6_000
 
 function clean(result: ModuleExecResult): string {
@@ -308,7 +318,12 @@ function jobItems(runtime: AgentRuntime, plan: FrozenInstallPlan): JobItemSpec[]
         // here would be a second implementation of the part that has to be
         // right, running on the side of the connection that cannot be trusted
         // to survive it.
-        const result = await deps.ctx.exec('bmctl update --json', {
+        // The guard window is named rather than left at the router's own 120
+        // seconds. Everything that has to happen before the confirm - the
+        // install, the migration, the deferred restart of the agent, and this
+        // module reading the router back - has to fit inside it, and on a slow
+        // router with a large configuration it did not.
+        const result = await deps.ctx.exec(`bmctl update --json --timeout ${GUARD_WINDOW_SEC}`, {
           timeoutMs: INSTALL_TIMEOUT_MS
         })
         if (result.code !== 0) {
@@ -335,6 +350,15 @@ function jobItems(runtime: AgentRuntime, plan: FrozenInstallPlan): JobItemSpec[]
     items.push({
       name: 'Read the router back and keep the change',
       run: async (): Promise<void | { warning: string }> => {
+        // Waited out rather than probed into. `bm-agent`'s postinst backgrounds
+        // its own restart a few seconds after apk returns - deferred so that an
+        // update taken from the router can answer before the process running it
+        // is replaced - so the object disappears at a moment this side cannot
+        // see coming. Probing first would as often as not be answered by the
+        // process the update just replaced, and the confirm a moment later
+        // would land in the gap.
+        await new Promise((resolve) => setTimeout(resolve, RESTART_GRACE_MS))
+
         let next = await deps.reprobe()
 
         if (!next.agent.running) {
@@ -344,8 +368,10 @@ function jobItems(runtime: AgentRuntime, plan: FrozenInstallPlan): JobItemSpec[]
 
         if (!next.agent.installed || !next.agent.running) {
           throw new Error(
-            'the router updated itself and its agent is not answering afterwards - ' +
-              'the guard it armed will restore the previous packages within its timeout'
+            'the router updated itself and its agent is not answering afterwards. The packages ' +
+              'stay installed; what the guard will do is put back the configuration the router ' +
+              'had before and reload its network. `bmctl rollback` at a router shell is what ' +
+              'puts the previous packages back.'
           )
         }
 
@@ -355,17 +381,27 @@ function jobItems(runtime: AgentRuntime, plan: FrozenInstallPlan): JobItemSpec[]
         // commands. An agent too old to have a guard answers this the same way
         // it answers everything else it does not have, and that is not a
         // failure either - there was nothing counting down.
-        const kept = unwrap(
-          await agentCall({ ctx: deps.ctx, capability: deps.agent }, 'guard_confirm')
-        )
+        const confirm = (): Promise<{ ok: boolean; error: string | null }> =>
+          agentCall({ ctx: deps.ctx, capability: deps.agent }, 'guard_confirm').then(unwrap)
+
+        let kept = await confirm()
+
+        // Once more, because the only thing this call is racing is a restart
+        // that takes a second or two. A single attempt that lands in it leaves
+        // the router undoing an update this side just reported as done.
+        if (!kept.ok) {
+          await new Promise((resolve) => setTimeout(resolve, RESTART_GRACE_MS))
+          kept = await confirm()
+        }
 
         if (!kept.ok) {
           return {
             warning:
-              `${next.agent.release} is installed and answering, but the guard it armed was ` +
-              `not confirmed: ${kept.error ?? 'the agent did not answer'}. Unless \`bmctl ` +
-              'config confirm\` is run on the router, it will restore the packages it had ' +
-              'before, within the guard\'s timeout.'
+              `${next.agent.release} is installed and stays installed, but the guard the update ` +
+              `armed was not confirmed: ${kept.error ?? 'the agent did not answer'}. Unless ` +
+              '`bmctl config confirm` is run on the router, it will put back the configuration ' +
+              'it had before the update - network, firewall, dhcp and this module\'s own - and ' +
+              'reload those services, within the guard\'s timeout.'
           }
         }
       }

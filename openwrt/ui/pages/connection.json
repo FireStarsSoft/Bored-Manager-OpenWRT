@@ -2235,7 +2235,7 @@
                                       "tone": "warning",
                                       "lines": [
                                         "The sentence below is not a call that failed - this router is answering. It is the router disagreeing with something it was asked for, or a record this module still holds that the daemon has not taken over yet, and it is the only place either is stated.",
-                                        "Where it names something made before the router kept its own binding, that thing is offered to the daemon again on every pass, with the priority and the table it was stamped with. Its ip rules stand exactly where they were meanwhile, and traffic still follows them - what has stopped is anything reacting to a change. Fix what the sentence names and the next pass finishes the handover; nothing here has to be pressed."
+                                        "Where it names something made before the router kept its own binding, that thing is offered to the daemon again on every pass, with the priority and the table it was stamped with. The sentence below says what is happening to its ip rules meanwhile, which depends on what this router has: with no bm-wanbind they stand where they were and nothing maintains them, and with one this module cannot drive they are being removed by it. Fix what the sentence names and the next pass finishes the handover; nothing here has to be pressed."
                                       ]
                                     },
                                     {
@@ -2606,7 +2606,7 @@
                                       "tone": "warning",
                                       "lines": [
                                         "The sentence below is not a call that failed - this router is answering. It is the router disagreeing with something it was asked for, or a record this module still holds that the daemon has not taken over yet, and it is the only place either is stated.",
-                                        "Where it names something made before the router kept its own binding, that thing is offered to the daemon again on every pass, with the priority and the table it was stamped with. Its ip rules stand exactly where they were meanwhile, and traffic still follows them - what has stopped is anything reacting to a change. Fix what the sentence names and the next pass finishes the handover; nothing here has to be pressed."
+                                        "Where it names something made before the router kept its own binding, that thing is offered to the daemon again on every pass, with the priority and the table it was stamped with. The sentence below says what is happening to its ip rules meanwhile, which depends on what this router has: with no bm-wanbind they stand where they were and nothing maintains them, and with one this module cannot drive they are being removed by it. Fix what the sentence names and the next pass finishes the handover; nothing here has to be pressed."
                                       ]
                                     },
                                     {
@@ -2686,7 +2686,7 @@
                                           "key": "ipfull",
                                           "label": "Policy routing (ip-full)",
                                           "input": "checkbox",
-                                          "initial": true
+                                          "initial": false
                                         },
                                         {
                                           "key": "dnsmasq",
@@ -3284,7 +3284,7 @@
                                       "tone": "warning",
                                       "lines": [
                                         "The sentence below is not a call that failed - this router is answering. It is the router disagreeing with something it was asked for, or a record this module still holds that the daemon has not taken over yet, and it is the only place either is stated.",
-                                        "Where it names something made before the router kept its own binding, that thing is offered to the daemon again on every pass, with the priority and the table it was stamped with. Its ip rules stand exactly where they were meanwhile, and traffic still follows them - what has stopped is anything reacting to a change. Fix what the sentence names and the next pass finishes the handover; nothing here has to be pressed."
+                                        "Where it names something made before the router kept its own binding, that thing is offered to the daemon again on every pass, with the priority and the table it was stamped with. The sentence below says what is happening to its ip rules meanwhile, which depends on what this router has: with no bm-wanbind they stand where they were and nothing maintains them, and with one this module cannot drive they are being removed by it. Fix what the sentence names and the next pass finishes the handover; nothing here has to be pressed."
                                       ]
                                     },
                                     {
@@ -4194,7 +4194,7 @@
                                       "tone": "warning",
                                       "lines": [
                                         "The sentence below is not a call that failed - this router is answering. It is the router disagreeing with something it was asked for, or a record this module still holds that the daemon has not taken over yet, and it is the only place either is stated.",
-                                        "Where it names something made before the router kept its own binding, that thing is offered to the daemon again on every pass, with the priority and the table it was stamped with. Its ip rules stand exactly where they were meanwhile, and traffic still follows them - what has stopped is anything reacting to a change. Fix what the sentence names and the next pass finishes the handover; nothing here has to be pressed."
+                                        "Where it names something made before the router kept its own binding, that thing is offered to the daemon again on every pass, with the priority and the table it was stamped with. The sentence below says what is happening to its ip rules meanwhile, which depends on what this router has: with no bm-wanbind they stand where they were and nothing maintains them, and with one this module cannot drive they are being removed by it. Fix what the sentence names and the next pass finishes the handover; nothing here has to be pressed."
                                       ]
                                     },
                                     {
@@ -4274,7 +4274,7 @@
                                           "key": "ipfull",
                                           "label": "Policy routing (ip-full)",
                                           "input": "checkbox",
-                                          "initial": true
+                                          "initial": false
                                         },
                                         {
                                           "key": "dnsmasq",
@@ -4558,7 +4558,7 @@
                                       "tone": "warning",
                                       "lines": [
                                         "The sentence below is not a call that failed - this router is answering. It is the router disagreeing with something it was asked for, or a record this module still holds that the daemon has not taken over yet, and it is the only place either is stated.",
-                                        "Where it names something made before the router kept its own binding, that thing is offered to the daemon again on every pass, with the priority and the table it was stamped with. Its ip rules stand exactly where they were meanwhile, and traffic still follows them - what has stopped is anything reacting to a change. Fix what the sentence names and the next pass finishes the handover; nothing here has to be pressed."
+                                        "Where it names something made before the router kept its own binding, that thing is offered to the daemon again on every pass, with the priority and the table it was stamped with. The sentence below says what is happening to its ip rules meanwhile, which depends on what this router has: with no bm-wanbind they stand where they were and nothing maintains them, and with one this module cannot drive they are being removed by it. Fix what the sentence names and the next pass finishes the handover; nothing here has to be pressed."
                                       ]
                                     },
                                     {
@@ -4985,7 +4985,7 @@
                                       "tone": "warning",
                                       "lines": [
                                         "The sentence below is not a call that failed - this router is answering. It is the router disagreeing with something it was asked for, or a record this module still holds that the daemon has not taken over yet, and it is the only place either is stated.",
-                                        "Where it names something made before the router kept its own binding, that thing is offered to the daemon again on every pass, with the priority and the table it was stamped with. Its ip rules stand exactly where they were meanwhile, and traffic still follows them - what has stopped is anything reacting to a change. Fix what the sentence names and the next pass finishes the handover; nothing here has to be pressed."
+                                        "Where it names something made before the router kept its own binding, that thing is offered to the daemon again on every pass, with the priority and the table it was stamped with. The sentence below says what is happening to its ip rules meanwhile, which depends on what this router has: with no bm-wanbind they stand where they were and nothing maintains them, and with one this module cannot drive they are being removed by it. Fix what the sentence names and the next pass finishes the handover; nothing here has to be pressed."
                                       ]
                                     },
                                     {

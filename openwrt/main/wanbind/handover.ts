@@ -70,7 +70,6 @@
 import { safeUciWord, wanbindSection } from '../uci'
 import {
   wanbindBindMany,
-  wanbindBindings,
   wanbindInstanceSet,
   type AgentDeps,
   type WanbindBindSpec,
@@ -255,6 +254,24 @@ function refusal(
 const HANDOVER_CHUNK = 200
 
 /**
+ * And how many bytes of them, which is the ceiling that actually binds.
+ *
+ * Every ubus call this module makes puts its whole JSON payload on an SSH
+ * command line, and dropbear - the SSH server OpenWrt ships - refuses an exec
+ * request whose command is longer than a few kilobytes, before any shell runs.
+ * Two hundred specs is about thirty kilobytes, so batching by count alone
+ * turned a slow handover into one that fails outright, on precisely the routers
+ * it was added for. Nothing else in this module has ever put a payload this
+ * size on a command line - the pool spec goes through a file for the same
+ * reason.
+ *
+ * Six kilobytes of JSON leaves room for the shell quoting to grow around a name
+ * somebody typed. It is about forty specs a call, which is still one commit and
+ * one pass for forty records instead of forty of each.
+ */
+const HANDOVER_BYTES = 6_000
+
+/**
  * Every one-to-one binding this module still holds, offered in batches.
  *
  * One call per two hundred rather than one per record, and at the size this
@@ -322,10 +339,27 @@ async function handOverBindings(
     })
   }
 
-  for (let at = 0; at < pending.length; at += HANDOVER_CHUNK) {
+  for (let at = 0; at < pending.length; ) {
     if (!alive()) return
 
-    const batch = pending.slice(at, at + HANDOVER_CHUNK)
+    // Filled by size and by count, and always at least one - a single record
+    // too large for the budget is still better sent than skipped for ever.
+    const batch: typeof pending = []
+    let bytes = 2
+
+    while (at < pending.length && batch.length < HANDOVER_CHUNK) {
+      const next = pending[at]
+      if (!next) break
+
+      const cost = JSON.stringify(next.spec).length + 1
+
+      if (batch.length > 0 && bytes + cost > HANDOVER_BYTES) break
+
+      batch.push(next)
+      bytes += cost
+      at += 1
+    }
+
     const confirmed: DirectBindingRecord[] = []
     const reply = await wanbindBindMany(deps, batch.map((one) => one.spec))
 
@@ -339,23 +373,17 @@ async function handOverBindings(
       continue
     }
 
-    const rows = new Map(reply.data.results.map((row) => [row.id, row]))
+    if (!alive()) return
 
-    // The batch reply says what was *written*, and written is not the same as
-    // kept: the daemon's own configuration reader runs afterwards, and a
-    // section it throws out is on the router and is still not a binding - it
-    // installs no rule and seats nobody. The single form got that verdict back
-    // in the same reply; the batch form does not carry it, so the list is read
-    // once per batch rather than once per record.
-    //
-    // A list this module cannot read is not taken as approval. Every record in
-    // the batch is kept and named, and the next tick offers them again - which
-    // costs one repeated call and never drops a record on a silence.
-    const listed = await wanbindBindings(deps)
-    const held = new Map(
-      (listed.ok && listed.data ? listed.data.bindings : []).map((row) => [row.id, row])
-    )
-    const readable = listed.ok && Boolean(listed.data)
+    // `results[].ok` is the daemon's own read-back, not merely "it was
+    // written". `bindMany` re-snapshots after its commit, reads every section
+    // it wrote through the same reader a hand-typed one goes through, and for
+    // one that does not survive it restores the section and flips the row to
+    // `ok: false` with the reason. So written-but-unreadable - the case that
+    // produces two ids for one binding if it is got wrong - arrives here as a
+    // refusal, and asking the router a second time would only be a second
+    // chance to lose a record on a call that failed.
+    const rows = new Map(reply.data.results.map((row) => [row.id, row]))
 
     for (const one of batch) {
       const row = rows.get(one.id)
@@ -377,25 +405,6 @@ async function handOverBindings(
       }
 
       outcome.wrote += 1
-
-      if (!readable) {
-        strand(
-          outcome,
-          'binding',
-          one.id,
-          one.record.name,
-          'the router took it and then would not list what it now holds, so this module cannot tell whether the section it wrote is one the daemon will act on'
-        )
-        continue
-      }
-
-      const refused = refusal({ ok: true, error: null }, held.get(one.id))
-
-      if (refused) {
-        strand(outcome, 'binding', one.id, one.record.name, refused)
-        continue
-      }
-
       confirmed.push(one.record)
     }
 

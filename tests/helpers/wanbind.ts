@@ -560,16 +560,24 @@ export function fakeWanbind(seed: Partial<WanbindState> = {}): WanbindDaemon {
           return { id, ok: false, pref: 0, table: 0, reason: answered.reason ?? 'refused' }
         }
 
-        // A real daemon that wrote a section lists it afterwards, whatever its
-        // own reader then makes of it - and the caller reads that list back to
-        // tell "written" from "kept". An override answering with a row has
-        // therefore written one, so the state has to hold it or the read-back
-        // sees a router that took the section and lost it.
-        if (answered.binding && overrides.has('bind')) {
-          const row = answered.binding as unknown as RouterBinding
-          const seen = state.bindings.findIndex((entry) => entry.id === row.id)
-          if (seen >= 0) state.bindings[seen] = row
-          else state.bindings.push(row)
+        // The daemon re-snapshots after its commit and reads every section it
+        // wrote through the same reader a hand-typed one goes through: one that
+        // does not survive is restored and its row flipped to `ok: false` with
+        // the reason. So "written" and "kept" are already told apart in this
+        // reply, and the fake has to tell them apart too or a test about the
+        // second would be passing on the first.
+        const row = answered.binding as { usable?: boolean; reason?: string } | undefined
+
+        if (row && row.usable === false) {
+          const at = state.bindings.findIndex((entry) => entry.id === id)
+          if (at >= 0) state.bindings.splice(at, 1)
+          return {
+            id,
+            ok: false,
+            pref: 0,
+            table: 0,
+            reason: row.reason || 'the binding was written but cannot be read back'
+          }
         }
 
         return {
