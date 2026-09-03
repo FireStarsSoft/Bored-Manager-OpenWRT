@@ -811,4 +811,32 @@ let mine = service.waiting('bmi_lan', { include_reserved: true, limit: 2000 });
 check('one instance answers about its own LAN only', mine.counts.reserved <= 130, true);
 check('rather than about every binding on the router', mine.counts.reserved > 0, true);
 
+// ===========================================================================
+// A reload is a re-read, not a restart.
+//
+// Stopping this service takes every rule off the router and starting writes
+// them all back, so `/sbin/reload_config` - or a Save & Apply in LuCI - used to
+// mean five hundred rules removed, a firewall reload, and five hundred written
+// again, for a configuration change that may have been one line.
+
+let beforeReload = service.info();
+let keptState = beforeReload.instances[0].id;
+
+uloop.resetTimers();
+let reloaded = service.reloadConfig();
+
+check('every instance is still there', reloaded.instances, 4);
+check('and none was rebuilt, because none changed', reloaded.rebuilt, 0);
+check('all four kept what they had', reloaded.kept, 4);
+check('a pass is asked for rather than run', reloaded.pending, true);
+check('and the instance is the same one', service.info().instances[0].id, keptState);
+
+// One section edited, one instance rebuilt, the other three untouched.
+uci.set('bm_wanbind', 'bmi_guest', 'clients_per_wan', '3');
+
+let after = service.reloadConfig();
+
+check('the edited instance is rebuilt', after.rebuilt, 1);
+check('and the other three are not', after.kept, 3);
+
 report();

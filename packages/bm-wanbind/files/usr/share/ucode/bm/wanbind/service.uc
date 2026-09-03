@@ -209,7 +209,23 @@ let state = {
 	folded: 0,
 	coalesced: 0,
 	owed: {},
-	lastPass: { kind: '', at: 0, folded: 0 }
+	lastPass: { kind: '', at: 0, folded: 0 },
+
+	// Where the last pass spent its time.
+	//
+	// Not decoration: the interval is thirty seconds and a pass that takes
+	// longer than it is a router whose passes overlap. Which *part* is slow is
+	// the whole question - a slow dump is netifd, a slow config read is the
+	// file, slow rules are the kernel - and a single total says none of it.
+	timings: {
+		configMs: 0,
+		dumpMs: 0,
+		classifyMs: 0,
+		localMs: 0,
+		instancesMs: 0,
+		directMs: 0,
+		totalMs: 0
+	}
 };
 
 // How often a netifd that is not answering is worth another line in syslog.
@@ -239,6 +255,17 @@ const WAITING_LIMIT_MAX = 2000;
  * bindings as three calls, which is three commits rather than five hundred.
  */
 const BIND_MANY_LIMIT = 200;
+
+/**
+ * Milliseconds off the monotonic clock, for measuring one pass.
+ *
+ * Monotonic rather than the wall clock: an NTP step during a pass would
+ * otherwise be reported as the pass having taken an hour, or minus one.
+ */
+function millis() {
+	let now = clock(true);
+	return type(now) == 'array' ? (now[0] * 1000 + now[1] / 1000000) : 0;
+}
 
 /** Resident set size in kilobytes, or -1 when /proc did not say. */
 function rssKb() {
@@ -467,6 +494,8 @@ function localEscapes(snap, view) {
 export function pass() {
 	let now = time();
 	let out = [];
+	let started = millis();
+	let mark = started;
 
 	// One read of the configuration for the whole pass, and the only place that
 	// asks for the refusals to be written to syslog: a bad section is a sentence
@@ -474,11 +503,17 @@ export function pass() {
 	// once per question anybody asks this daemon.
 	let snap = cfg.snapshot({ log: true });
 
+	state.timings.configMs = millis() - mark;
+	mark = millis();
+
 	// One read of netifd for the whole pass, for the same reason. Every instance
 	// and the binding half all need the interface list; asking once per half was
 	// five dumps on a router with four instances, each one a reply that grows
 	// with every session dialled.
 	let ifaces = wans.dump(state.bus);
+
+	state.timings.dumpMs = millis() - mark;
+	mark = millis();
 
 	if (ifaces === null) {
 		state.netifd.ok = false;
@@ -519,12 +554,18 @@ export function pass() {
 	// two passes over one dump answer the same question twice.
 	let view = layout.classify(ifaces, layout.statements());
 
+	state.timings.classifyMs = millis() - mark;
+	mark = millis();
+
 	// Before the instances and before the bindings, and that order is
 	// load-bearing on the first pass after an upgrade: the escapes have to be
 	// in the kernel before a rule that sends an address to a WAN's table is
 	// verified against it, or there is a window in which a bound machine cannot
 	// reach the network it is sitting on.
 	localEscapes(snap, view);
+
+	state.timings.localMs = millis() - mark;
+	mark = millis();
 
 	// Read before the instances run, from the rows the last binding pass left,
 	// so that every instance on the router is told the same thing about which
@@ -545,11 +586,17 @@ export function pass() {
 			push(out, reconcile.run(st, ctx));
 	}
 
+	state.timings.instancesMs = millis() - mark;
+	mark = millis();
+
 	// Deliberately after the instances. A binding's priority is below every
 	// instance's client range, so the kernel reads it first whatever order they
 	// were written in - but a pass that put bindings first would be writing
 	// rules from a device list the instances are about to refresh.
 	direct.run(ctx);
+
+	state.timings.directMs = millis() - mark;
+	state.timings.totalMs = millis() - started;
 
 	state.ticks = state.ticks + 1;
 	return out;
@@ -1042,7 +1089,12 @@ export function stats() {
 			pending: (state.soon != null),
 			due: state.soon ? state.dueAt : 0,
 			owed: state.owed
-		}
+		},
+
+		// Where the last pass spent its time. A pass that takes longer than the
+		// interval is a router whose passes overlap, and which part is slow is
+		// the whole question.
+		timings: state.timings
 	};
 };
 
@@ -1200,6 +1252,79 @@ export function waiting(id, opts) {
 		limit: limit,
 		offset: offset,
 		capped: (to < total)
+	};
+};
+
+/**
+ * Re-read the configuration without stopping.
+ *
+ * What this replaces is a restart, and on a router carrying five hundred
+ * bindings a restart is not a small thing: stopping runs `bmwan flush`, which
+ * takes every rule off, and starting writes them all back. For the second or
+ * two in between, every bound address falls back to the router's ordinary
+ * routing - and `/sbin/reload_config`, or Save & Apply in LuCI, is enough to
+ * cause it, because procd watches this package's file.
+ *
+ * An instance's pool and queue are this process's own memory, so an instance
+ * whose section has changed is rebuilt and loses its sticky choices; one whose
+ * section has not is left exactly as it is. The bindings need nothing: they are
+ * re-read from the file on every pass.
+ */
+export function reloadConfig() {
+	let snap = cfg.snapshot({ log: true });
+	let before = state.instances;
+
+	state.main = cfg.main(snap);
+	state.instances = {};
+	state.order = [];
+
+	let rebuilt = 0;
+	let kept = 0;
+
+	for (let one in cfg.instances(snap)) {
+		if (!one.enabled) {
+			notice('instance ' + one.id + ' is disabled; its rules will be removed');
+			continue;
+		}
+
+		let had = before[one.id];
+
+		// Compared as the record the engine was built from, because that is
+		// exactly what would be different about the state if it were rebuilt.
+		// Anything else - a rename, a comment - is not worth a pool of sticky
+		// choices being thrown away.
+		if (had != null && sprintf('%J', had.instance) == sprintf('%J', one)) {
+			state.instances[one.id] = had;
+			kept++;
+		}
+		else {
+			state.instances[one.id] = engine.create(one);
+			rebuilt++;
+		}
+
+		push(state.order, one.id);
+	}
+
+	let band = cfg.directBand(snap);
+
+	if (band.reason)
+		err('direct_pref_base: ' + band.reason);
+
+	// The interval may have moved, and the timer is armed against the old one.
+	schedule();
+
+	notice(sprintf('re-read /etc/config/bm_wanbind: %d instance(s) unchanged, %d rebuilt, %d binding(s) in the file',
+		kept, rebuilt, length(cfg.directBindings(snap))));
+
+	let due = passSoon('reload');
+
+	return {
+		ok: true,
+		instances: length(state.order),
+		kept: kept,
+		rebuilt: rebuilt,
+		pending: true,
+		due: due
 	};
 };
 
@@ -4837,6 +4962,12 @@ export const methods = {
 	// would be five hundred commits to flash and five hundred passes.
 	bind_many: method({ bindings: [] }, (args) => bindMany(args)),
 	unbind_many: method({ ids: [] }, (args) => unbindMany(args)),
+
+	// Re-read the file without stopping. The init script asks for this on a
+	// reload rather than restarting, because a restart takes every rule off the
+	// router and puts it back - which at five hundred bindings is a second or
+	// two of every bound address on ordinary routing.
+	reload: method({}, () => reloadConfig()),
 
 	reconcile: method({ instance: '', wait: false }, (args) => reconcileNow(args)),
 	flush: method({ instance: '' }, (args) => flush(args)),

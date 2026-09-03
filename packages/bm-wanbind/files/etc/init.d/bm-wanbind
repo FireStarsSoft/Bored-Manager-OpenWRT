@@ -98,6 +98,26 @@ service_stopped() {
 	/usr/sbin/bmwan flush >/dev/null 2>&1 || true
 }
 
+# A reload is a re-read, not a restart.
+#
+# Without this, rc.common answers `reload` by restarting - and stopping runs the
+# flush above, so `/sbin/reload_config` or a Save & Apply in LuCI takes every
+# rule off this router and puts them all back. On a box carrying five hundred
+# bindings that is five hundred rules removed, a firewall reload, and five
+# hundred written again, for a configuration change that may have been one line.
+#
+# The daemon re-reads the file, keeps the instances whose sections did not
+# change, rebuilds the ones that did, and asks for a pass. If it is not
+# answering - not started, or wedged - a restart is the honest fallback and is
+# what happened before.
+reload_service() {
+	if ubus -t 10 call bm.wanbind reload '{}' >/dev/null 2>&1; then
+		return 0
+	fi
+
+	restart
+}
+
 service_triggers() {
 	procd_add_reload_trigger "bm_wanbind"
 }
