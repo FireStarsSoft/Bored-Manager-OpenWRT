@@ -637,7 +637,7 @@ describe('the interfaces the dashboard table cannot list', () => {
 async function directRowFor(over: Partial<RouterBinding> = {}): Promise<DirectRow> {
   const client = wanbindClient({ daemon: fakeWanbind({ bindings: [binding(over)] }) })
   await client.tick()
-  const row = client.manager.directSnapshot().rows[0]!
+  const row = client.manager.directRows()[0]!
   client.dispose()
   return row
 }

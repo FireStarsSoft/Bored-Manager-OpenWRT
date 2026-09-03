@@ -57,7 +57,7 @@ export function emptyBindingSnapshot(): BindingSnapshot {
 }
 
 export function emptyDirectSnapshot(): DirectSnapshot {
-  return { t: 0, hookOk: true, lastError: '', rows: [], totals: { total: 0, ok: 0, held: 0 } }
+  return { t: 0, hookOk: true, lastError: '', totals: { total: 0, ok: 0, held: 0 } }
 }
 
 export function createBindingRuntime(
@@ -77,6 +77,7 @@ export function createBindingRuntime(
     ...(agent ? { agent } : {}),
     store,
     handover: NOTHING_HANDED_OVER,
+    directRows: null,
     instanceSession: createCheckSession(),
     bindSession: createCheckSession(),
     settingsSession: createCheckSession(),
@@ -107,6 +108,7 @@ export function resetRuntime(runtime: BindingRuntime): void {
   runtime.busy.clear()
   runtime.latestBinding = emptyBindingSnapshot()
   runtime.latestDirect = emptyDirectSnapshot()
+  runtime.directRows = null
   // A different router has different records to hand over, and this one's
   // verdict says nothing about it.
   runtime.handover = NOTHING_HANDED_OVER

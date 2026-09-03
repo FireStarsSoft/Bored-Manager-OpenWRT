@@ -15,6 +15,7 @@
  * anyway is what the whole rearrangement exists to remove. A failed call means
  * the rows are one tick stale, and the snapshot says so.
  */
+import type { DirectRow } from './types'
 import { diffAssignments, recordEvents } from './events'
 import { handoverNotice, handoverPending } from './handover'
 import {
@@ -371,17 +372,33 @@ export function directSnapshot(
   now = Date.now()
 ): DirectSnapshot {
   const cache = runtime.cache
-  const rows = bindingRows(cache.bindings, now)
   const notice = directNotice(runtime)
   runtime.latestDirect = {
     t: cache.fetchedAt,
     hookOk: !cache.stale && cache.error === '',
     lastError: cache.error,
-    rows,
-    totals: countDirectTotals(rows),
+    totals: countDirectTotals(directRows(runtime, now)),
     ...(notice ? { notice } : {})
   }
   return runtime.latestDirect
+}
+
+/**
+ * The one-to-one rows, built once per fetch.
+ *
+ * Memoised on the cache's own timestamp rather than on a clock: two readers in
+ * one tick - the totals above and the table's own fetch - would otherwise build
+ * five hundred rows twice, and every tick would rebuild them whether or not the
+ * router had answered since.
+ */
+export function directRows(runtime: BindingRuntime, now = Date.now()): DirectRow[] {
+  const at = runtime.cache.fetchedAt
+
+  if (runtime.directRows && runtime.directRows.at === at) return runtime.directRows.rows
+
+  const rows = bindingRows(runtime.cache.bindings, now)
+  runtime.directRows = { at, rows }
+  return rows
 }
 
 /**

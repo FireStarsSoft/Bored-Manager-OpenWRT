@@ -332,11 +332,19 @@ export interface DirectTotals {
 }
 
 /** The `direct` stream payload: the one-to-one half at a glance. */
+/**
+ * What goes out on the `direct` stream every tick.
+ *
+ * Deliberately without the rows. The table that shows them fetches them - the
+ * spec asks for `directRows` when the tab is open - and the stream is read for
+ * the four counts, the timestamp and the notice. Sent on the stream as well,
+ * five hundred bindings were a couple of hundred kilobytes pushed at every fast
+ * tick to every viewer, whether or not anybody had that tab in front of them.
+ */
 export interface DirectSnapshot {
   t: number
   hookOk: boolean
   lastError: string
-  rows: DirectRow[]
   totals: DirectTotals
   /** As on `BindingSnapshot`: a fact to state, not a call that did not work. */
   notice?: string
@@ -425,6 +433,13 @@ export interface BindingRuntime {
   busy: Set<string>
   latestBinding: BindingSnapshot
   latestDirect: DirectSnapshot
+  /**
+   * The one-to-one rows as of one fetch, so a tick builds them once.
+   *
+   * Null until the first fetch. Keyed on the cache's timestamp rather than on
+   * a clock, because that is what actually changes what the rows would say.
+   */
+  directRows: { at: number; rows: DirectRow[] } | null
   /**
    * What the last handover attempt did with the records this module still
    * holds from before the router owned them.

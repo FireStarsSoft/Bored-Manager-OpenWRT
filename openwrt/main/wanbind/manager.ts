@@ -16,6 +16,7 @@
  * where no package, an old package and a stopped service all mean the same
  * thing and the pages say so instead of quietly doing a worse job.
  */
+import { directRows as viewDirectRows } from './view'
 import type { ModuleCheckReport } from '@shared/check'
 import type { FormFieldOption } from '@shared/module-ui'
 import type { OkResult } from '@shared/types'
@@ -56,7 +57,7 @@ import {
   type BindingDeviceView,
   type BindingMonitorInput
 } from './view'
-import { assignmentRows, bindingRows, instanceRows, waitingRows } from './rows'
+import { assignmentRows, instanceRows, waitingRows } from './rows'
 import { eventRows } from './events'
 import type {
   BindingAgentReader,
@@ -164,7 +165,7 @@ export class BindingManager {
   }
 
   directRows(): DirectRow[] {
-    return bindingRows(this.runtime.cache.bindings, Date.now())
+    return viewDirectRows(this.runtime)
   }
 
   /** Counts for the overview and its history. */

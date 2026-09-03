@@ -46,9 +46,9 @@ async function rowFor(over: Partial<RouterBinding>): Promise<DirectRow> {
 async function directRows(bindings: RouterBinding[]): Promise<DirectRow[]> {
   const client = wanbindClient({ daemon: fakeWanbind({ bindings }) })
   await client.tick()
-  const snapshot = client.manager.directSnapshot()
+  const rows = client.manager.directRows()
   client.dispose()
-  return snapshot.rows
+  return rows
 }
 
 async function totalsFor(

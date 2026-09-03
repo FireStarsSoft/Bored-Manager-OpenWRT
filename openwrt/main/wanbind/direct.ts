@@ -30,6 +30,7 @@
  * straight back on its next pass - a change that appeared to succeed, showed
  * for a few seconds and then undid itself with nothing anywhere to explain it.
  */
+import { directRows } from './view'
 import type { OkResult } from '@shared/types'
 import {
   wanbindBind,
@@ -65,7 +66,7 @@ function unavailable(runtime: BindingRuntime): string {
 
 /** The row the last pass reported for one binding, by the id it answers to. */
 function directRow(runtime: BindingRuntime, id: string): DirectRow | undefined {
-  return runtime.latestDirect.rows.find((row) => row.id === id)
+  return directRows(runtime).find((row) => row.id === id)
 }
 
 /**
@@ -328,7 +329,7 @@ export async function updateDirect(
   if (!name || name.length > 80 || !isSafeUciValue(name)) {
     return { ok: false, error: 'binding name must contain 1-80 characters on one line' }
   }
-  const clash = runtime.latestDirect.rows.some(
+  const clash = directRows(runtime).some(
     (other) =>
       other.id !== id && other.source === 'manual' && other.name.toLowerCase() === name.toLowerCase()
   )
