@@ -428,12 +428,18 @@ export function normalize(raw: unknown): OwrtHostData {
     data.stickyMap.push([instanceId, mac, wanName, finite(value[3])])
   }
 
+  // Not gated on `instanceIds`, unlike the sticky map above, and the reason is
+  // the whole of what this document is for now: the instances live on the
+  // router, so `data.instances` is empty on every machine running 3.4.0 - and a
+  // gate on it would drop every line of history the moment it was read back.
+  // The sticky map is different: an entry keyed on an instance nobody has is a
+  // choice nothing will ever consult again.
   for (const value of Array.isArray(raw.events) ? raw.events : []) {
     if (!Array.isArray(value) || value.length < 4) continue
     const instanceId = string(value[0])
     const kind = string(value[2])
     const text = string(value[3])
-    if (!instanceIds.has(instanceId) || !kind || !text) continue
+    if (!instanceId || !kind || !text) continue
     data.events.push([instanceId, finite(value[1]), kind, text.slice(0, 500)])
     if (data.events.length >= 2_000) break
   }

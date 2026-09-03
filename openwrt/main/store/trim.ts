@@ -70,7 +70,15 @@ function shareEventRing(
   cap: number,
   instanceCount: number
 ): OwrtHostData['events'] {
-  const share = Math.max(1, Math.floor(cap / Math.max(1, instanceCount)))
+  // Shared between the instances that appear in the ring, not between the
+  // instances in the document. The instances live on the router now, so the
+  // document holds none - and dividing by that made the share the whole cap,
+  // which let one busy instance push every other one's history out.
+  const seen = new Set<string>()
+  for (const entry of events) seen.add(entry[0])
+
+  const between = Math.max(1, seen.size, instanceCount)
+  const share = Math.max(1, Math.floor(cap / between))
   const used = new Map<string, number>()
   const keep = new Array<boolean>(events.length).fill(false)
   for (let index = events.length - 1; index >= 0; index--) {

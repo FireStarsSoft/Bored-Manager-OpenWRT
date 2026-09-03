@@ -15,6 +15,7 @@
  * anyway is what the whole rearrangement exists to remove. A failed call means
  * the rows are one tick stale, and the snapshot says so.
  */
+import { diffAssignments, recordEvents } from './events'
 import { handoverNotice, handoverPending } from './handover'
 import {
   wanbindAssignments,
@@ -99,6 +100,11 @@ export function refreshCache(runtime: BindingRuntime, force = false): Promise<vo
   const generation = runtime.generation
 
   const run = async (): Promise<void> => {
+    // Held before anything replaces it: the per-instance history is written
+    // from the difference between two replies, and the cache below is the only
+    // copy of the older one.
+    const previous = runtime.cache
+
     if (!runtime.ctx.connected) {
       // Stale, not empty, and only once there is something to be stale about:
       // these are still this router's rows, and they become right again the
@@ -172,6 +178,18 @@ export function refreshCache(runtime: BindingRuntime, force = false): Promise<vo
     const waiting = anybodyUnseated(info.data) ? await wanbindWaiting(deps) : null
 
     if (generation !== runtime.generation) return
+
+    // What changed between this reply and the last one, before the cache stops
+    // holding the last one.
+    //
+    // `fetchedAt` is what makes this safe rather than a nicety: the empty list
+    // a cache carries before its first fetch is not a router with nobody
+    // seated on it, and diffing against it would write "assigned" into the
+    // history for every client on the router - once per reconnect, once per
+    // module reset, once per switch back to a machine.
+    if (previous.fetchedAt > 0 && previous.info && assignments.ok && assignments.data) {
+      recordEvents(runtime, diffAssignments(previous.assignments, assignments.data.assignments))
+    }
 
     runtime.cache = {
       info: info.data,
