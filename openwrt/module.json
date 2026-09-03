@@ -124,6 +124,7 @@
     "directUpdate",
     "directEnable",
     "directDisable",
+    "directDeleteMany",
     "directDelete",
     "scanRows",
     "scanNow",

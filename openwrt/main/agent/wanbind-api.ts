@@ -48,6 +48,7 @@ import {
   type WanbindLayoutReply,
   type WanbindSettings,
   type WanbindStats,
+  type WanbindUnbindManyReply,
   type WanbindUnbindReply,
   type WanbindWansReply,
   type WanbindAssignment,
@@ -254,6 +255,23 @@ export function wanbindRuleExplain(
     dst,
     table: Math.trunc(table)
   })
+}
+
+/**
+ * Remove many bindings in one call: one commit and one pass, not N of each.
+ *
+ * The daemon takes at most two hundred ids, which is what a caller has to batch
+ * against - and every id gets a row in the reply whether or not it went, so a
+ * caller can say which ones are still there rather than reporting the whole
+ * batch by its worst member.
+ */
+export async function wanbindUnbindMany(
+  deps: AgentDeps,
+  ids: string[]
+): Promise<AgentCallResult<WanbindUnbindManyReply>> {
+  return unwrap(
+    await call<WanbindUnbindManyReply>(deps, 'unbind_many', { ids }, MUTATE_TIMEOUT_MS)
+  )
 }
 
 /** What the kernel is holding, against what the last pass decided it should. */

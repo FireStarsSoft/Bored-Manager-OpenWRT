@@ -26,6 +26,7 @@ import { queueDeviceAction } from './devices'
 import {
   applyBind,
   deleteDirect,
+  deleteManyDirect,
   disableDirect,
   enableDirect,
   updateDirect
@@ -351,6 +352,11 @@ export class BindingManager {
 
   directDisable(id: unknown): Promise<OkResult> {
     return disableDirect(this.runtime, id)
+  }
+
+  /** The table's bulk Delete: one commit and one pass per two hundred. */
+  directDeleteMany(ids: unknown): Promise<OkResult> {
+    return deleteManyDirect(this.runtime, ids)
   }
 
   directDelete(id: unknown): Promise<OkResult> {

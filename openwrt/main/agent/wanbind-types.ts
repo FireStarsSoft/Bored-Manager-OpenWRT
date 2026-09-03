@@ -494,6 +494,16 @@ export interface WanbindCheckReply {
   reason?: string
 }
 
+/** What `unbind_many` answers: one row per id, whether or not it went. */
+export interface WanbindUnbindManyReply {
+  ok: boolean
+  removed: number
+  pending?: boolean
+  due?: number
+  reason?: string
+  results: Array<{ id: string; ok: boolean; reason: string }>
+}
+
 export interface WanbindUnbindReply {
   ok: boolean
   id: string

@@ -537,6 +537,25 @@ export function fakeWanbind(seed: Partial<WanbindState> = {}): WanbindDaemon {
       if (at >= 0) state.bindings.splice(at, 1)
       return { ok: true, id, removed: at >= 0 ? 1 : 0, swept: 0, reason: null }
     },
+    // The batch form. Every id gets a row whether or not it went, which is what
+    // lets a caller name the ones the router kept rather than reporting the
+    // whole batch by its worst member.
+    unbind_many: (args) => {
+      const ids = Array.isArray(args.ids) ? args.ids.map((one) => String(one)) : []
+      const results = ids.map((id) => {
+        const at = state.bindings.findIndex((entry) => entry.id === id)
+        if (at < 0) return { id, ok: false, reason: `no binding called ${id}` }
+        state.bindings.splice(at, 1)
+        return { id, ok: true, reason: '' }
+      })
+      return {
+        ok: true,
+        removed: results.filter((one) => one.ok).length,
+        pending: true,
+        due: 2,
+        results
+      }
+    },
     instance_check: () => ({
       ok: true,
       findings: [],

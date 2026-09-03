@@ -459,6 +459,7 @@ export const FEATURES: Record<string, FeatureSpec | null> = {
   // thing that would make it impossible: a router with no daemon has no
   // binding to switch off, so this gate cannot strand anybody.
   directDisable: { kind: 'action', requires: ['bindingDaemon'] },
+  directDeleteMany: { kind: 'action', requires: ['bindingDaemon'] },
   directDelete: { kind: 'action', requires: ['bindingDaemon'] },
 
   // The binding monitor. Its whole purpose is to describe a router whose

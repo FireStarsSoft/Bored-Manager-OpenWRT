@@ -3068,6 +3068,15 @@
                                       "confirm": "Delete this one-to-one binding and remove its rule from the router? The address goes back to whatever the rest of this page would do with it."
                                     }
                                   ],
+                                  "selectable": true,
+                                  "bulkActions": [
+                                    {
+                                      "label": "Delete",
+                                      "method": "directDeleteMany",
+                                      "kind": "danger",
+                                      "confirm": "Delete the selected one-to-one bindings and remove their rules from the router? They go in batches of two hundred, one commit and one pass each. A seat an instance handed out is left alone and named."
+                                    }
+                                  ],
                                   "emptyText": "No address is bound one-to-one on this router yet",
                                   "rowDetail": [
                                     {

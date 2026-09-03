@@ -36,6 +36,7 @@ import {
   wanbindBind,
   wanbindBindings,
   wanbindUnbind,
+  wanbindUnbindMany,
   type WanbindBindSpec,
   type WanbindBindingsReply
 } from '../agent'
@@ -448,6 +449,117 @@ export function disableDirect(runtime: BindingRuntime, idRaw: unknown): Promise<
  * gone, and the sentence is about something left behind that needs a hand - an
  * error here would invite them to press Delete again and remove nothing.
  */
+/** How many ids the daemon takes in one `unbind_many`. */
+const DELETE_BATCH = 200
+
+/**
+ * Remove a selection of one-to-one bindings, in batches.
+ *
+ * One commit and one pass per batch rather than per binding: five hundred
+ * deletes used to be five hundred sections written one at a time and five
+ * hundred passes behind them, which on a router with flash is five hundred
+ * writes to it.
+ *
+ * A binding an instance seated is refused by name rather than by count, and the
+ * rest of the selection still goes. The alternative - refusing the whole
+ * selection because one row in it is not deletable - makes somebody hunt for
+ * which one, on a table of five hundred.
+ */
+export async function deleteManyDirect(
+  runtime: BindingRuntime,
+  idsRaw: unknown
+): Promise<OkResult> {
+  const wanted = Array.isArray(idsRaw) ? idsRaw : []
+  const blocked = unavailable(runtime)
+  if (blocked) return { ok: false, error: blocked }
+
+  const ids: string[] = []
+  const refused: string[] = []
+
+  for (const one of wanted) {
+    const id = typeof one === 'string' ? one.trim() : ''
+    if (!id) continue
+
+    const row = directRow(runtime, id)
+
+    // Only the hand-placed ones. A seat an instance handed out is the
+    // instance's to take back, and deleting its section here would have the
+    // next pass write it again.
+    if (row && row.source !== 'manual') {
+      refused.push(row.name || id)
+      continue
+    }
+
+    ids.push(id)
+  }
+
+  if (!ids.length) {
+    return {
+      ok: false,
+      error: refused.length
+        ? `none of those are hand-placed bindings: ${refused.slice(0, 5).join(', ')}${refused.length > 5 ? ` and ${refused.length - 5} more` : ''}. A seat an instance handed out is removed from that instance.`
+        : 'no one-to-one binding was named'
+    }
+  }
+
+  return runMutationJob(
+    runtime,
+    'direct-delete',
+    `Delete ${ids.length} one-to-one binding${ids.length === 1 ? '' : 's'}`,
+    async () => {
+      let removed = 0
+      const failed: string[] = []
+
+      for (let at = 0; at < ids.length; at += DELETE_BATCH) {
+        const batch = ids.slice(at, at + DELETE_BATCH)
+        const reply = await wanbindUnbindMany(agentDeps(runtime), batch)
+
+        if (!reply.ok || !reply.data) {
+          return {
+            ok: false,
+            error: `${removed} removed, and then the router stopped answering: ${
+              reply.error ?? 'no reason given'
+            }`
+          }
+        }
+
+        if (reply.data.ok === false) {
+          return { ok: false, error: reply.data.reason ?? 'the router refused the batch' }
+        }
+
+        for (const one of reply.data.results ?? []) {
+          if (one.ok) removed += 1
+          else failed.push(`${one.id} (${one.reason})`)
+        }
+      }
+
+      runtime.service.forceDump()
+      recordEvent(
+        runtime,
+        'deleted',
+        `${removed} one-to-one binding(s) removed from the router in ${Math.ceil(
+          ids.length / DELETE_BATCH
+        )} call(s)`
+      )
+
+      if (failed.length) {
+        return {
+          ok: false,
+          error: `${removed} removed; the router kept ${failed.length}: ${failed
+            .slice(0, 3)
+            .join('; ')}`
+        }
+      }
+
+      const note = refused.length
+        ? ` ${refused.length} were left alone: a seat an instance handed out is removed from that instance.`
+        : ''
+
+      return { ok: true, data: `${removed} binding(s) removed.${note}` }
+    }
+  )
+}
+
 export async function deleteDirect(runtime: BindingRuntime, idRaw: unknown): Promise<OkResult> {
   const id = typeof idRaw === 'string' ? idRaw.trim() : ''
   if (!id) return { ok: false, error: 'no one-to-one binding was named' }

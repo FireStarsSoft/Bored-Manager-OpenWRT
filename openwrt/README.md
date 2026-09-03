@@ -262,7 +262,7 @@ something else is deciding, the monitor says what it decided.
 ### What each control needs before it will run
 
 Every method the pages can call is listed in `main/requirements.ts`, and
-`runtime/handlers.ts` routes all sixty-five through the one gate that reads it.
+`runtime/handlers.ts` routes all sixty-six through the one gate that reads it.
 Before that, the requirements were two hand-written `if` chains inside the two
 create handlers: an apply would run on a plan its own check had refused, and
 `bindingStart` on an instance created months ago never asked again whether

@@ -306,6 +306,7 @@ export function registerHandlers(runtime: OpenWrtRuntime): void {
   })
   handle('directEnable', (id: unknown) => binding.directEnable(id))
   handle('directDisable', (id: unknown) => binding.directDisable(id))
+  handle('directDeleteMany', (ids) => binding.directDeleteMany(ids))
   handle('directDelete', (id: unknown) => binding.directDelete(id))
 
   // The daemon's own numbers: the priority bands, the catch-all table and the

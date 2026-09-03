@@ -94,6 +94,7 @@ export {
   wanbindBind,
   wanbindBindings,
   wanbindUnbind,
+  wanbindUnbindMany,
   wanbindAssignments,
   wanbindWaiting,
   wanbindLayout,
