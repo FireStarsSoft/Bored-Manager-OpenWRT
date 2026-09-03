@@ -22,7 +22,7 @@
 import { access, popen, readfile, writefile } from 'fs';
 import { cursor } from 'uci';
 
-import { err } from 'bm.log';
+import { debug, err } from 'bm.log';
 
 export const CONF = '/etc/sysctl.d/60-bm-scale.conf';
 
@@ -160,6 +160,49 @@ function pow2Floor(value) {
  * 128 MB router is not advice, it is an out-of-memory reboot with a number
  * attached.
  */
+/**
+ * What this router is carrying: DHCP leases, and PPPoE members in the pool
+ * configuration.
+ *
+ * Read here rather than asked of the two daemons, because `bmctl tune` runs on
+ * a router where neither may be started and the answer still has to be the
+ * right size.
+ */
+export function scale() {
+	let clients = 0;
+	let sessions = 0;
+
+	let leases = readfile('/tmp/dhcp.leases');
+
+	if (type(leases) == 'string') {
+		for (let line in split(leases, chr(10))) {
+			if (match(trim(line), /^[0-9]+[ 	]/))
+				clients++;
+		}
+	}
+
+	try {
+		cursor().foreach('bm_pppoe', 'member', () => { sessions++; });
+	}
+	catch (e) {
+		debug('cannot count pool members: ' + e);
+	}
+
+	return { clients: clients, sessions: sessions };
+};
+
+/** How much memory this router has, in kilobytes, or null. */
+export function memory() {
+	let text = readfile('/proc/meminfo');
+
+	if (type(text) != 'string')
+		return null;
+
+	let found = match(text, /MemTotal:[ 	]+([0-9]+)/);
+
+	return found ? int(found[1]) : null;
+};
+
 export function recommended(load, memTotalKb) {
 	let clients = (type(load) == 'object' && type(load.clients) == 'int' && load.clients > 0) ? load.clients : 0;
 	let sessions = (type(load) == 'object' && type(load.sessions) == 'int' && load.sessions > 0) ? load.sessions : 0;

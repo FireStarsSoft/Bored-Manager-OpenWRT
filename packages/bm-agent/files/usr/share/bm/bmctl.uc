@@ -15,7 +15,7 @@ import { run as configCommand, USAGE as CONFIG_USAGE } from 'bm.cliconfig';
 import { compatibility } from 'bm.meta';
 import { plan, run } from 'bm.migrate';
 import { install as installPackages, report as requirementsReport } from 'bm.requirements';
-import { apply as tuneApply, current as tuneCurrent } from 'bm.tune';
+import { apply as tuneApply, current as tuneCurrent, memory as tuneMemory, recommended as tuneRecommended, scale as tuneScale } from 'bm.tune';
 import { apply as applyUpdate, check as checkUpdate, last as lastUpdate, rollback } from 'bm.update';
 import { API_VERSION, CONFIG_SCHEMA, RELEASE } from 'bm.version';
 
@@ -432,6 +432,27 @@ if (command == 'tune') {
 			printf('%-18s %s\n', key, value == null ? 'unknown' : sprintf('%s', value));
 		}
 		printf('\npersisted in %s: %J\n', state.file, state.persisted);
+
+		// What this router is carrying, and what its tables should be for it.
+		// The same arithmetic the app's Router limits page offers, so a console
+		// and a page cannot give somebody two different numbers.
+		let advice = tuneRecommended(tuneScale(), tuneMemory());
+
+		printf('\nfor %d client(s) and %d session(s) on this router:\n',
+			tuneScale().clients, tuneScale().sessions);
+		printf('%-18s %d\n', 'conntrack_max', advice.conntrack_max);
+		printf('%-18s %d\n', 'gc_thresh1', advice.gc_thresh1);
+		printf('%-18s %d\n', 'gc_thresh2', advice.gc_thresh2);
+		printf('%-18s %d\n', 'gc_thresh3', advice.gc_thresh3);
+
+		if (advice.mem_capped) {
+			printf('\nconntrack_max is held down by this router-s memory: a full table at 320 bytes\n');
+			printf('an entry would be an eighth of its RAM.\n');
+		}
+
+		printf('\napply them with `bmctl tune conntrack_max=%d gc_thresh1=%d gc_thresh2=%d gc_thresh3=%d`\n',
+			advice.conntrack_max, advice.gc_thresh1, advice.gc_thresh2, advice.gc_thresh3);
+
 		exit(0);
 	}
 

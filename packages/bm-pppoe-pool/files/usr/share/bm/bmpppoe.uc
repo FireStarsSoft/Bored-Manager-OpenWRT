@@ -183,6 +183,30 @@ if (command == 'status') {
 		}
 	}
 
+	// What the pass cost and what the router can carry, which is the half of
+	// `status` somebody reads when the pools look fine and the router does not.
+	let numbers = call('stats', {});
+
+	if (type(numbers) == 'object' && type(numbers.pass) == 'object') {
+		printf('\npass: config %d ms, dump %d ms, counters %d ms, watchdog %d ms (%d ms total)\n',
+			numbers.pass.configMs, numbers.pass.dumpMs, numbers.pass.counterMs,
+			numbers.pass.watchdogMs, numbers.pass.totalMs);
+		printf('%d member(s) waiting to be redialled; rss %d MB\n',
+			numbers.queueDepth, numbers.rssKb / 1024);
+	}
+
+	if (type(result.router) == 'object' && result.router.flowOffload === false) {
+		printf('\nflow offload: off - turn it on with `bmctl tune flow_offload=1` before growing a\n');
+		printf('pool past 64 sessions. Without it the kernel walks every routing rule for every\n');
+		printf('packet, and that walk is what caps the router.\n');
+	}
+
+	if (type(result.blind) == 'object' && result.blind) {
+		printf('\nnetifd has not answered the interface dump for %ds (%d failure(s)) - the rows above\n',
+			time() - result.blind.since, result.blind.failures);
+		printf('are what its events last said, and an address may be stale.\n');
+	}
+
 	if (length(result.legacy)) {
 		printf('\nPools from the old model - only delete works on these:\n');
 		for (let one in result.legacy) {
