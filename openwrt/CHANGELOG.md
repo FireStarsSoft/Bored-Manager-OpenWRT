@@ -207,12 +207,15 @@ a router somebody administers by hand is better off with it - and it is no
 longer the answer the binding tab points at.
 
 **The handover was one call and one flash commit per record.** It is `bind_many`
-in batches of two hundred now, with one document write and one line in the event
-trail per batch rather than per record. Two things fell out of doing it: the
-specs go through the same argument translation the single call does, or
-`when_down` never reaches the daemon; and the batch reply does not carry the
-daemon's own read-back, so the list is read once per batch - written is not the
-same as kept.
+now, with one document write and one line in the event trail per batch rather
+than per record. Batches are filled by size rather than by count, and that is
+not a detail: every ubus call this module makes goes out as JSON on an SSH
+command line, dropbear refuses an exec request longer than a few kilobytes
+before any shell runs, and two hundred specs is thirty kilobytes. Batching by
+the daemon's own limit of two hundred would have replaced a slow handover with
+one that could not run at all, on precisely the routers it was added for. The
+other thing that fell out of doing it: the specs go through the same argument
+translation the single call does, or `when_down` never reaches the daemon.
 
 ### Capacity: what this router can carry
 
