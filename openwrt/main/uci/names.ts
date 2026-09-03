@@ -37,3 +37,27 @@ export function isSafeUciValue(value: string): boolean {
   }
   return true
 }
+
+/**
+ * The sieve for a string this module writes as part of a UCI *name*, or into a
+ * value the router will read back as one.
+ *
+ * Refuses rather than sanitising, for the reason at the top of this file: a
+ * name that does not match is a bug in the caller, and quietly repairing it
+ * would write a section under a name nothing else can find again.
+ */
+export function safeUciWord(value: string): boolean {
+  return /^[A-Za-z0-9_.-]{1,32}$/.test(value)
+}
+
+/**
+ * A UCI section name for one instance.
+ *
+ * The module's own instance ids are opaque strings it generated; UCI section
+ * names may hold only letters, digits and underscores. `bm` plus the id with
+ * everything else replaced is stable, collision-free for the ids this module
+ * makes, and recognisable in `uci show bm_wanbind`.
+ */
+export function wanbindSection(id: string): string {
+  return `bm${id.replace(/[^A-Za-z0-9_]/g, '')}`
+}

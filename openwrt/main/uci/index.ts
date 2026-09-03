@@ -6,10 +6,10 @@
  *
  * Import this barrel, never a file inside it.
  */
-export { execTimeout, isPppoePrefix, isSafeUciValue } from './names'
 export {
-  commandFailure,
-  runUciBatch,
-  type ExecContext,
-  type UciPackage
-} from './batch'
+  execTimeout,
+  isPppoePrefix,
+  isSafeUciValue,
+  safeUciWord,
+  wanbindSection
+} from './names'

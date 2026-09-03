@@ -67,11 +67,10 @@
  * Tying the life of the new half to the old one, to delete a duplicate permit,
  * is the worse trade.
  */
+import { safeUciWord, wanbindSection } from '../uci'
 import {
-  safeUciWord,
-  wanbindBindV2,
+  wanbindBind,
   wanbindInstanceSet,
-  wanbindSection,
   type AgentDeps,
   type WanbindInstanceSpec
 } from '../agent'
@@ -253,7 +252,7 @@ async function handOverBinding(
     return
   }
 
-  const written = await wanbindBindV2(deps, {
+  const written = await wanbindBind(deps, {
     id,
     name: record.name,
     ...(record.target.kind === 'ip' ? { ip: record.target.ip } : { mac: record.target.mac }),

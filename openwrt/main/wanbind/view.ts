@@ -16,10 +16,10 @@
  * the rows are one tick stale, and the snapshot says so.
  */
 import {
-  wanbindAssignmentsV2,
-  wanbindBindingsV2,
+  wanbindAssignments,
+  wanbindBindings,
   wanbindInfo,
-  wanbindWaitingV2,
+  wanbindWaiting,
   type WanbindBindingsReply,
   type WanbindInfo
 } from '../agent'
@@ -123,8 +123,8 @@ export function refreshCache(runtime: BindingRuntime, force = false): Promise<vo
     const deps = agentDeps(runtime)
     const [info, assignments, bindings] = await Promise.all([
       wanbindInfo(deps),
-      wanbindAssignmentsV2(deps),
-      wanbindBindingsV2(deps)
+      wanbindAssignments(deps),
+      wanbindBindings(deps)
     ])
 
     if (generation !== runtime.generation) return
@@ -144,7 +144,7 @@ export function refreshCache(runtime: BindingRuntime, force = false): Promise<vo
     // cache is not replaced until every call is in, so writing this answer into
     // it first would leave a surface reading between the two awaits a set of
     // fresh counts under the previous tick's timestamp.
-    const waiting = anybodyUnseated(info.data) ? await wanbindWaitingV2(deps) : null
+    const waiting = anybodyUnseated(info.data) ? await wanbindWaiting(deps) : null
 
     if (generation !== runtime.generation) return
 

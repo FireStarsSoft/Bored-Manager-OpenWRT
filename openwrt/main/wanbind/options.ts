@@ -22,7 +22,7 @@
  */
 import type { FormFieldOption } from '@shared/module-ui'
 import {
-  wanbindLayoutV2,
+  wanbindLayout,
   wanbindWans,
   type WanbindVerdict,
   type WanbindWan
@@ -310,7 +310,7 @@ function lanLabel(verdict: WanbindVerdict): string {
 export async function lanOptions(runtime: BindingRuntime): Promise<FormFieldOption[]> {
   if (!runtime.ctx.connected || !daemonReady(runtime)) return []
 
-  const result = await wanbindLayoutV2(agentDeps(runtime))
+  const result = await wanbindLayout(agentDeps(runtime))
   if (!result.ok || !result.data) return []
 
   const rows: CapRow[] = []

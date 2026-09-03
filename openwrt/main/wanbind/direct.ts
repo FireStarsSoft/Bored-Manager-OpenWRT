@@ -32,9 +32,9 @@
  */
 import type { OkResult } from '@shared/types'
 import {
-  wanbindBindV2,
-  wanbindBindingsV2,
-  wanbindUnbindV2,
+  wanbindBind,
+  wanbindBindings,
+  wanbindUnbind,
   type WanbindBindSpec,
   type WanbindBindingsReply
 } from '../agent'
@@ -108,7 +108,7 @@ async function directEdit(
   let current = prefetched
 
   if (!current) {
-    const listed = await wanbindBindingsV2(deps, id)
+    const listed = await wanbindBindings(deps, id)
     if (!listed.ok || !listed.data) {
       return { ok: false, error: listed.error ?? 'the router did not answer about that binding' }
     }
@@ -128,7 +128,7 @@ async function directEdit(
     }
   }
 
-  const written = await wanbindBindV2(deps, {
+  const written = await wanbindBind(deps, {
     id,
     name: changes.name ?? current.name,
     ...(current.targetKind === 'ip' ? { ip: current.label } : { mac: current.label }),
@@ -177,13 +177,13 @@ export async function applyBind(runtime: BindingRuntime, raw: unknown): Promise<
     'direct-create',
     `Bind ${target} to ${spec.wan}`,
     async () => {
-      const written = await wanbindBindV2(agentDeps(runtime), spec)
+      const written = await wanbindBind(agentDeps(runtime), spec)
       if (!written.ok) {
         return { ok: false, error: written.error ?? 'the router refused to create the binding' }
       }
       runtime.service.forceDump()
 
-      const listed = await wanbindBindingsV2(agentDeps(runtime), spec.id)
+      const listed = await wanbindBindings(agentDeps(runtime), spec.id)
       const created = listed.data?.bindings.find((binding) => binding.id === spec.id)
       if (!created) {
         return {
@@ -308,7 +308,7 @@ export async function updateDirect(
   // on, then answered "Save: done". The same for `when_down`, in both
   // directions. One read here closes all of it, and it is not an extra read -
   // it is `directEdit`'s read, moved up to where the decisions are.
-  const listed = await wanbindBindingsV2(agentDeps(runtime), id)
+  const listed = await wanbindBindings(agentDeps(runtime), id)
   if (!listed.ok || !listed.data) {
     return { ok: false, error: listed.error ?? 'the router did not answer about that binding' }
   }
@@ -464,7 +464,7 @@ export async function deleteDirect(runtime: BindingRuntime, idRaw: unknown): Pro
     'direct-delete',
     `Delete one-to-one binding ${name}`,
     async () => {
-      const removed = await wanbindUnbindV2(agentDeps(runtime), id)
+      const removed = await wanbindUnbind(agentDeps(runtime), id)
       if (!removed.ok) {
         return { ok: false, error: removed.error ?? 'the router would not remove that binding' }
       }
