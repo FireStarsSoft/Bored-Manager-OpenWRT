@@ -283,4 +283,19 @@ check('two clauses', layout.clauses([ 'a', 'b' ]), 'a and b');
 check('three clauses', layout.clauses([ 'a', 'b', 'c' ]), 'a, b and c');
 check('no clauses', layout.clauses([]), '');
 
+// fw4's own wildcard, which is what bm-pppoe-pool writes: one `pppoe-<prefix>+`
+// per pool rather than one `list network` entry per session. Read as a literal
+// name, every WAN in a pool is in no firewall zone - and a binding onto one is
+// refused for a reason that is not true.
+uci.set('firewall', 'poolzone', 'zone');
+uci.set('firewall', 'poolzone', 'name', 'bmwanpool');
+uci.set('firewall', 'poolzone', 'device', [ 'pppoe-fpt+' ]);
+
+let pooled = layout.classify([
+	{ name: 'fpt101', proto: 'pppoe', device: 'eth1.101', l3Device: 'pppoe-fpt101',
+	  up: true, uptime: 900, ipv4: { addr: '100.70.0.101', mask: 32 }, table: 10101 }
+], layout.statements());
+
+check('a pooled session is in the zone its pool wrote', pooled.byName['fpt101'].zone, 'bmwanpool');
+
 report();

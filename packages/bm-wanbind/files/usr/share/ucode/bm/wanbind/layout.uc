@@ -199,15 +199,24 @@ export function clauses(parts) {
 /**
  * Whether a zone's `list device` entry claims this netdev.
  *
- * Only a trailing `*` is honoured, and a leading `!` is the opposite of a
- * claim: that is the shape routers actually carry, and a half-understood
- * pattern matching too much would put an interface into a zone it is not in.
+ * A trailing `*` and a trailing `+` are both honoured, and a leading `!` is the
+ * opposite of a claim: that is the shape routers actually carry, and a
+ * half-understood pattern matching too much would put an interface into a zone
+ * it is not in.
+ *
+ * `+` is fw4's own spelling - it rewrites a trailing `+` to `*` when it renders
+ * the ruleset - and it is what bm-pppoe-pool writes, one `pppoe-<prefix>+` per
+ * pool instead of one `list network` entry per session. Without it here, every
+ * WAN in a pool read as being in no firewall zone, and a binding onto one was
+ * refused for a reason that was not true.
  */
 function deviceMatches(entry, device) {
 	if (!length(entry) || substr(entry, 0, 1) == '!')
 		return false;
 
-	if (substr(entry, length(entry) - 1, 1) == '*') {
+	let last = substr(entry, length(entry) - 1, 1);
+
+	if (last == '*' || last == '+') {
 		let prefix = substr(entry, 0, length(entry) - 1);
 		return length(prefix) > 0 && substr(device, 0, length(prefix)) == prefix;
 	}

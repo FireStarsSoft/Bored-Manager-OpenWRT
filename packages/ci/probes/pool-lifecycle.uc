@@ -39,6 +39,23 @@ function networks(uci, zone) {
 	return type(value) == 'string' ? value : '';
 };
 
+/**
+ * What a zone matches by device, which is how a pool joins one now.
+ *
+ * fw4 runs `fw4 -q network <name>` on every ifup and reloads the whole firewall
+ * when that name is in a zone's `list network`, so a pool of five hundred
+ * sessions coming up was up to five hundred full reloads. One `pppoe-<prefix>+`
+ * pattern - fw4's own wildcard - matches every session's device by name,
+ * including ones that dial after the ruleset was built, and the hotplug finds
+ * nothing to reload for.
+ */
+function devices(uci, zone) {
+	let value = uci.get('firewall', zone, 'device');
+	if (type(value) == 'array')
+		return join(',', value);
+	return type(value) == 'string' ? value : '';
+};
+
 // The carrier the pools dial over, as sysfs tells it.
 seed('/sys/cl' + 'ass/net/eth1/address', 'aa:bb:cc:dd:ee:ff\n');
 seed('/sys/cl' + 'ass/net/eth1/operstate', 'up\n');
@@ -102,7 +119,8 @@ check('untagged table is the base', uci.get('network', 'fpt0', 'ip4table'), '100
 check('zone exists', uci.get('firewall', 'bmwanpool', 'name'), 'bmwanpool');
 check('zone rejects input', uci.get('firewall', 'bmwanpool', 'input'), 'REJECT');
 check('zone masquerades', uci.get('firewall', 'bmwanpool', 'masq'), '1');
-check('zone membership is the member list', networks(uci, 'bmwanpool'), 'fpt0,fpt101,fpt102');
+check('the zone matches the pool by device pattern', devices(uci, 'bmwanpool'), 'pppoe-fpt+');
+check('and names no member one by one', networks(uci, 'bmwanpool'), '');
 check('forwarding src', uci.get('firewall', 'bmfwd', 'src'), 'lan');
 check('forwarding dest', uci.get('firewall', 'bmfwd', 'dest'), 'bmwanpool');
 
@@ -192,7 +210,7 @@ check('the new member mac is the golden one', uci.get('network', cfg.deviceSecti
 check('the removed member is gone', uci.get('network', 'fpt102'), null);
 check('its device is gone', uci.get('network', cfg.deviceSection('fpt1', 102)), null);
 check('the untagged member is gone too', uci.get('network', 'fpt0'), null);
-check('zone membership followed', networks(uci, 'bmwanpool'), 'fpt101,fpt103');
+check('the zone still matches the pool, whatever its members are', devices(uci, 'bmwanpool'), 'pppoe-fpt+');
 check('the kept member kept its password', uci.get('network', 'fpt101', 'password'), 'pw2');
 
 let modeFlip = pppoe.poolSet({ id: 'fpt1', mode: 'single' });
@@ -219,7 +237,7 @@ check('single member table', uci.get('network', 'vnp202', 'ip4table'), '20202');
 check('inherit writes no macaddr', uci.get('network', 'bmd_vnpt_201', 'macaddr'), null);
 check('but still writes the tagged device', uci.get('network', 'bmd_vnpt_201', 'vid'), '201');
 check('single member record carries its account', uci.get('bm_pppoe', 'vnpt_201', 'username'), 'a@vnpt');
-check('the shared zone is the union', networks(uci, 'bmwanpool'), 'fpt101,fpt103,vnp201,vnp202');
+check('a shared zone matches both pools', devices(uci, 'bmwanpool'), 'pppoe-fpt+,pppoe-vnp+');
 
 let retyped = pppoe.poolSet({
 	id: 'vnpt',
@@ -319,7 +337,7 @@ check('its sections are gone', uci.get('network', 'fpt101'), null);
 check('its devices are gone', uci.get('network', cfg.deviceSection('fpt1', 103)), null);
 check('its record is gone', uci.get('bm_pppoe', 'fpt1'), null);
 check('its member records are gone', uci.get('bm_pppoe', cfg.memberSection('fpt1', 101)), null);
-check('the shared zone keeps the other pools', networks(uci, 'bmwanpool'), 'vnp201,vnp203,tst50');
+check('a deleted pool takes its pattern and leaves the others', devices(uci, 'bmwanpool'), 'pppoe-vnp+,pppoe-tst+');
 check('the forwarding survives for it', uci.get('firewall', 'bmfwd', 'dest'), 'bmwanpool');
 check('the neighbour pool is untouched', uci.get('network', 'vnp201', 'username'), 'a@vnpt');
 

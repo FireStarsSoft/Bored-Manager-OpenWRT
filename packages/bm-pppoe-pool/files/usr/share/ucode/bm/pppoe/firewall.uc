@@ -114,6 +114,16 @@ export function lanZone(uci) {
  * the create gate refuses a derived name that would collide - so an entry
  * that parses as `<prefix><vlan>` belongs to this package to add and remove.
  */
+/** Whether this `list device` entry is the wildcard one of our pools writes. */
+function ourPattern(pools, entry) {
+	for (let one in pools) {
+		if (entry == ('pppoe-' + one.prefix + '+'))
+			return true;
+	}
+
+	return false;
+};
+
 function oursBy(pools, entry) {
 	for (let one in pools) {
 		if (vlanOfSection(one.prefix, entry) !== null)
@@ -186,7 +196,7 @@ export function reconcile(pools, retiring) {
 
 	for (let one in pools) {
 		if (!exists(wanted, one.zone)) {
-			wanted[one.zone] = { masq: false, mtuFix: false, lanForward: false, networks: [] };
+			wanted[one.zone] = { masq: false, mtuFix: false, lanForward: false, networks: [], devices: [] };
 			push(order, one.zone);
 		}
 
@@ -195,11 +205,25 @@ export function reconcile(pools, retiring) {
 		zone.mtuFix = zone.mtuFix || one.mtuFix;
 		zone.lanForward = zone.lanForward || one.lanForward;
 
-		for (let member in one.members) {
-			let section = sprintf('%s%d', one.prefix, member.vlan);
-			if (!(section in zone.networks))
-				push(zone.networks, section);
-		}
+		// One device pattern for the whole pool, rather than one network entry
+		// per member.
+		//
+		// fw4's interface hotplug runs `fw4 -q network <name>` on every `ifup`,
+		// and when that name is in a zone's `list network` it reloads the whole
+		// firewall. A pool of five hundred sessions coming up after a reboot is
+		// therefore up to five hundred full firewall reloads, each one parsing
+		// a netifd dump of a few hundred kilobytes and rendering the ruleset
+		// again. Nothing in this package caused it and nothing said so.
+		//
+		// `pppoe-<prefix>+` is fw4's own wildcard - it turns a trailing `+`
+		// into `*` when it renders - so the zone matches every session's device
+		// by name, including ones that dial after the ruleset was built. The
+		// hotplug then finds the interface in no zone's network list and does
+		// nothing.
+		let pattern = 'pppoe-' + one.prefix + '+';
+
+		if (!(pattern in zone.devices))
+			push(zone.devices, pattern);
 	}
 
 	let zones = zonesByName(uci);
@@ -238,19 +262,38 @@ export function reconcile(pools, retiring) {
 			changed = true;
 		}
 
+		// Whatever else is in the zone keeps its place; what this package put
+		// there is replaced by the pattern below. A router upgraded from the
+		// per-member list therefore loses five hundred entries and gains one,
+		// in one pass, and that pass is the last firewall reload the pool ever
+		// causes on its own.
 		let networks = [];
 		for (let entry in (current ? listOf(current.network) : [])) {
 			if (!oursBy(everyPool, entry))
 				push(networks, entry);
 		}
-		for (let entry in want.networks)
-			push(networks, entry);
 
 		if (!current || !sameList(listOf(current.network), networks)) {
 			if (length(networks))
 				uci.set(FIREWALL, section, 'network', networks);
 			else
 				uci.delete(FIREWALL, section, 'network');
+			changed = true;
+		}
+
+		let devices = [];
+		for (let entry in (current ? listOf(current.device) : [])) {
+			if (!ourPattern(everyPool, entry))
+				push(devices, entry);
+		}
+		for (let entry in want.devices)
+			push(devices, entry);
+
+		if (!current || !sameList(listOf(current.device), devices)) {
+			if (length(devices))
+				uci.set(FIREWALL, section, 'device', devices);
+			else
+				uci.delete(FIREWALL, section, 'device');
 			changed = true;
 		}
 	}
@@ -266,6 +309,7 @@ export function reconcile(pools, retiring) {
 		let current = zones[name];
 		let section = text(current['.name']);
 		let networks = [];
+		let devices = [];
 		let dropped = false;
 
 		for (let entry in listOf(current.network)) {
@@ -275,10 +319,22 @@ export function reconcile(pools, retiring) {
 				push(networks, entry);
 		}
 
+		for (let entry in listOf(current.device)) {
+			if (ourPattern(everyPool, entry))
+				dropped = true;
+			else
+				push(devices, entry);
+		}
+
 		if (!dropped)
 			continue;
 
 		changed = true;
+
+		if (length(devices))
+			uci.set(FIREWALL, section, 'device', devices);
+		else
+			uci.delete(FIREWALL, section, 'device');
 
 		if (length(networks)) {
 			uci.set(FIREWALL, section, 'network', networks);
