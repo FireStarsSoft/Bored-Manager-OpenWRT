@@ -426,6 +426,14 @@ export interface BindingRuntime {
   /** The in-flight refresh, so two ticks never race two fetches. */
   fetching: Promise<void> | null
   /**
+   * When the in-flight fetch started, or 0 while none is.
+   *
+   * The reason a tick can emit at all while a fetch is outstanding: a router
+   * that has stopped answering holds its reply open, and without a start time
+   * there is no way to tell that from a reply that is merely on its way.
+   */
+  fetchStartedAt: number
+  /**
    * Instance and binding ids with a job running. A second mutation on one of
    * them is refused rather than queued: both are create-and-edit calls against
    * one section, and the loser would silently undo the winner.

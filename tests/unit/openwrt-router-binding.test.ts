@@ -120,6 +120,9 @@ interface Router {
   /** A rule write would run as one `sh -s` script, so the verbs are on stdin. */
   stdins(): string[]
   snapshot(): BindingSnapshot | undefined
+  /** How many payloads went onto one stream since the last `forget`. */
+  emits(event: string): number
+  forget(): void
   dispose(): void
 }
 
@@ -166,6 +169,9 @@ async function router(
       const pushed = harness.emit.mock.calls.filter((call) => call[0] === 'binding')
       return pushed.at(-1)?.[1] as BindingSnapshot | undefined
     },
+    emits: (event: string) =>
+      harness.emit.mock.calls.filter((call) => call[0] === event).length,
+    forget: () => harness.emit.mockClear(),
     dispose: () => runtime.dispose?.()
   }
 }
@@ -183,6 +189,22 @@ function wroteNoRule(owrt: Router): boolean {
 }
 
 describe('the router holds the instances and this module reads them', () => {
+  it('pushes one payload per stream per tick, not two', async () => {
+    const owrt = await router()
+    await owrt.sweep()
+    owrt.forget()
+    await owrt.sweep()
+
+    // It used to emit twice: once immediately and once when the fetch landed.
+    // At five hundred bindings that is two full payloads a tick down a stream
+    // where the second differs from the first only in being newer, and the app
+    // renders both.
+    expect(owrt.emits('binding')).toBe(1)
+    expect(owrt.emits('direct')).toBe(1)
+    owrt.dispose()
+  })
+
+
   it('asks the daemon for the seats and the queue, and writes no ip rule at all', async () => {
     const owrt = await router()
     await owrt.sweep()

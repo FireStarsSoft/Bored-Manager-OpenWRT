@@ -83,6 +83,7 @@ export function createBindingRuntime(
     settingsSession: createCheckSession(),
     cache: emptyCache(),
     fetching: null,
+    fetchStartedAt: 0,
     busy: new Set(),
     latestBinding: emptyBindingSnapshot(),
     latestDirect: emptyDirectSnapshot(),
@@ -105,6 +106,7 @@ export function resetRuntime(runtime: BindingRuntime): void {
   runtime.settingsSession.clear()
   runtime.cache = emptyCache()
   runtime.fetching = null
+  runtime.fetchStartedAt = 0
   runtime.busy.clear()
   runtime.latestBinding = emptyBindingSnapshot()
   runtime.latestDirect = emptyDirectSnapshot()

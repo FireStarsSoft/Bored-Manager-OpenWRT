@@ -318,6 +318,9 @@ export function registerHandlers(runtime: OpenWrtRuntime): void {
   // One button, and it deliberately runs even while the periodic scan is
   // gated off: somebody is looking at the page by definition.
   handle('scanNow', () => scan.scanNow())
+  handle('scanExplain', (pref, cidr, dst, table) =>
+    scan.explain(Number(pref) || 0, String(cidr ?? ''), String(dst ?? ''), Number(table) || 0)
+  )
 
   handle('rulesCheck', (values: unknown) => rules.check(values))
   handle('rulesApply', (payload: unknown) => rules.apply(payload))

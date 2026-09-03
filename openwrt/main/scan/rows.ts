@@ -317,7 +317,7 @@ export function emptyScanSummary(rulesTruncated = false, cap = 0): ScanSummary {
     if (kind === 'kernel') continue
     byOwner[label] = 0
   }
-  return { total: 0, byOwner, foreign: 0, unreachable: 0, selectors: 0, rulesTruncated, cap }
+  return { total: 0, onRouter: 0, byOwner, foreign: 0, unreachable: 0, selectors: 0, rulesTruncated, cap }
 }
 
 export interface ScanRowsResult {
@@ -344,6 +344,9 @@ export function buildScanRows(reply: WanbindRulesReply): ScanRowsResult {
   const daemonWrites = low > 0 && reply.rules.some((rule) => MANAGED_OWNERS.has(rule.owner))
 
   const summary = emptyScanSummary(reply.capped, reply.limit)
+  // What the router holds, from the daemon rather than from this loop: the
+  // rows below are collapsed and may be one page of several.
+  summary.onRouter = typeof reply.raw === 'number' ? reply.raw : 0
   const rows: ScanRow[] = []
   const seen = new Map<string, number>()
 
@@ -365,9 +368,14 @@ export function buildScanRows(reply: WanbindRulesReply): ScanRowsResult {
     const repeat = seen.get(base) ?? 0
     seen.set(base, repeat + 1)
 
+    const stands = typeof rule.count === 'number' && rule.count > 0 ? rule.count : 1
+
     rows.push({
       key: repeat === 0 ? base : `${base}|${repeat}`,
       ip: sourceRouted ? hostAddress(rule.cidr) : rule.selector,
+      cidr: rule.cidr,
+      dst: rule.dst ?? '',
+      count: stands,
       sourceRouted,
       pref: rule.pref,
       table: rule.table,
@@ -382,7 +390,7 @@ export function buildScanRows(reply: WanbindRulesReply): ScanRowsResult {
         outranks: outranksModule,
         sourceRouted
       }),
-      reason: rule.reason,
+      reason: rule.reason ?? '',
       rule: ruleText(rule),
       routes: lines,
       routesText: lines.join(NEWLINE),
@@ -391,12 +399,12 @@ export function buildScanRows(reply: WanbindRulesReply): ScanRowsResult {
       outranksModule
     })
 
-    summary.total += 1
+    summary.total += stands
     const label = ownerLabel(rule.owner)
     // Seeded keys start at zero, and an owner this build has never met has no
     // seed at all - so the count is opened rather than incremented, which is
     // the difference between a new slice and a slice reading NaN.
-    summary.byOwner[label] = (summary.byOwner[label] ?? 0) + 1
+    summary.byOwner[label] = (summary.byOwner[label] ?? 0) + stands
     // netifd is not foreign, and this is the line that says so: those rules are
     // the router routing itself, three per interface with a table of its own,
     // and the tile this feeds is the one that says how many rules somebody

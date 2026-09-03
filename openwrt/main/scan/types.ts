@@ -85,6 +85,16 @@ export interface ScanRow {
   key: string
   /** The source address, or the selector text when the rule has no source. */
   ip: string
+  /** The selectors as the daemon holds them, which is what `rule_explain` wants. */
+  cidr: string
+  dst: string
+  /**
+   * How many rules this row stands for. 1 for a row that is one rule.
+   *
+   * The tiles count rules, not rows, so this is what they add up - otherwise a
+   * router carrying fifteen hundred netifd rules reports five hundred.
+   */
+  count: number
   /** False when `ip` describes a selector rather than naming an address. */
   sourceRouted: boolean
   pref: number
@@ -166,6 +176,16 @@ export interface ScanSummary {
    * would bury the one rule somebody actually needs to find.
    */
   total: number
+  /**
+   * The rules the kernel is holding, as the daemon counted them before it
+   * collapsed anything or cut a page.
+   *
+   * `total` is what these rows add up to and this is what the router has. On a
+   * router with no collapsing they are the same number; on one dialling five
+   * hundred sessions they are a thousand apart, and the tile says "rules seen"
+   * about the router rather than about the reply.
+   */
+  onRouter: number
   byOwner: Record<string, number>
   /**
    * Rules nothing on this router claims. The daemon's own three owners are not

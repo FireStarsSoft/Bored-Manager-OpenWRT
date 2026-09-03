@@ -123,6 +123,7 @@
     "directDelete",
     "scanRows",
     "scanNow",
+    "scanExplain",
     "rulesEffective",
     "rulesCheck",
     "rulesApply",

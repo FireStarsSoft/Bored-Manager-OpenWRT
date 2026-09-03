@@ -467,6 +467,10 @@ export const FEATURES: Record<string, FeatureSpec | null> = {
   // explain the refusals.
   scanRows: null,
   scanNow: { kind: 'action', requires: ['bindingDaemon'] },
+  // A read, and gated like every other read: null. The engine asks the daemon
+  // itself and hands back the daemon's own refusal sentence when there is no
+  // daemon to ask, which is what the panel should show rather than a gate's.
+  scanExplain: null,
 
   // The daemon's own numbers - the priority bands, the catch-all table and the
   // timers an instance is stamped with when it is created. They were module

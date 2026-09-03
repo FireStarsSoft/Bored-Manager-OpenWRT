@@ -31,13 +31,33 @@ export type WanbindRuleOwner =
 export interface WanbindRuleRow {
   pref: number
   cidr: string
+  /**
+   * The destination the rule selects on, for the rules that select on one.
+   *
+   * Empty on every source rule, which is most of them. The LAN-local escapes
+   * are the ones that carry it, and it is half their identity: two of them
+   * differ in nothing else.
+   */
+  dst?: string
   table: number
   action: number
   selector: string
   owner: WanbindRuleOwner
   id: string
   instance: string
-  reason: string
+  reason?: string
+  /**
+   * How many rules this row stands for, when the daemon collapsed a run of
+   * them. Absent on a row that is one rule, which is the common case.
+   *
+   * netifd writes three rules for every interface carrying `option ip4table`,
+   * so a router dialling five hundred sessions carries fifteen hundred of them
+   * and they are all the same fact. Collapsed they are five hundred rows; the
+   * count is what keeps the totals honest about the other thousand.
+   */
+  count?: number
+  /** The preferences behind a collapsed row. */
+  prefs?: number[]
 }
 
 export interface WanbindTableRow {

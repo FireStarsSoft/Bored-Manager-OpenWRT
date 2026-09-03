@@ -4828,6 +4828,25 @@
                                         {
                                           "type": "keyValue",
                                           "source": {
+                                            "kind": "invoke",
+                                            "method": "scanExplain",
+                                            "args": [
+                                              "$row.pref",
+                                              "$row.cidr",
+                                              "$row.dst",
+                                              "$row.table"
+                                            ]
+                                          },
+                                          "rows": [
+                                            {
+                                              "key": "reason",
+                                              "label": "What it does"
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "type": "keyValue",
+                                          "source": {
                                             "kind": "stream",
                                             "event": "monitor",
                                             "path": "$row"
@@ -4857,10 +4876,6 @@
                                             {
                                               "key": "owner",
                                               "label": "Written by"
-                                            },
-                                            {
-                                              "key": "reason",
-                                              "label": "What it does"
                                             },
                                             {
                                               "key": "rule",

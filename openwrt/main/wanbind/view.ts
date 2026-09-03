@@ -98,6 +98,8 @@ export function refreshCache(runtime: BindingRuntime, force = false): Promise<vo
   if (runtime.fetching) return runtime.fetching
   if (!force && Date.now() - runtime.cache.fetchedAt < CACHE_TTL_MS) return Promise.resolve()
 
+  runtime.fetchStartedAt = Date.now()
+
   const generation = runtime.generation
 
   const run = async (): Promise<void> => {
@@ -228,7 +230,10 @@ export function refreshCache(runtime: BindingRuntime, force = false): Promise<vo
       runtime.cache.error = error instanceof Error ? error.message : String(error)
     })
     .finally(() => {
-      if (runtime.fetching === fetching) runtime.fetching = null
+      if (runtime.fetching === fetching) {
+        runtime.fetching = null
+        runtime.fetchStartedAt = 0
+      }
     })
 
   runtime.fetching = fetching
@@ -415,16 +420,47 @@ export function emitSnapshots(runtime: BindingRuntime): void {
 }
 
 /**
- * Called after the fast sweep replaced its model: refresh from the daemon in
- * the background and emit when it lands.
+ * A fetch that has been outstanding longer than a whole interval.
  *
- * The second emit goes out immediately as well, so a `stale` flip is never held
- * back by a fetch that hangs - the page learns the router stopped answering at
- * the tick it stopped, not at the tick the timeout expired.
+ * The case this exists for is a router that accepts the connection and then
+ * says nothing: the call does not fail, it simply never comes back, and every
+ * tick after it would emit nothing at all. Marking the cache stale here is what
+ * puts the sentence on the page at the tick it stopped answering rather than at
+ * the tick the transport finally gives up.
+ */
+function fetchHung(runtime: BindingRuntime, now: number): boolean {
+  if (!runtime.fetching || runtime.fetchStartedAt <= 0) return false
+
+  const budget = Math.max(1_000, runtime.ctx.fastIntervalMs('openwrt'))
+
+  if (now - runtime.fetchStartedAt <= budget) return false
+  if (runtime.cache.stale) return false
+
+  const waited = Math.round((now - runtime.fetchStartedAt) / 1_000)
+
+  runtime.cache.stale = true
+  runtime.cache.error = `The router has not answered for ${waited}s.`
+  return true
+}
+
+/**
+ * Called after the fast sweep replaced its model: refresh from the daemon and
+ * emit when it lands.
+ *
+ * One emit per tick, on each of the two streams. It used to be two - one
+ * immediately and one when the fetch landed - which at five hundred bindings
+ * meant every tick pushed two full payloads onto a stream where the second
+ * differed from the first only in having newer numbers. The case the immediate
+ * emit was there for is a fetch that hangs, and `fetchHung` covers that one
+ * without paying for it on every tick that does not.
  */
 export function onSample(runtime: BindingRuntime): void {
+  if (fetchHung(runtime, Date.now())) {
+    emitSnapshots(runtime)
+    return
+  }
+
   void refreshCache(runtime).then(() => emitSnapshots(runtime))
-  emitSnapshots(runtime)
 }
 
 // ------------------------------------------------------------- what others ask

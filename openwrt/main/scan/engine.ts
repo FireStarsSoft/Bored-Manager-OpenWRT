@@ -22,7 +22,12 @@
  */
 import type { ModulePoller } from '@shared/modules'
 import type { OkResult } from '@shared/types'
-import { wanbindRules, type AgentDeps } from '../agent'
+import {
+  wanbindRuleExplain,
+  wanbindRules,
+  type AgentDeps,
+  type WanbindRulesReply
+} from '../agent'
 import { RULE_BOUNDS } from '../config'
 import { bindingDaemonProblem } from '../requirements'
 import { buildScanRows, emptyScanSummary } from './rows'
@@ -73,6 +78,37 @@ export function emptyScanSnapshot(): ScanSnapshot {
 /** How many rows one page of the monitor asks for. */
 const SCAN_PAGE = 500
 
+/**
+ * How many of those pages one pass will take.
+ *
+ * A stop, not a target. Five thousand rows is already more than anybody reads,
+ * and the alternative to a stop is a pass that walks a router answering
+ * something unexpected until the tick after next.
+ */
+const SCAN_MAX_PAGES = 10
+
+/**
+ * Two pages of one reply, joined.
+ *
+ * Everything except the rules and the tables comes from the first page: the
+ * bands, the main table and the counts describe the router, not the page. The
+ * tables are merged because a rule on page four can point at a table page one
+ * never mentioned, and a row whose table is missing renders as a rule going
+ * nowhere.
+ */
+function joinPages(first: WanbindRulesReply, next: WanbindRulesReply): WanbindRulesReply {
+  const tables = [...first.tables]
+  const seen = new Set(tables.map((row) => row.table))
+
+  for (const row of next.tables) {
+    if (seen.has(row.table)) continue
+    seen.add(row.table)
+    tables.push(row)
+  }
+
+  return { ...first, rules: [...first.rules, ...next.rules], tables }
+}
+
 export class ScanEngine {
   private readonly options: ScanEngineOptions
   private readonly poller: ModulePoller
@@ -106,6 +142,38 @@ export class ScanEngine {
 
   rows(): ScanSnapshot['rows'] {
     return this.payload.rows
+  }
+
+  /**
+   * The daemon's sentence about one rule, asked for when somebody opens it.
+   *
+   * The reason a pass does not carry them: at fifteen hundred rows the prose is
+   * most of a megabyte, which is what a ubus reply has in total - so the pass
+   * asks for none and the panel asks for one.
+   */
+  async explain(
+    pref: number,
+    cidr: string,
+    dst: string,
+    table: number
+  ): Promise<{ reason: string }> {
+    if (this.disposed || !this.options.ctx.connected) return { reason: '' }
+
+    const problem = bindingDaemonProblem(this.options.agent())
+    if (problem) return { reason: problem }
+
+    const reply = await wanbindRuleExplain(this.deps(), pref, cidr, dst, table)
+
+    if (!reply.ok || !reply.data) return { reason: reply.error ?? REFUSED }
+    if (!reply.data.read) return { reason: UNREADABLE }
+    if (!reply.data.found) {
+      return {
+        reason:
+          'The router no longer has this rule. It was there when this table was built; something has removed it since, and the next pass will show the table without it.'
+      }
+    }
+
+    return { reason: reply.data.rule?.reason ?? '' }
   }
 
   async scanNow(): Promise<OkResult> {
@@ -215,21 +283,55 @@ export class ScanEngine {
     const problem = bindingDaemonProblem(this.options.agent())
     if (problem) return this.fail(generation, problem)
 
-    // Without the sentences, and paged.
+    // Without the sentences, and page by page.
     //
-    // At five hundred sessions the router carries fifteen hundred rules and
-    // every row used to arrive with a paragraph explaining itself: the prose
-    // was most of the reply, and this table shows a sentence only for the row
-    // somebody opens. netifd's three rules per interface arrive as one row.
-    const reply = await wanbindRules(this.deps(), { limit: SCAN_PAGE, reasons: false })
-    if (!this.current(generation)) return SCAN_STOPPED
-    if (!reply.ok || !reply.data) return this.fail(generation, reply.error ?? REFUSED)
-    // Before the list, always. An empty `rules` beside `read: false` is the
-    // kernel declining to answer, and publishing it as a table would say the
-    // one thing this feature must never say wrongly.
-    if (!reply.data.read) return this.fail(generation, UNREADABLE)
+    // At five hundred sessions and five hundred bindings the router carries
+    // about two thousand rules and the daemon collapses them to about fifteen
+    // hundred rows - three pages. One page used to be the whole pass, so the
+    // table showed the first five hundred and the tile above it said that was
+    // how many rules the router had.
+    //
+    // Every row used to arrive with a paragraph explaining itself, too: the
+    // prose was most of the reply, and this table now shows a sentence only for
+    // the row somebody opens, through `explain` below.
+    let merged: WanbindRulesReply | null = null
+    let offset = 0
+    let pages = 0
 
-    const { rows, summary } = buildScanRows(reply.data)
+    while (pages < SCAN_MAX_PAGES) {
+      const reply = await wanbindRules(this.deps(), {
+        limit: SCAN_PAGE,
+        offset,
+        reasons: false
+      })
+      if (!this.current(generation)) return SCAN_STOPPED
+      if (!reply.ok || !reply.data) return this.fail(generation, reply.error ?? REFUSED)
+      // Before the list, always. An empty `rules` beside `read: false` is the
+      // kernel declining to answer, and publishing it as a table would say the
+      // one thing this feature must never say wrongly. Checked on every page,
+      // because a dump that fails on the third one is as blind as one that
+      // fails on the first.
+      if (!reply.data.read) return this.fail(generation, UNREADABLE)
+
+      pages += 1
+      merged = merged === null ? reply.data : joinPages(merged, reply.data)
+      offset += reply.data.rules.length
+
+      // A page that came back empty ends it whatever the count says: the
+      // alternative is asking the same offset ten times.
+      if (reply.data.rules.length === 0) break
+      if (offset >= reply.data.count) break
+    }
+
+    if (merged === null) return this.fail(generation, REFUSED)
+
+    // Whether the table was cut is decided here and nowhere else. Each page
+    // carries the daemon's `capped` about *that page*, and the first one always
+    // says yes on a router with more than five hundred rows - so carrying it
+    // through would report every large router as truncated no matter how many
+    // pages were walked.
+    const short = offset < merged.count
+    const { rows, summary } = buildScanRows({ ...merged, capped: short })
     if (!this.current(generation)) return SCAN_STOPPED
     this.publish({ t: Date.now(), ok: true, lastError: '', rows, summary })
     return ''
