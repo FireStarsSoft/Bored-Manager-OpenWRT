@@ -30,7 +30,7 @@ import * as legacy from 'bm.pppoe.legacy';
 import * as sections from 'bm.pppoe.sections';
 import * as sessions from 'bm.pppoe.sessions';
 
-export const RELEASE = '2.4.0';
+export const RELEASE = '2.4.1';
 
 /** The ubus contract version, separate from the release. 2 is the pool-of-
  * members model; 3 adds `carrier_mode` (vlan | direct) to the spec. A module

@@ -309,6 +309,17 @@ function replyFindings(ctx, out) {
 }
 
 function fw4Findings(ctx, out) {
+	// Three answers, not two. `null` is a router this agent could not ask - no
+	// shell, and the binary in neither of the two places it is usually put -
+	// and telling somebody their firewall is missing on that evidence is how
+	// this row came to be wrong about a working router in the first place.
+	if (ctx.software.fw4 === null) {
+		finding(out, 'fw4', 'info', 'Whether firewall4 is installed was not checked',
+			'This agent could not run a shell on the router, so it has nothing to go on. Router readiness under Module settings asks a different way and will say.',
+			null, {});
+		return;
+	}
+
 	if (!ctx.software.fw4) {
 		finding(out, 'fw4', 'error', 'Firewall4 is not installed',
 			'Nothing forwards a LAN out of a WAN without it, so no binding and no pool can carry traffic.',

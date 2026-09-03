@@ -23,6 +23,7 @@ import { access, popen, readfile, writefile } from 'fs';
 import { cursor } from 'uci';
 
 import { debug, err } from 'bm.log';
+import { uciBoolean } from 'bm.facts';
 
 export const CONF = '/etc/sysctl.d/60-bm-scale.conf';
 
@@ -112,7 +113,7 @@ export function flowOffload() {
 		if (value == null)
 			return false;
 
-		return type(value) == 'string' ? value == '1' : value == true;
+		return uciBoolean(value);
 	}
 	catch (e) {
 		return null;
@@ -137,9 +138,7 @@ export function flowOffloadHw() {
 		if (value == null)
 			return false;
 
-		let one = trim('' + value);
-
-		return (one == '1' || one == 'true' || one == 'yes' || one == 'on');
+		return uciBoolean(value);
 	}
 	catch (e) {
 		return null;

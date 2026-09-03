@@ -33,6 +33,15 @@ const CPU_ONLINE = '/sys/devices/system/cpu/online';
 const OSRELEASE = '/proc/sys/kernel/osrelease';
 const LOADAVG = '/proc/loadavg';
 const OPENWRT_RELEASE = '/etc/openwrt_release';
+
+/**
+ * What dnsmasq hands out when nobody said otherwise.
+ *
+ * `dnsmasq.init` reads `config_get limit "$cfg" limit 150`, so both an absent
+ * `dhcpleasemax` and a `config dhcp` section with no `limit` mean this number
+ * rather than no ceiling at all.
+ */
+const LEASE_DEFAULT = 150;
 const OS_RELEASE = '/etc/os-release';
 const BOARD_JSON = '/etc/board.json';
 const SYSINFO_MODEL = '/tmp/sysinfo/model';
@@ -191,9 +200,13 @@ export function memory() {
 	if (type(body) != 'string')
 		return out;
 
+	// Anchored to the start of a line. `Cached` on its own is a substring of
+	// `SwapCached`, and which one won depended on the order the kernel happens
+	// to print them in - it prints `Cached` first today, and nothing says it
+	// must. ucode has no multiline flag, so the anchor is written out.
 	let read = function(label) {
-		let found = match(body, regexp(label + ':[ \t]+([0-9]+) kB'));
-		return found ? int(found[1]) : null;
+		let found = match(body, regexp('(^|\n)' + label + ':[ \t]+([0-9]+) kB'));
+		return found ? int(found[2]) : null;
 	};
 
 	out.totalKb = read('MemTotal');
@@ -389,6 +402,7 @@ export function pppoeDevices() {
 export function shellFacts() {
 	let handle = popen('df -k /overlay 2>/dev/null || df -k / 2>/dev/null; ' +
 		'echo bm-df-end; ' +
+		'command -v fw4 >/dev/null 2>&1 && echo fw4here; ' +
 		'nft list tables inet 2>/dev/null | grep -q "table inet fw4" && echo fw4run', 'r');
 
 	if (!handle)
@@ -404,6 +418,7 @@ export function shellFacts() {
 
 	return {
 		df: (cut >= 0) ? substr(body, 0, cut) : body,
+		fw4Present: (index(body, 'fw4here') >= 0),
 		fw4Running: (index(body, 'fw4run') >= 0)
 	};
 };
@@ -444,12 +459,38 @@ export function flash(shell) {
 	return out;
 };
 
-/** Whether fw4 is installed, and whether its ruleset is actually loaded. */
+/**
+ * Whether fw4 is installed, and whether its ruleset is actually loaded.
+ *
+ * `command -v`, not a path. This asked `access('/usr/sbin/fw4')` and firewall4
+ * installs `/sbin/fw4`, so every router with a perfectly good firewall was told
+ * it had none - and the probe seeded the same wrong path, so it agreed. The
+ * module's own readiness check has used `command -v fw4` since long before this
+ * file existed, which is why one surface said "installed" while this one said
+ * "not installed" about the same router.
+ *
+ * The fallback is for the caller that has no shell at all: two paths rather
+ * than one, because guessing is what went wrong here and the point of listing
+ * both is that neither is load-bearing.
+ */
 export function fw4(shell) {
-	return {
-		present: (access('/usr/sbin/fw4') === true),
-		loaded: (type(shell) == 'object') ? (shell.fw4Running === true) : null
-	};
+	if (type(shell) == 'object') {
+		return {
+			present: (shell.fw4Present === true),
+			loaded: (shell.fw4Running === true)
+		};
+	}
+
+	// No shell to ask. The binary is looked for in both places OpenWrt and its
+	// derivatives put it - but not finding it is not the same as knowing there
+	// is none, so that answer is `null` and the surfaces say "not checked"
+	// rather than "not installed". Guessing a path is what went wrong here, and
+	// a fallback that turned a failed guess into a verdict would be the same
+	// mistake wearing a different hat.
+	if (access('/sbin/fw4') === true || access('/usr/sbin/fw4') === true)
+		return { present: true, loaded: null };
+
+	return { present: null, loaded: null };
 };
 
 /**
@@ -464,7 +505,11 @@ export function fw4(shell) {
 export function flowOffloadKernel(osrelease) {
 	let loaded = readfile(PROC_MODULES);
 
-	if (type(loaded) == 'string' && match(loaded, /(^|\n)(nft_flow_offload|nf_flow_table)[ \t]/))
+	// `nft_flow_offload` and nothing else. `nf_flow_table` is `kmod-nf-flow`,
+	// which `kmod-nft-offload` depends on and which several other things pull in
+	// on their own - so seeing it loaded says the flowtable core is there, not
+	// that fw4's `flow_offloading` has an nftables expression to compile to.
+	if (type(loaded) == 'string' && match(loaded, /(^|\n)nft_flow_offload[ \t]/))
 		return true;
 
 	let where = text(osrelease);
@@ -506,12 +551,32 @@ export function hwOffloadCapable(target) {
  * can be written for. The 150 each falls back to is dnsmasq's own default and
  * is flagged as a default rather than reported as a setting.
  */
-/** A uci boolean, in the four spellings OpenWrt writes. */
-function flagOf(value) {
-	let one = trim(type(value) == 'string' ? value : '');
+/**
+ * Whether a value read out of /etc/config means true.
+ *
+ * fw4 and netifd take `1`, `on`, `true` and `yes` to mean the same thing, and
+ * LuCI happens to write only the first - so a reader that compares against `'1'`
+ * is right about every configuration LuCI produced and wrong about every
+ * hand-edited or migrated one, which is exactly the population these readers
+ * exist to be correct on.
+ *
+ * Exported, and the only copy in this package, because the module's own
+ * `util.ts` already records what happens otherwise: the same answer written
+ * down four times, three of the copies applied to some of their booleans and
+ * not to others. It had happened here too - `tune.uc` read
+ * `option flow_offloading` as true only when it was spelled `'1'`, so a router
+ * already running flow offload was told it was off, had its session ceiling cut
+ * to sixty-four, was called unstable, and was offered a button to switch on
+ * what was already on.
+ */
+export function uciBoolean(value) {
+	if (type(value) == 'bool')
+		return value;
+
+	let one = lc(trim(type(value) == 'string' ? value : ''));
 
 	return (one == '1' || one == 'true' || one == 'yes' || one == 'on');
-}
+};
 
 export function leaseLimits() {
 	let out = { dnsmasq: 150, lan: 150, dnsmasqDefault: true, lanDefault: true };
@@ -543,12 +608,19 @@ export function leaseLimits() {
 		let lowest = null;
 
 		uci.foreach('dhcp', 'dhcp', (section) => {
-			if (flagOf(section.ignore))
+			if (uciBoolean(section.ignore))
 				return;
 
+			// Absent is not unlimited. `dnsmasq.init` reads
+			// `config_get limit "$cfg" limit 150`, so a section that never had
+			// the option handed out 150 addresses all along - and skipping it
+			// let a router with the default ceiling report that it had none.
 			let value = digits(section.limit);
 
-			if (value == null || value < 1)
+			if (value == null)
+				value = LEASE_DEFAULT;
+
+			if (value < 1)
 				return;
 
 			if (lowest == null || value < lowest)

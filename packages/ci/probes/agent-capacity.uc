@@ -13,7 +13,7 @@
 // from `CONSTANTS` at assert time, so calibrating a constant on a rig does not
 // turn this probe red.
 
-import { seed, unlink, wipe, writes } from 'fs';
+import { seed, setPopen, unlink, wipe, writes } from 'fs';
 import { cursor } from 'uci';
 
 import { CONSTANTS, compute, report as cachedReport } from 'bm.capacity';
@@ -74,7 +74,7 @@ function baseline(totalKb, availableKb) {
 	seed('/etc/openwrt_release',
 		"DISTRIB_RELEASE='25.12.5'\nDISTRIB_TARGET='x86/64'\nDISTRIB_ARCH='x86" + "_64'\n");
 	seed('/tmp/sysinfo/model', 'QEMU Standard PC\n');
-	seed('/usr/sbin/fw4', '');
+	seed('/sbin/fw4', '');
 	seed('/sys/cl' + 'ass/net/eth0/device', '');
 	seed('/sys/cl' + 'ass/net/eth0/operstate', 'up\n');
 	seed('/sys/cl' + 'ass/net/eth1/device', '');
@@ -182,7 +182,7 @@ wipe();
 seed('/proc/meminfo', 'MemTotal: 2097152 kB\nMemAvailable: 1600000 kB\n');
 seed('/proc/cpuinfo', 'processor\t: 0\nmodel name\t: Intel(R) Celeron(R) J4125 CPU @ 2.00GHz\n');
 seed('/proc/loadavg', '0.10 0.20 0.30 1/100 999\n');
-seed('/usr/sbin/fw4', '');
+seed('/sbin/fw4', '');
 sysctl(262144, 1000, 8192);
 
 let bare = compute({});
@@ -202,6 +202,64 @@ let blind = compute({});
 check('a router that will not say how much memory it has is unknown', blind.stability.level, 'unknown');
 check('rather than being told it has none', blind.ceiling.dimensions.memory, null);
 check('and the memory row does not claim a shortfall', levelOf(blind, 'memory'), 'info');
+
+// --------------------------------------------------------------- firewall4
+
+// The row this release exists for. It used to be a yes/no read off a guessed
+// path - `/usr/sbin/fw4`, which firewall4 does not use - so a router with a
+// perfectly good firewall was told it had none, on the same page where Router
+// readiness said it had one. There are three answers here, and the difference
+// between two of them is the whole fix.
+
+check('a router that could not be asked is not accused of missing a firewall',
+	levelOf(blind, 'fw4'), 'info');
+says('it says the question was not checked',
+	rowFor(blind, 'fw4').label, /was not checked/);
+
+// A shell that answers is the normal case, and it is asked the same question
+// the rest of the agent asks: `command -v fw4`, not a path.
+baseline(2097152, 1600000);
+unlink('/sbin/fw4');
+setPopen('Filesystem           1K-blocks      Used Available Use% Mounted on
+/dev/root               122880     24576     98304  20% /overlay
+bm-df-end
+fw4here
+fw4run
+');
+
+let armed = compute({});
+
+check('a shell that finds fw4 and its ruleset passes', levelOf(armed, 'fw4'), 'pass');
+
+// The error path is still there, and this is the only evidence that earns it.
+baseline(2097152, 1600000);
+unlink('/sbin/fw4');
+setPopen('Filesystem           1K-blocks      Used Available Use% Mounted on
+/dev/root               122880     24576     98304  20% /overlay
+bm-df-end
+');
+
+let none = compute({});
+
+check('a router whose shell says there is no fw4 is told so', levelOf(none, 'fw4'), 'error');
+says('in those words', rowFor(none, 'fw4').label, /Firewall4 is not installed/);
+
+// Installed but not loaded is its own answer - the ruleset failed, the package
+// did not.
+baseline(2097152, 1600000);
+unlink('/sbin/fw4');
+setPopen('Filesystem           1K-blocks      Used Available Use% Mounted on
+/dev/root               122880     24576     98304  20% /overlay
+bm-df-end
+fw4here
+');
+
+let quiet = compute({});
+
+says('installed and not loaded is a different sentence',
+	rowFor(quiet, 'fw4').label, /ruleset is not loaded/);
+
+setPopen(null);
 
 // A kernel too old for MemAvailable still gets a memory model - the estimate is
 // the kernel's own, and it is labelled.

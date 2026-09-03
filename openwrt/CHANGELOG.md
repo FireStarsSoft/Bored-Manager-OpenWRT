@@ -12,6 +12,17 @@ at **2.4.0** - the dashboard, the interfaces and the device table still work
 without them, and nothing else does.
 Which release a module build installs is pinned in `main/agent/manifest.ts`.
 
+## 3.4.1
+
+Pins the router packages at **2.4.1**, which is where the fix is: the Capacity
+tab told routers that had firewall4 that they did not, because the agent looked
+for the binary at a path firewall4 does not use. Nothing in the module changed -
+it renders what the router reports - so this release exists to move the pin.
+
+The report now has a third answer for that row. A router the agent could not run
+a shell on reads *"Whether firewall4 is installed was not checked"* rather than
+being told its firewall is missing on evidence nobody gathered.
+
 ## 3.4.0
 
 Needs Bored Manager **0.7.0**, unchanged, and the router packages at **2.4.0**,

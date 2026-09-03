@@ -23,6 +23,10 @@ let tick = 1000000;
 let readCounts = {};
 let writeCount = 0;
 
+// The shell, and what was asked of it. See `setPopen`.
+let popenBody = null;
+let popenCommands = [];
+
 function touch(path) {
 	tick = tick + 1;
 	mtimes[path] = tick;
@@ -39,6 +43,8 @@ export function wipe() {
 	mtimes = {};
 	readCounts = {};
 	writeCount = 0;
+	popenBody = null;
+	popenCommands = [];
 };
 
 export function readfile(path, limit) {
@@ -132,6 +138,44 @@ export function open(path, mode, perm) { return null; };
 export function fdopen(fd, mode) { return null; };
 export function opendir(path) { return null; };
 export function mkstemp(template) { return null; };
-export function popen(command, mode) { return null; };
+/**
+ * A shell that answers with what a probe says a router printed.
+ *
+ * Null until `setPopen` is called, which is what every probe written before
+ * this saw - so a caller that treats a null shell as "not checked" is still
+ * exercised by default.
+ *
+ * It exists because of the bug it would have caught. `bm.facts` asked
+ * `access('/usr/sbin/fw4')` for a binary OpenWrt installs at `/sbin/fw4`, and
+ * the probe seeded the same wrong path the code guessed - so the test agreed
+ * with the bug through six review rounds. Moving that question onto the shell
+ * fixed it, and left the shell string itself checked by nothing: the sentinel
+ * the command echoes and the sentinel the parser looks for could be spelled
+ * differently and every probe would still pass. This is what lets a probe hand
+ * in a transcript copied off a router and assert what the parser makes of it.
+ */
+/** Probe setup: what the next `popen` reads. Null puts it back to answering nothing. */
+export function setPopen(body) {
+	popenBody = (type(body) == 'string') ? body : null;
+};
+
+/** What was asked of the shell, so a probe can assert the command as well. */
+export function popenAsked() {
+	return popenCommands;
+};
+
+export function popen(command, mode) {
+	push(popenCommands, command);
+
+	if (popenBody == null)
+		return null;
+
+	let body = popenBody;
+
+	return {
+		read: function(how) { return body; },
+		close: function() { return true; }
+	};
+};
 export function pipe() { return null; };
 export function error() { return null; };

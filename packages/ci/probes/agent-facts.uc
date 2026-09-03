@@ -13,7 +13,7 @@
 // probe harness looks like: `popen` and `stat` answer null, and only what has
 // been seeded exists.
 
-import { seed, wipe } from 'fs';
+import { popenAsked, seed, setPopen, unlink, wipe } from 'fs';
 import { cursor } from 'uci';
 
 import * as facts from 'bm.facts';
@@ -123,6 +123,21 @@ let older = facts.memory();
 check('an older kernel is estimated from free, buffers and cache', older.availableKb, 125000);
 check('and says so', older.estimated, true);
 
+// `Cached` is a substring of `SwapCached`, and which one an unanchored search
+// finds depends on the order the kernel prints them in. It prints `Cached`
+// first today; nothing says it must, and a router that swaps would have had
+// its available memory read off the wrong line.
+seed('/proc/meminfo',
+	'MemTotal:         262144 kB' + chr(10) +
+	'MemFree:          100000 kB' + chr(10) +
+	'Buffers:            5000 kB' + chr(10) +
+	'SwapCached:       999999 kB' + chr(10) +
+	'Cached:            20000 kB' + chr(10) +
+	'SwapTotal:        200000 kB');
+
+check('the cache line is read by name, not by whichever line contains the word',
+	facts.memory().availableKb, 125000);
+
 // ------------------------------------------------------------------ flash
 
 check('a filesystem that will not answer leaves flash unknown', facts.flash(null).freeKb, null);
@@ -140,6 +155,97 @@ check('a wrapped df line is read from the end', space.freeKb, 98304);
 check('with its total', space.totalKb, 122880);
 check('and its mount point', space.mount, '/overlay');
 
+// -------------------------------------------------------------------- fw4
+//
+// The check that was wrong on every real router: the code asked
+// `access('/usr/sbin/fw4')` and firewall4 installs `/sbin/fw4`, so a router
+// with a working firewall was told it had none - while the readiness card,
+// which has always used `command -v fw4`, said it was fine about the same
+// router. Nothing here asserted fw4 at all, and the capacity probe seeded the
+// same wrong path the code guessed, so both agreed with the bug.
+
+// The shell string itself, driven end to end. This is the half that was checked
+// by nothing: the sentinel the command echoes and the sentinel the parser looks
+// for could be spelled differently and every other assertion here would still
+// pass - which is exactly the shape of the bug this section exists for.
+//
+// The transcript is what a router prints, not what the code expects: df, the
+// separator, then the two sentinels.
+wipe();
+setPopen('Filesystem           1K-blocks      Used Available Use% Mounted on
+' +
+	'/dev/root               122880     24576     98304  20% /overlay
+' +
+	'bm-df-end
+' +
+	'fw4here
+' +
+	'fw4run
+');
+
+let live = facts.shellFacts();
+
+check('the shell said fw4 is there', live.fw4Present, true);
+check('and that its ruleset is loaded', live.fw4Running, true);
+check('and the df survived the same read', facts.flash(live).freeKb, 98304);
+check('and fw4 reads as present from it', facts.fw4(live).present, true);
+
+// The same router with no firewall: the separator is printed, neither sentinel
+// is.
+wipe();
+setPopen('Filesystem           1K-blocks      Used Available Use% Mounted on
+' +
+	'/dev/root               122880     24576     98304  20% /overlay
+' +
+	'bm-df-end
+');
+
+let bare2 = facts.shellFacts();
+
+check('no sentinel means no fw4', bare2.fw4Present, false);
+check('and no ruleset', bare2.fw4Running, false);
+check('and the finding follows', facts.fw4(bare2).present, false);
+
+// The command has to actually ask. A parser looking for a word nothing echoes
+// is the failure that hid for six review rounds.
+let asked = popenAsked();
+let saidHere = false;
+
+for (let one in asked) {
+	if (index(one, 'echo fw4here') >= 0)
+		saidHere = true;
+}
+
+check('and the command it ran is the one that echoes that word', saidHere, true);
+
+wipe();
+
+// The shell is the answer where there is one, because it finds the binary
+// wherever the distribution put it.
+let told = facts.fw4({ fw4Present: true, fw4Running: true });
+check('a shell that finds fw4 is what decides', told.present, true);
+check('and it says whether the ruleset is loaded', told.loaded, true);
+
+let quiet = facts.fw4({ fw4Present: false, fw4Running: false });
+check('a shell that does not find it says so', quiet.present, false);
+
+// With no shell at all - which is what this harness is - the fallback looks for
+// the binary. Both paths, because guessing one is what went wrong.
+wipe();
+// Unknown, not absent. Not finding a binary in the two places it is usually put
+// is not the same as knowing there is none, and a fallback that turned a failed
+// guess into a verdict would be the original bug wearing a different hat.
+check('no shell and no binary is unknown rather than absent', facts.fw4(null).present, null);
+check('and the loaded question is unanswered rather than answered no',
+	facts.fw4(null).loaded, null);
+
+seed('/sbin/fw4', '');
+check('fw4 where OpenWrt actually installs it is found', facts.fw4(null).present, true);
+
+wipe();
+seed('/usr/sbin/fw4', '');
+check('and somewhere else on the path is found too', facts.fw4(null).present, true);
+
 // ---------------------------------------------------------------- offload
 
 wipe();
@@ -156,6 +262,16 @@ wipe();
 seed('/lib/modules/6.6.73/pppoe.ko', 'x');
 seed('/lib/modules/6.6.73/modules.builtin', 'kernel/net/ipv4/ip_tunnel.ko' + chr(10));
 check('a module directory without it is a no', facts.flowOffloadKernel('6.6.73'), false);
+
+// `nf_flow_table` is `kmod-nf-flow`. `kmod-nft-offload` depends on it and so do
+// several other things, so finding it loaded says the flowtable core is there -
+// not that fw4's `flow_offloading` has an nftables expression to compile to.
+// Counting it was an offer to switch on a firewall that would then not load.
+wipe();
+seed('/proc/modules', 'nf_flow_table 24576 1 - Live 0x0000000000000000' + chr(10) + '');
+seed('/lib/modules/6.6.73/pppoe.ko', 'x');
+check('the flowtable core on its own is not the expression fw4 needs',
+	facts.flowOffloadKernel('6.6.73'), false);
 
 check('a target known to offload in hardware says so', facts.hwOffloadCapable('ramips/mt7621'), 'yes');
 check('and one nobody here knows about says that instead', facts.hwOffloadCapable('x86/64'), 'unknown');
@@ -221,6 +337,17 @@ uci.set('dhcp', 'iot', 'interface', 'iot');
 uci.set('dhcp', 'iot', 'limit', '0');
 
 check('a switched-off pool does not decide the ceiling', facts.leaseLimits().lan, 1000);
+
+// A section that never had the option is not a section with no ceiling.
+// `dnsmasq.init` reads `config_get limit "$cfg" limit 150`, so this LAN has
+// been handing out 150 addresses all along - and skipping it reported that the
+// router had no per-LAN ceiling at all.
+uci.set('dhcp', 'spare', 'dhcp');
+uci.set('dhcp', 'spare', 'interface', 'spare');
+
+check('a section with no limit carries dnsmasq own default', facts.leaseLimits().lan, 150);
+
+uci.delete('dhcp', 'spare');
 check('and no longer called a default', raised.dnsmasqDefault, false);
 check('the per-LAN limit is read too', raised.lan, 1000);
 

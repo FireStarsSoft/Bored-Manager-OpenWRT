@@ -9,7 +9,7 @@
 // RELEASE has to match PKG_VERSION in the Makefile and packages/version.json.
 // `npm run packages:check` fails the build when they disagree.
 
-export const RELEASE = '2.4.0';
+export const RELEASE = '2.4.1';
 export const API_VERSION = 3;
 
 // The shape of the data on disk - configuration and the agent's own state.

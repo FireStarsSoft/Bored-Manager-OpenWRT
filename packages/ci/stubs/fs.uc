@@ -24,5 +24,7 @@ export function fdopen(fd, mode) { return null; };
 export function opendir(path) { return null; };
 export function mkstemp(template) { return null; };
 export function popen(command, mode) { return null; };
+export function setPopen(body) { return null; };
+export function popenAsked() { return []; };
 export function pipe() { return null; };
 export function error() { return null; };

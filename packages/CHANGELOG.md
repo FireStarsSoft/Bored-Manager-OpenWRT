@@ -9,6 +9,44 @@ guessing, so it moves only when the shape of a call changes. `configSchema` is
 the shape of what is written to `/etc`, and it is what a downgrade is refused
 on. All three are in [`version.json`](version.json).
 
+## 2.4.1
+
+A router with a working firewall was told it had none.
+
+`bm.agent capacity` decided whether firewall4 was installed by looking for
+`/usr/sbin/fw4`. firewall4 installs `/sbin/fw4`, so the Capacity report said
+**"Firewall4 is not installed"** about every router that had it - while Router
+readiness, which asks `command -v fw4`, said on the same page that it did. The
+report now asks the shell the same question the rest of the agent asks, and when
+there is no shell to ask it says the question was not checked rather than
+answering it wrong.
+
+Three smaller readers were wrong in the same way - confident about something they
+had not established:
+
+- `/proc/meminfo` was read with an unanchored label, so `Cached` also matched
+  `SwapCached:`. It read the right number only because the kernel happens to
+  print `Cached` first.
+- A `config dhcp` section with no `limit` was treated as a section with no lease
+  ceiling. `dnsmasq.init` defaults that option to 150, so a router with the
+  default ceiling reported that it had none.
+- `nf_flow_table` being loaded was taken as evidence that fw4 flow offload had a
+  kernel to compile to. It is `kmod-nf-flow`, which several other things pull in
+  on their own; only `nft_flow_offload` counts.
+
+And one more of the same shape, in the other direction. `option flow_offloading`
+was read as on only when it was spelled `'1'`. fw4 and netifd take `1`, `on`,
+`true` and `yes` to mean the same thing; LuCI happens to write only the first,
+so the reader was right about every configuration LuCI produced and wrong about
+every hand-edited or migrated one. A router already running flow offload was
+told it was off, had its session ceiling cut to sixty-four, was called unstable,
+and was offered a button to switch on what was already on. There is now one
+reader for uci booleans, `bm.facts uciBoolean`, and the three copies that had
+drifted apart call it.
+
+Nothing else moved: same `apiVersion`, same `configSchema`, same ubus contract.
+Update the three packages together, as always.
+
 ## 2.4.0
 
 WAN Binding is the router's, outright. The feature descriptor's `apiVersion`

@@ -34,7 +34,8 @@ import {
 	leaseCount,
 	leaseLimits,
 	pppoeDevices,
-	shellFacts
+	shellFacts,
+	uciBoolean
 } from 'bm.facts';
 import { issues as findIssues, requirements as findRequirements } from 'bm.capfind';
 
@@ -172,19 +173,21 @@ function number(value, fallback) {
 	return fallback;
 }
 
+/**
+ * A uci boolean with a default for "the option is not there at all", which is a
+ * third answer `bm.facts`'s own reader does not have to give: an absent
+ * `enabled` on a section means enabled, and an absent one elsewhere might not.
+ */
 function flag(value, fallback) {
 	if (type(value) == 'bool')
 		return value;
 
-	let one = text(value);
+	let one = lc(text(value));
 
-	if (one == '1' || one == 'true' || one == 'yes' || one == 'on')
-		return true;
+	if (!length(one))
+		return fallback;
 
-	if (one == '0' || one == 'false' || one == 'no' || one == 'off')
-		return false;
-
-	return fallback;
+	return uciBoolean(one);
 }
 
 function listOf(value) {

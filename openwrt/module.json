@@ -2,7 +2,7 @@
   "apiVersion": 2,
   "id": "openwrt",
   "name": "OpenWRT",
-  "version": "3.4.0",
+  "version": "3.4.1",
   "description": "Manage an OpenWRT router without its web UI: live dashboard, the PPPoE Dialer, and WAN Binding - one-to-one LAN device to WAN binding, hand-placed address-to-port bindings and a monitor that explains every source-routed address, all owned by the router's own binding service.",
   "author": "Bored Manager",
   "minAppVersion": "0.7.0",

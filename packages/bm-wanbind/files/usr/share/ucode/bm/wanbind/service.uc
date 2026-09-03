@@ -46,7 +46,7 @@ import * as reconcile from 'bm.wanbind.reconcile';
 import * as ruleset from 'bm.wanbind.rules';
 import * as wans from 'bm.wanbind.wans';
 
-export const RELEASE = '2.4.0';
+export const RELEASE = '2.4.1';
 
 /**
  * Where a WAN's own routing table is numbered from when this half has to give

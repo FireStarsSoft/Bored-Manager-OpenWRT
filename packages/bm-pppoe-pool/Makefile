@@ -17,7 +17,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=bm-pppoe-pool
-PKG_VERSION:=2.4.0
+PKG_VERSION:=2.4.1
 PKG_RELEASE:=1
 
 PKG_MAINTAINER:=FireStarsSoft
