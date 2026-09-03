@@ -18,6 +18,7 @@ import * as uloop from 'uloop';
 import * as uciLib from 'uci';
 import * as service from 'bm.wanbind.service';
 import * as cfg from 'bm.wanbind.config';
+import * as direct from 'bm.wanbind.direct';
 
 import { check, report, says } from 'probe';
 
@@ -310,5 +311,39 @@ let back = service.info();
 check('netifd is answering again', back.netifd.ok, true);
 check('and the count starts over', back.netifd.failures, 0);
 check('the pass runs every instance again', length(service.pass()), 4);
+
+// ===========================================================================
+// The DHCP hook does not read the configuration.
+//
+// It runs on every lease add, renew and release on the router. Reading
+// /etc/config/bm_wanbind here was four opens per DHCP packet - parsing in
+// proportion to the traffic rather than to the number of bindings - to answer a
+// question that only changes when somebody edits a binding.
+
+// The three hundred and thirty-second binding follows a MAC, and the pass above
+// has just indexed it.
+let followed = scale.clientMac(331);
+
+uciLib.resetCounters();
+let noted = direct.lease({ action: 'add', mac: followed, ip: '10.9.3.99' }, { now: 1000 });
+
+check('a lease for a followed MAC reads no configuration', uciLib.opened(), 0);
+check('and exactly the one binding that follows it was acted on', length(noted.handled ?? []), 1);
+
+uciLib.resetCounters();
+let ignored = direct.lease({ action: 'add', mac: '02:00:ff:ff:ff:ff', ip: '10.9.0.240' }, { now: 1000 });
+
+check('a lease for a MAC nobody follows reads none either', uciLib.opened(), 0);
+check('and nothing was done about it', length(ignored.handled ?? []), 0);
+
+// A section that has just been unbound is out of the index before the pass that
+// would have rebuilt it, so a lease arriving in between finds nothing to move.
+direct.forget('bmdir_331');
+
+uciLib.resetCounters();
+let gone = direct.lease({ action: 'add', mac: followed, ip: '10.9.3.98' }, { now: 1000 });
+
+check('a forgotten binding is not followed', length(gone.handled ?? []), 0);
+check('and it still cost no read', uciLib.opened(), 0);
 
 report();

@@ -2167,6 +2167,11 @@ export function unbind(args) {
 	// written, which is not the question every line above was asking.
 	snap = cfg.snapshot();
 
+	// Out of the index the DHCP hook reads, before the pass rather than after
+	// it: between the two, a lease event for the address this call just unbound
+	// would otherwise still find a binding to move.
+	direct.forget(id);
+
 	let after = direct.run({ bus: state.bus, now: time() });
 	let removed = after.ok ? count(after.removed) : 0;
 

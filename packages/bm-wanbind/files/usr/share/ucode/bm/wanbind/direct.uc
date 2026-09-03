@@ -751,7 +751,57 @@ let state = {
 	lastUnverified: [],
 	events: 0,
 	lastPassAt: 0,
-	lastPassMs: 0
+	lastPassMs: 0,
+
+	// The last pass's sections, by name, and the MAC-following ones indexed by
+	// the MAC they follow.
+	//
+	// Built here so the DHCP hook does not have to read the configuration. That
+	// hook runs on every lease add, renew and release on the router - which on a
+	// box carrying a thousand sessions is a re-read of /etc/config/bm_wanbind
+	// per DHCP packet, to answer a question whose answer changed the last time
+	// somebody edited a binding.
+	//
+	// Only what the last pass saw. A binding created since is not in here, and
+	// that is the same answer it had before: its client has no entry in
+	// `memory` either, so the hook had nothing to move.
+	sections: {},
+	byMac: {}
+};
+
+/**
+ * Take one binding out of the index a deleted section is still in.
+ *
+ * `unbind` removes the section and asks for a pass, and between those two the
+ * DHCP hook could act on a binding that no longer exists - moving a rule for an
+ * address whose owner has just been told it is unbound. The pass rebuilds the
+ * index from the file, so this only has to cover the gap.
+ */
+export function forget(id) {
+	let name = text(id);
+
+	if (!length(name))
+		return false;
+
+	delete state.sections[name];
+	delete state.memory[name];
+
+	let kept = {};
+
+	for (let mac in keys(state.byMac)) {
+		let ids = [];
+
+		for (let one in state.byMac[mac]) {
+			if (one != name)
+				push(ids, one);
+		}
+
+		if (length(ids))
+			kept[mac] = ids;
+	}
+
+	state.byMac = kept;
+	return true;
 };
 
 /** Start again from nothing. What `flush` leaves behind, and what a probe resets to. */
@@ -763,6 +813,8 @@ export function reset() {
 	state.ready = false;
 	state.reason = '';
 	state.lastUnverified = [];
+	state.sections = {};
+	state.byMac = {};
 };
 
 /**
@@ -944,6 +996,27 @@ export function run(ctx) {
 	state.memory = planned.memory;
 	state.rows = planned.rows;
 	state.ready = true;
+
+	// The index the DHCP hook reads instead of the file.
+	state.sections = {};
+	state.byMac = {};
+
+	for (let one in bindings) {
+		state.sections[one.id] = one;
+
+		if (!one.usable || one.targetKind != 'mac')
+			continue;
+
+		let mac = text(one.target ? one.target.mac : '');
+		if (!length(mac))
+			continue;
+
+		if (!exists(state.byMac, mac))
+			state.byMac[mac] = [];
+
+		push(state.byMac[mac], one.id);
+	}
+
 	state.reason = '';
 	state.passes = state.passes + 1;
 	state.written = state.written + written;
@@ -1067,21 +1140,22 @@ export function lease(event, ctx) {
 
 	let handled = [];
 
-	// The configured list, with the unusable skipped here, rather than
-	// `directBindings()` - which holds exactly the same bindings but writes an
-	// error line for every refused section each time it is asked. That is right
-	// for the pass and for `bmwan check`, which happen on a timer and when
-	// somebody asks; this runs from the DHCP hotplug hook, so one mistyped
-	// binding would put that line in syslog on every lease add, renew and
-	// release on the router - logging in proportion to the traffic rather than
-	// to the mistake, on a box carrying thousands of sessions.
-	let snap = (type(ctx) == 'object' && type(ctx.snap) == 'object') ? ctx.snap : cfg.snapshot();
+	// From the index the last pass left, rather than from the file.
+	//
+	// This runs from the DHCP hotplug hook, so it runs on every lease add,
+	// renew and release on the router. Reading the configuration here was four
+	// opens of /etc/config/bm_wanbind per DHCP packet - logging and parsing in
+	// proportion to the traffic rather than to the number of bindings - to
+	// answer a question that only changes when somebody edits one.
+	//
+	// A MAC nobody follows is the overwhelmingly common case and now costs one
+	// failed lookup.
+	let following = exists(state.byMac, event.mac) ? state.byMac[event.mac] : [];
 
-	for (let one in cfg.directConfigured(snap)) {
-		if (!one.usable)
-			continue;
+	for (let id in following) {
+		let one = state.sections[id];
 
-		if (one.targetKind != 'mac' || one.target.mac != event.mac)
+		if (!one || !one.usable)
 			continue;
 
 		let entry = state.memory[one.id];
