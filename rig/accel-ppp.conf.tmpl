@@ -1,0 +1,41 @@
+[modules]
+log_file
+pppoe
+auth_pap
+auth_chap_md5
+ippool
+chap-secrets
+
+[core]
+thread-count=4
+
+[log]
+log-file=/dev/null
+level=1
+
+[pppoe]
+# Every VLAN on the rig's carrier bridge, and nothing else. The regex is what
+# keeps this off the machine's own interfaces: `bmr-wan.101` matches, `eth1`
+# does not, and there is no interface= line to fall back on.
+interface=re:^@WAN@\.[0-9]+$
+ac-name=bmr
+verbose=0
+
+[chap-secrets]
+chap-secrets=@CHAP@
+
+[ip-pool]
+gw-ip-address=10.64.0.1
+10.64.0.2-10.64.15.254
+
+[ppp]
+verbose=0
+mtu=1492
+mru=1492
+ipv4=require
+ipv6=deny
+lcp-echo-interval=30
+lcp-echo-failure=3
+
+[cli]
+tcp=127.0.0.1:2001

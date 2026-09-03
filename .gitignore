@@ -43,3 +43,8 @@ luci-src/
 # output, never a source file: `npm run packages:ucode` writes to /dev/null and
 # a stray one at the root would otherwise be swept up by `git add -A`.
 *.uc.bc
+
+# The rig: downloads, build trees, disk images, logs, generated keys.
+rig/work/
+rig/out/
+rig/.secrets/
