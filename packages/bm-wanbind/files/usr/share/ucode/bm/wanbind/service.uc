@@ -225,6 +225,17 @@ const NETIFD_LOG_EVERY = 60;
 // costs one pass every two seconds and every request is answered inside three.
 const PASS_COALESCE_MS = 2000;
 
+/**
+ * How many bindings one `bind_many` may carry.
+ *
+ * Not a ubus limit - the reply is nowhere near the message ceiling at this size
+ * - but a limit on one synchronous callback: two hundred sections is a commit
+ * of about forty kilobytes and a read-back of the whole file, and a daemon
+ * inside that callback is answering nothing else. The module sends five hundred
+ * bindings as three calls, which is three commits rather than five hundred.
+ */
+const BIND_MANY_LIMIT = 200;
+
 /** Resident set size in kilobytes, or -1 when /proc did not say. */
 function rssKb() {
 	let status = readfile('/proc/self/status');
@@ -1510,13 +1521,21 @@ function wanTable(name) {
  * away from being live while a refused one may well have a rule on the router
  * already from before it was broken.
  */
-function freePref(band, snap) {
+function freePref(band, snap, claimed) {
 	let taken = {};
 
 	for (let one in cfg.directConfigured(snap)) {
 		if (one.pref >= 1)
 			taken[sprintf('%d', one.pref)] = true;
 	}
+
+	// And the numbers handed out earlier in this same batch, which are in
+	// nobody's file yet. Without them two hundred bindings written in one call
+	// would every one of them be given the lowest free priority - two hundred
+	// rules at one number, which is not an order the kernel breaks in any way
+	// worth relying on.
+	for (let key in keys((type(claimed) == 'object') ? claimed : {}))
+		taken[key] = true;
 
 	for (let pref = band.base; pref <= band.top; pref++) {
 		if (!(sprintf('%d', pref) in taken))
@@ -1963,7 +1982,7 @@ function wanTablesTaken(list, snap) {
  * is a DHCP re-acquire on that WAN and nothing else - the option is a statement
  * about where its routes go, and no other interface's configuration is touched.
  */
-function allocateWanTable(wan, snap) {
+function allocateWanTable(wan, snap, shared) {
 	// Its own cursor, rather than one passed in: this runs before `bind()` opens
 	// the one it writes the binding with, and threading it through would make the
 	// order of two unrelated things matter.
@@ -2011,6 +2030,13 @@ function allocateWanTable(wan, snap) {
 
 	let taken = wanTablesTaken(live, snap);
 
+	// And the numbers this batch has already handed out, which are in no file
+	// yet: without them two bindings onto two untabled WANs in one call would
+	// be given the same table, which is the one state that sends one binding's
+	// traffic out of another's port.
+	for (let key in keys((type(shared) == 'object') ? shared : {}))
+		taken[key] = true;
+
 	for (let one in cfg.directConfigured(snap) ?? []) {
 		if (one.table > 0)
 			taken[sprintf('%d', one.table)] = true;
@@ -2026,6 +2052,9 @@ function allocateWanTable(wan, snap) {
 
 	if (!table)
 		return 0;
+
+	if (type(shared) == 'object')
+		shared[sprintf('%d', table)] = true;
 
 	if (!uci.set('network', wan, 'ip4table', sprintf('%d', table)) || !uci.commit('network')) {
 		err(sprintf('could not write option ip4table on %s', wan));
@@ -2066,8 +2095,20 @@ function allocateWanTable(wan, snap) {
  * fields an edit must always carry are the ones that say what this binding is:
  * the target - `ip` or `mac` - and the `wan` it leaves by.
  */
-export function bind(args) {
-	let snap = cfg.snapshot();
+/**
+ * Everything `bind` decides before it writes anything, decided once.
+ *
+ * Split out of `bind` so that a batch can make the same decisions for two
+ * hundred bindings against one reading of the router and one reading of the
+ * file - and so that the two paths cannot drift into deciding differently,
+ * which would be two routers wearing one configuration.
+ *
+ * `ctx.claimed` and `ctx.targets` are what the batch has already handed out and
+ * is not in any file yet: without them every entry in one call would be given
+ * the same free priority.
+ */
+function bindPlan(args, ctx) {
+	let snap = ctx.snap;
 
 	let id = trim(text(args.id));
 
@@ -2103,10 +2144,19 @@ export function bind(args) {
 	if (!length(wan))
 		return { ok: false, reason: 'name the WAN this binding leaves through' };
 
+	// Two entries in one batch naming the same section would be one section
+	// written twice, and the caller would be told both succeeded.
+	if (type(ctx.ids) == 'object') {
+		if (ctx.ids[id] === true)
+			return { ok: false, reason: sprintf('two entries in this batch are both called %s', id) };
+
+		ctx.ids[id] = true;
+	}
+
 	// Before a priority is chosen, before a table is allocated, and before one
 	// character is written. `bind_check` says the same thing, but a caller is
 	// free not to ask it, and the cost of finding out afterwards is a subnet.
-	let wanRefusal = wanRoleRefusal(wan);
+	let wanRefusal = wanRoleRefusal(wan, ctx.live);
 
 	if (wanRefusal)
 		return { ok: false, reason: wanRefusal };
@@ -2131,7 +2181,7 @@ export function bind(args) {
 		if (!band.usable)
 			return { ok: false, reason: band.reason };
 
-		pref = freePref(band, snap);
+		pref = freePref(band, snap, ctx.claimed);
 
 		if (!pref) {
 			return { ok: false, reason: sprintf('every ip rule priority from %d to %d is already claimed by a binding. Widen the band with `option direct_pref_base` on the main section, or remove a binding that is no longer wanted', band.base, band.top) };
@@ -2150,20 +2200,13 @@ export function bind(args) {
 		// arithmetic this half can do, and `writePreparation` already knows how
 		// to write the option once a record carries the number.
 		if (!table)
-			table = allocateWanTable(wan, snap);
+			table = allocateWanTable(wan, snap, ctx.taken);
 
 		if (!table) {
 			return { ok: false, reason: sprintf('netifd reports no ip4table for %s, so there is no table for this binding to point at. Give that interface `option ip4table` in /etc/config/network - a WAN with no table of its own has no route this binding could send anything down', wan) };
 		}
 	}
 
-	let uci = openConfig();
-
-	if (!uci) {
-		return { ok: false, reason: 'the binding was not written: /etc/config could not be opened, so nothing in /etc/config/bm_wanbind was changed. Check that the overlay is mounted and writable' };
-	}
-
-	uci.set(PACKAGE, id, 'direct');
 	// Carried forward like every other field, and for the sharper version of the
 	// same reason: an edit that says only "this address leaves by wan3 now" must
 	// not also switch a binding back on that somebody deliberately switched off.
@@ -2172,8 +2215,6 @@ export function bind(args) {
 	let enabled = type(args.enabled) == 'bool'
 		? args.enabled
 		: (previous ? previous.enabled : true);
-
-	uci.set(PACKAGE, id, 'enabled', enabled ? '1' : '0');
 
 	// An absent name, lan or when_down on a section that already exists carries
 	// forward what the section has, exactly as `pref` and `table` do above. This
@@ -2192,34 +2233,9 @@ export function bind(args) {
 	if (!length(name) && previous && previous.name != previous.id)
 		name = previous.name;
 
-	if (length(name) && name != id)
-		uci.set(PACKAGE, id, 'name', name);
-	else
-		uci.delete(PACKAGE, id, 'name');
-
-	// The two are exclusive, so setting one always removes the other. An edit
-	// that moved a binding from an address to a MAC would otherwise leave both
-	// in the section, which `bm.wanbind.config` refuses - correctly, and for a
-	// reason that would have nothing to do with what was asked for.
-	if (length(ip)) {
-		uci.set(PACKAGE, id, 'ip', ip);
-		uci.delete(PACKAGE, id, 'mac');
-	}
-	else {
-		uci.set(PACKAGE, id, 'mac', mac);
-		uci.delete(PACKAGE, id, 'ip');
-	}
-
-	uci.set(PACKAGE, id, 'wan', wan);
-
 	let lan = trim(text(args.lan));
 	if (!length(lan) && previous)
 		lan = previous.lan;
-
-	if (length(lan))
-		uci.set(PACKAGE, id, 'lan', lan);
-	else
-		uci.delete(PACKAGE, id, 'lan');
 
 	// Absent on a new binding means hold, the same as it does everywhere else
 	// this word is read. A binding whose choice was lost fails closed rather
@@ -2232,10 +2248,96 @@ export function bind(args) {
 	if (!length(whenDown) && previous)
 		whenDown = previous.whenDown;
 
-	uci.set(PACKAGE, id, 'when_down', length(whenDown) ? whenDown : 'hold');
+	if (type(ctx.claimed) == 'object')
+		ctx.claimed[sprintf('%d', pref)] = true;
 
-	uci.set(PACKAGE, id, 'pref', sprintf('%d', pref));
-	uci.set(PACKAGE, id, 'table', sprintf('%d', table));
+	// Two entries following one address is the failure the config reader
+	// refuses between sections: the lower-numbered rule decides and the other
+	// is never reached, so one of the two does nothing while its row says
+	// otherwise. Caught here so the batch says which entry, rather than the
+	// read-back saying only that one of them is broken.
+	if (type(ctx.targets) == 'object') {
+		let key = length(ip) ? ('ip ' + ip) : ('mac ' + mac);
+
+		if (ctx.targets[key] === true)
+			return { ok: false, reason: sprintf('another entry in this batch already follows %s', length(ip) ? ip : mac) };
+
+		ctx.targets[key] = true;
+	}
+
+	return {
+		ok: true,
+		spec: {
+			id: id,
+			ip: ip,
+			mac: mac,
+			wan: wan,
+			lan: lan,
+			name: name,
+			whenDown: length(whenDown) ? whenDown : 'hold',
+			enabled: enabled,
+			pref: pref,
+			table: table,
+			previous: previous
+		}
+	};
+}
+
+/** One binding's fields into the cursor. No commit: the caller owns that. */
+function writeBindSection(uci, spec) {
+	let id = spec.id;
+
+	uci.set(PACKAGE, id, 'direct');
+	uci.set(PACKAGE, id, 'enabled', spec.enabled ? '1' : '0');
+
+	if (length(spec.name) && spec.name != id)
+		uci.set(PACKAGE, id, 'name', spec.name);
+	else
+		uci.delete(PACKAGE, id, 'name');
+
+	// The two are exclusive, so setting one always removes the other. An edit
+	// that moved a binding from an address to a MAC would otherwise leave both
+	// in the section, which `bm.wanbind.config` refuses - correctly, and for a
+	// reason that would have nothing to do with what was asked for.
+	if (length(spec.ip)) {
+		uci.set(PACKAGE, id, 'ip', spec.ip);
+		uci.delete(PACKAGE, id, 'mac');
+	}
+	else {
+		uci.set(PACKAGE, id, 'mac', spec.mac);
+		uci.delete(PACKAGE, id, 'ip');
+	}
+
+	uci.set(PACKAGE, id, 'wan', spec.wan);
+
+	if (length(spec.lan))
+		uci.set(PACKAGE, id, 'lan', spec.lan);
+	else
+		uci.delete(PACKAGE, id, 'lan');
+
+	uci.set(PACKAGE, id, 'when_down', spec.whenDown);
+	uci.set(PACKAGE, id, 'pref', sprintf('%d', spec.pref));
+	uci.set(PACKAGE, id, 'table', sprintf('%d', spec.table));
+
+	return true;
+}
+
+export function bind(args) {
+	let snap = cfg.snapshot();
+	let planned = bindPlan(args, { snap: snap });
+
+	if (!planned.ok)
+		return { ok: false, reason: planned.reason };
+
+	let spec = planned.spec;
+	let id = spec.id;
+	let uci = openConfig();
+
+	if (!uci) {
+		return { ok: false, reason: 'the binding was not written: /etc/config could not be opened, so nothing in /etc/config/bm_wanbind was changed. Check that the overlay is mounted and writable' };
+	}
+
+	writeBindSection(uci, spec);
 
 	if (uci.commit(PACKAGE) === null) {
 		return { ok: false, reason: 'the binding would not commit to /etc/config/bm_wanbind; the file may be read-only or the overlay full' };
@@ -2252,7 +2354,7 @@ export function bind(args) {
 	let written = configuredBinding(id, snap);
 
 	if (!written || written.reason) {
-		restore(id, previous);
+		restore(id, spec.previous);
 		return { ok: false, reason: written ? written.reason : 'the binding was written but cannot be read back out of /etc/config/bm_wanbind' };
 	}
 
@@ -2281,6 +2383,173 @@ export function bind(args) {
 		return { ok: true, pending: true, due: due, binding: row };
 
 	return { ok: true, binding: row };
+};
+
+/**
+ * Two hundred bindings, one commit, one pass.
+ *
+ * What this is for is the module handing over the bindings it used to write
+ * itself: five hundred sections that each need reading back, and five hundred
+ * separate `bind` calls would be five hundred commits to flash and five hundred
+ * full passes over the same band. Two hundred is the batch: one callback, one
+ * commit of about forty kilobytes, and one pass at the end of it.
+ */
+export function bindMany(args) {
+	let list = (type(args.bindings) == 'array') ? args.bindings : [];
+
+	if (!length(list))
+		return { ok: false, reason: 'send bindings: a list of the same fields bind takes' };
+
+	if (length(list) > BIND_MANY_LIMIT) {
+		return {
+			ok: false,
+			reason: sprintf('bind_many takes at most %d bindings in one call and this one carries %d. Send it in batches: each batch is one commit and one pass',
+				BIND_MANY_LIMIT, length(list))
+		};
+	}
+
+	let snap = cfg.snapshot();
+	let live = wans.dump(state.bus);
+	let ctx = {
+		snap: snap,
+		live: live,
+		view: (live === null) ? null : layout.classify(live, layout.statements()),
+		claimed: {},
+		targets: {},
+		ids: {},
+		taken: {}
+	};
+
+	let uci = openConfig();
+
+	if (!uci)
+		return { ok: false, reason: 'nothing was written: /etc/config could not be opened' };
+
+	let specs = [];
+	let results = [];
+
+	for (let one in list) {
+		let entry = (type(one) == 'object') ? one : {};
+		let planned = bindPlan(entry, ctx);
+
+		if (!planned.ok) {
+			push(results, { id: trim(text(entry.id)), ok: false, pref: 0, table: 0, reason: planned.reason });
+			continue;
+		}
+
+		writeBindSection(uci, planned.spec);
+		push(specs, planned.spec);
+		push(results, { id: planned.spec.id, ok: true, pref: planned.spec.pref, table: planned.spec.table, reason: '' });
+	}
+
+	if (length(specs) && uci.commit(PACKAGE) === null)
+		return { ok: false, reason: 'the bindings would not commit to /etc/config/bm_wanbind; the file may be read-only or the overlay full' };
+
+	// One read of the file for the whole batch, and every section in it put
+	// through exactly the checks a section typed in by hand goes through. One
+	// that does not survive them is put back the way it was found rather than
+	// left half-written.
+	snap = cfg.snapshot();
+
+	let written = 0;
+	let refused = 0;
+
+	for (let spec in specs) {
+		let back = configuredBinding(spec.id, snap);
+
+		for (let row in results) {
+			if (row.id != spec.id || !row.ok)
+				continue;
+
+			if (!back || back.reason) {
+				restore(spec.id, spec.previous);
+				row.ok = false;
+				row.reason = back ? back.reason : 'the binding was written but cannot be read back out of /etc/config/bm_wanbind';
+				refused++;
+			}
+			else {
+				written++;
+			}
+		}
+	}
+
+	for (let row in results) {
+		if (!row.ok && !length(row.reason))
+			refused++;
+	}
+
+	let due = passSoon('bind_many');
+
+	notice(sprintf('%d binding(s) written in one call, %d refused; a pass is due in %ds',
+		written, length(results) - written, PASS_COALESCE_MS / 1000));
+
+	return {
+		ok: true,
+		written: written,
+		refused: length(results) - written,
+		pending: true,
+		due: due,
+		results: results
+	};
+};
+
+/** The same in reverse: a list of names off the router in one commit. */
+export function unbindMany(args) {
+	let list = (type(args.ids) == 'array') ? args.ids : [];
+
+	if (!length(list))
+		return { ok: false, reason: 'send ids: the section names to remove' };
+
+	if (length(list) > BIND_MANY_LIMIT) {
+		return {
+			ok: false,
+			reason: sprintf('unbind_many takes at most %d ids in one call and this one carries %d. Send it in batches: each batch is one commit and one pass',
+				BIND_MANY_LIMIT, length(list))
+		};
+	}
+
+	let snap = cfg.snapshot();
+	let uci = openConfig();
+
+	if (!uci)
+		return { ok: false, reason: 'nothing was removed: /etc/config could not be opened' };
+
+	let results = [];
+	let removed = 0;
+
+	for (let one in list) {
+		let id = trim(text(one));
+
+		if (!length(id) || !match(id, SECTION_NAME)) {
+			push(results, { id: id, ok: false, reason: 'that is not a section name' });
+			continue;
+		}
+
+		if (configuredBinding(id, snap) == null) {
+			push(results, { id: id, ok: false, reason: sprintf('no binding called %s in /etc/config/bm_wanbind', id) });
+			continue;
+		}
+
+		uci.delete(PACKAGE, id);
+
+		// Out of the index the DHCP hook reads before the pass rather than
+		// after it, exactly as `unbind` does: between the two, a lease event
+		// for one of these addresses would still find a binding to move.
+		direct.forget(id);
+
+		push(results, { id: id, ok: true, reason: '' });
+		removed++;
+	}
+
+	if (removed && uci.commit(PACKAGE) === null)
+		return { ok: false, reason: 'the sections would not be removed from /etc/config/bm_wanbind' };
+
+	let due = passSoon('unbind_many');
+
+	notice(sprintf('%d binding(s) removed in one call; the pass that takes their rules off is due in %ds',
+		removed, PASS_COALESCE_MS / 1000));
+
+	return { ok: true, removed: removed, pending: true, due: due, results: results };
 };
 
 /**
@@ -4395,6 +4664,12 @@ export const methods = {
 	// answer with what it did. Without it the request is folded into the pass
 	// that is already due, which is what the hotplug hooks want - they arrive
 	// one per interface and would otherwise each buy a full pass.
+	// The batch forms of the two above. What they are for is the module handing
+	// over the bindings it used to write itself: five hundred separate calls
+	// would be five hundred commits to flash and five hundred passes.
+	bind_many: method({ bindings: [] }, (args) => bindMany(args)),
+	unbind_many: method({ ids: [] }, (args) => unbindMany(args)),
+
 	reconcile: method({ instance: '', wait: false }, (args) => reconcileNow(args)),
 	flush: method({ instance: '' }, (args) => flush(args)),
 

@@ -526,4 +526,98 @@ check('with nothing left over', second.deferred, 0);
 // another's port.
 check('and every table is a different number', length(keys(taken)), 100);
 
+// ===========================================================================
+// Two hundred bindings in one call.
+//
+// The module hands over the bindings it used to write itself. Five hundred
+// separate `bind` calls would be five hundred commits to flash and five hundred
+// full passes over the same band, on a router that is answering everything else
+// in between.
+
+uloop.resetTimers();
+uciLib.resetCounters();
+scale.resetBusCounts();
+
+let batchSpecs = [];
+
+// On the two LANs the fixture's own five hundred do not reach: those sit from
+// .10 to .134 on each, and a batch that collided with them would be measuring
+// the collision check rather than the batch.
+for (let i = 0; i < 200; i++) {
+	let lan = (i < 100) ? 'guest' : 'iot';
+	let subnet = (i < 100) ? '10.9.2' : '10.9.3';
+
+	push(batchSpecs, {
+		id: sprintf('bmhand_%03d', i),
+		ip: sprintf('%s.%d', subnet, 150 + (i % 100)),
+		wan: scale.wanName((i % 500) + 1),
+		lan: lan,
+		when_down: 'hold'
+	});
+}
+
+let handed = service.bindMany({ bindings: batchSpecs });
+
+check('every one of them was written', handed.written, 200);
+check('none refused', handed.refused, 0);
+check('in one commit', uciLib.commits('bm_wanbind'), 1);
+check('with one look at netifd', scale.busCounts().dump, 1);
+check('and a pass owed rather than run', handed.pending, true);
+check('one pass, not two hundred', uloop.pending(), 1);
+check('a result per entry', length(handed.results), 200);
+check('each carrying the number it was given', handed.results[0].pref > 0, true);
+
+// Every priority handed out is a different one. Allocated from the file alone,
+// every entry in the batch would have been given the lowest free number - two
+// hundred rules at one priority, which is not an order the kernel breaks in any
+// way worth relying on.
+let seenPrefs = {};
+for (let row in handed.results) {
+	if (row.ok)
+		seenPrefs[sprintf('%d', row.pref)] = true;
+}
+
+check('and no two the same', length(keys(seenPrefs)), 200);
+
+// The batch checks itself as well as the file: two entries naming one section,
+// or following one address, are caught here rather than by the read-back saying
+// only that one of them is broken.
+let clashes = service.bindMany({ bindings: [
+	{ id: 'bmclash_a', ip: '10.9.1.200', wan: 'p003', lan: 'LAN_WIRED' },
+	{ id: 'bmclash_a', ip: '10.9.1.201', wan: 'p003', lan: 'LAN_WIRED' },
+	{ id: 'bmclash_b', ip: '10.9.1.200', wan: 'p004', lan: 'LAN_WIRED' }
+] });
+
+check('the good one is written', clashes.written, 1);
+check('and the other two refused', clashes.refused, 2);
+says('one for its name', clashes.results[1].reason, /both called bmclash_a/);
+says('the other for its address', clashes.results[2].reason, /already follows 10\.9\.1\.200/);
+
+// Over the limit is refused before anything is opened, rather than half done.
+uciLib.resetCounters();
+
+let toomany = [];
+for (let i = 0; i < 201; i++)
+	push(toomany, { id: sprintf('bmover_%03d', i), ip: sprintf('10.9.2.%d', 5 + i), wan: 'p005', lan: 'guest' });
+
+let over = service.bindMany({ bindings: toomany });
+
+check('a batch over the limit is refused', over.ok, false);
+says('and says how to send it', over.reason, /Send it in batches/);
+check('having opened nothing', uciLib.opened(), 0);
+
+// And the same in reverse.
+uciLib.resetCounters();
+
+let names = [];
+for (let i = 0; i < 200; i++)
+	push(names, sprintf('bmhand_%03d', i));
+
+let dropped = service.unbindMany({ ids: names });
+
+check('every one removed', dropped.removed, 200);
+check('in one commit', uciLib.commits('bm_wanbind'), 1);
+check('with a pass owed', dropped.pending, true);
+check('and the sections are gone', uci.get('bm_wanbind', 'bmhand_000'), null);
+
 report();
