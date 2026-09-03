@@ -16,7 +16,7 @@
 // system(), and the probes hand in nothing and get a daemon that reconciles
 // UCI without ever running a command on the machine checking it.
 
-import { lsdir, readfile, unlink } from 'fs';
+import { lsdir, readfile, stat, unlink } from 'fs';
 import { cursor } from 'uci';
 import { timer } from 'uloop';
 
@@ -65,6 +65,13 @@ const SPEC_ARGS = {
 	masq: true, mtu_fix: true, lan_forward: true
 };
 
+// What the config cadence watches, and how often it reads anyway when the
+// filesystem will not say. Twelve passes is once a minute at the default
+// counter interval, which is the slowest a hand-edited section should take to
+// be noticed.
+const NETWORK_FILE = '/etc/config/network';
+const CONFIG_EVERY = 12;
+
 let state = {
 	bus: null,
 	system: null,
@@ -83,7 +90,33 @@ let state = {
 	reloadTimer: null,
 	reloadAt: 0,
 	fwTimer: null,
-	fwAt: 0
+	fwAt: 0,
+
+	// Which pool each member section belongs to, built when the configuration
+	// is read and looked up per dumped interface. The alternative - asking
+	// every pool whether it owns each name, and every pool answering by walking
+	// its member list - is a quarter of a million comparisons per pass at five
+	// hundred sessions.
+	bySection: {},
+	indexSize: 0,
+	indexBuilds: 0,
+
+	// When /etc/config/network was last written, as the daemon last saw it.
+	networkMtime: 0,
+
+	// Where the last pass spent its time, and how much of the router it looked
+	// at. A pass that takes longer than the counter interval is a router whose
+	// passes overlap, and which part is slow is the whole question.
+	pass: {
+		configMs: 0,
+		dumpMs: 0,
+		counterMs: 0,
+		watchdogMs: 0,
+		totalMs: 0,
+		dumpEntries: 0,
+		configReads: 0
+	},
+	lastPassMs: 0
 };
 
 function rssKb() {
@@ -94,6 +127,17 @@ function rssKb() {
 	let found = match(status, /VmRSS:[ \t]+([0-9]+)/);
 	return found ? int(found[1]) : -1;
 };
+
+/**
+ * Milliseconds off the monotonic clock, for measuring one pass.
+ *
+ * Monotonic rather than the wall clock: an NTP step during a pass would
+ * otherwise be reported as the pass having taken an hour, or minus one.
+ */
+function millis() {
+	let now = clock(true);
+	return type(now) == 'array' ? (now[0] * 1000 + now[1] / 1000000) : 0;
+}
 
 function each() {
 	let out = [];
@@ -110,6 +154,19 @@ function text(value) {
 function baseOf(device) {
 	let dot = index(device, '.');
 	return dot >= 0 ? substr(device, 0, dot) : device;
+};
+
+/**
+ * One pool's live state, by id, or null.
+ *
+ * For the probes: everything a surface needs is on `info` and `stats`, and the
+ * one thing they cannot show is the shape of what this process is holding -
+ * which is exactly what a scale assertion is about.
+ */
+export function poolState(id) {
+	let name = type(id) == 'string' ? id : '';
+
+	return exists(state.pools, name) ? state.pools[name] : null;
 };
 
 export function attach(bus) {
@@ -368,12 +425,65 @@ export function load() {
 	state.pools = next;
 	state.order = order;
 
+	// Which pool a section belongs to, worked out once.
+	//
+	// The dump loop asked every pool whether it owned each interface, and a
+	// pool answered by walking its member list - so a router with five hundred
+	// sessions and a few hundred interfaces of its own spent a quarter of a
+	// million comparisons per pass to place a dump it could have looked up.
+	state.bySection = {};
+	state.indexSize = 0;
+
+	for (let st in each()) {
+		for (let member in st.pool.members) {
+			let name = cfg.sectionFor(st.pool.prefix, member.vlan);
+
+			if (!length(name))
+				continue;
+
+			state.bySection[name] = st;
+			state.indexSize = state.indexSize + 1;
+		}
+	}
+
+	state.indexBuilds = state.indexBuilds + 1;
+
 	notice(sprintf('loaded %d pool(s), counters every %ds, redial after %ds',
 		length(order), state.main.counterInterval, state.main.redialAfter));
 };
 
 // ---------------------------------------------------------------------------
 // The loops.
+
+/**
+ * Whether /etc/config/network is worth reading again.
+ *
+ * `stat` when the filesystem answers, a slow cadence when it does not. The
+ * fallback matters more than it looks: reading nothing at all until a restart
+ * would mean a section somebody enabled by hand never taking effect, so "could
+ * not tell" has to mean "read it soon" rather than "assume nothing changed".
+ */
+function configStale() {
+	let held = null;
+
+	try {
+		held = stat(NETWORK_FILE);
+	}
+	catch (e) {
+		held = null;
+	}
+
+	if (type(held) != 'object' || type(held.mtime) != 'int') {
+		state.networkMtime = 0;
+		return (state.ticks % CONFIG_EVERY) == 0;
+	}
+
+	if (held.mtime == state.networkMtime)
+		return false;
+
+	state.networkMtime = held.mtime;
+	return true;
+}
 
 /** Fold `network.interface dump` into every pool's session table. */
 function refresh(now) {
@@ -416,10 +526,15 @@ function refresh(now) {
 			table: type(entry.ip4table) == 'int' ? entry.ip4table : null
 		};
 
-		for (let st in each()) {
-			if (sessions.observe(st, normalised, now))
-				break;
-		}
+		// One lookup rather than a walk of every pool's member list. An
+		// interface that is not a member of any pool - the router's own LAN,
+		// its uplink, somebody else's tunnel - costs one failed lookup.
+		let st = state.bySection[name];
+
+		state.pass.dumpEntries = state.pass.dumpEntries + 1;
+
+		if (st)
+			sessions.observe(st, normalised, now);
 	}
 
 	return true;
@@ -474,23 +589,56 @@ function meter(now) {
 
 export function pass() {
 	let now = time();
+	let started = millis();
+	let mark = started;
+
+	state.pass.dumpEntries = 0;
+	state.pass.configReads = 0;
+
+	// /etc/config/network, and only when it has changed.
+	//
+	// This read every member's section on every pass - five hundred sections
+	// re-parsed every five seconds to find out something that changes when
+	// somebody edits the file. The file's own modification time says whether
+	// that is worth doing; a filesystem that will not answer falls back to
+	// reading it every twelfth pass, which is once a minute at the default
+	// interval rather than twelve times.
+	if (configStale()) {
+		for (let st in each())
+			sessions.observeWritten(st, sections.stateOf(st.pool));
+
+		state.pass.configReads = 1;
+	}
 
 	for (let st in each()) {
-		sessions.observeWritten(st, sections.stateOf(st.pool));
-
 		if (!length(st.carrierMac))
 			st.carrierMac = carrierMacOf(st.pool.carrier, null);
 	}
 
+	state.pass.configMs = millis() - mark;
+	mark = millis();
+
 	refresh(now);
+
+	state.pass.dumpMs = millis() - mark;
+	mark = millis();
+
 	meter(now);
+
+	state.pass.counterMs = millis() - mark;
+	mark = millis();
+
 	watchdog(now);
+
+	state.pass.watchdogMs = millis() - mark;
 
 	for (let st in each()) {
 		st.lastPassAt = now;
 		sessions.trace(st);
 	}
 
+	state.pass.totalMs = millis() - started;
+	state.lastPassMs = state.pass.totalMs;
 	state.ticks = state.ticks + 1;
 };
 
@@ -1067,6 +1215,11 @@ export function stats() {
 		known += length(st.sessions);
 	}
 
+	let waiting = 0;
+
+	for (let st in each())
+		waiting += sessions.queueDepth(st);
+
 	return {
 		rssKb: rssKb(),
 		uptime: time() - STARTED,
@@ -1075,7 +1228,19 @@ export function stats() {
 		eventsHandled: events,
 		redials: redials,
 		sessions: known,
-		queueDepth: known
+
+		// How many members are down and waiting to be redialled. It used to be
+		// the number of sessions this daemon knows about, which on a healthy
+		// router with five hundred sessions read as five hundred waiting.
+		queueDepth: waiting,
+
+		// Where the last pass spent its time, and how much of the router it had
+		// to look at. A pass that takes longer than the counter interval is a
+		// router whose passes overlap.
+		pass: state.pass,
+		lastPassMs: state.lastPassMs,
+		indexSize: state.indexSize,
+		indexBuilds: state.indexBuilds
 	};
 };
 

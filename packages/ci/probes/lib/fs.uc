@@ -12,13 +12,27 @@
 
 let files = {};
 
+// When each file was last written, on a clock that only moves when something
+// writes. A daemon that re-reads a configuration file only when its mtime has
+// changed cannot be told apart from one that re-reads it every pass unless the
+// mtime is a fact a probe can control.
+let mtimes = {};
+let tick = 1000000;
+
+function touch(path) {
+	tick = tick + 1;
+	mtimes[path] = tick;
+}
+
 /** Probe setup: put a file where the daemon will look for it. */
 export function seed(path, content) {
 	files[path] = content;
+	touch(path);
 };
 
 export function wipe() {
 	files = {};
+	mtimes = {};
 };
 
 export function readfile(path, limit) {
@@ -27,6 +41,7 @@ export function readfile(path, limit) {
 
 export function writefile(path, data, limit) {
 	files[path] = data;
+	touch(path);
 	return length(data);
 };
 
@@ -63,7 +78,18 @@ export function lsdir(path, pattern) {
 export function mkdir(path, mode) { return true; };
 export function rmdir(path) { return true; };
 export function rename(from, to) { return null; };
-export function stat(path) { return null; };
+/** Enough of a stat for the readers here: when it changed, and how big it is. */
+export function stat(path) {
+	if (!exists(files, path))
+		return null;
+
+	return {
+		type: 'file',
+		size: length(files[path]),
+		mtime: mtimes[path],
+		ctime: mtimes[path]
+	};
+};
 export function lstat(path) { return null; };
 export function access(path, mode) { return exists(files, path); };
 export function chmod(path, mode) { return true; };

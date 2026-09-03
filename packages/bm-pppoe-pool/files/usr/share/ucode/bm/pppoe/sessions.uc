@@ -36,8 +36,6 @@ export function create(one) {
 		written: {},
 		ghosts: [],
 		carrierMac: '',
-		downQueue: [],
-		downHead: 0,
 		events: 0,
 		redials: 0,
 		lastPassAt: 0,
@@ -68,7 +66,6 @@ function markDown(st, section, now) {
 		return;
 
 	session.downSince = now;
-	push(st.downQueue, { section: section, since: now });
 };
 
 /** Fold one dumped interface's state into the table. */
@@ -196,41 +193,59 @@ export function dueForRedial(st, after, limit, now) {
 	if (after <= 0)
 		return [];
 
-	let out = [];
+	// Read off the sessions rather than off a queue.
+	//
+	// There was a queue, and it grew for the life of the process: entries were
+	// discarded only from the front, so one flapping session behind a stuck one
+	// kept every entry ever pushed. A redial every thirty seconds for a week is
+	// twenty thousand entries describing five hundred sessions. The state that
+	// decides all of this is `downSince`, which is on the session already, so
+	// the candidates are bounded by the number of members by construction.
+	let due = [];
 
-	while (st.downHead < length(st.downQueue) && length(out) < limit) {
-		let entry = st.downQueue[st.downHead];
-		let session = st.sessions[entry.section];
+	for (let section in keys(st.sessions)) {
+		let session = st.sessions[section];
 
-		// Stale: it came back up, went down again later, or is stopped now.
-		if (!session || !session.downSince || session.downSince != entry.since ||
-		    session.autostart === false) {
-			st.downHead = st.downHead + 1;
+		if (!session || !session.downSince || session.autostart === false)
 			continue;
-		}
 
 		// A section no longer written is not netifd's to redial.
-		if (!exists(st.written, entry.section)) {
-			st.downHead = st.downHead + 1;
+		if (!exists(st.written, section))
 			continue;
-		}
 
-		// The front has not waited long enough, so nothing behind it has either.
-		if (now - entry.since < after)
-			break;
+		if (now - session.downSince < after)
+			continue;
 
-		st.downHead = st.downHead + 1;
-		push(out, entry.section);
+		push(due, { section: section, since: session.downSince });
 	}
 
-	// Everything before the head is spent; start the array again rather than
-	// letting it grow for the life of the process.
-	if (st.downHead >= length(st.downQueue)) {
-		st.downQueue = [];
-		st.downHead = 0;
+	// Longest down first, which is what the queue was for.
+	sort(due, (a, b) => a.since - b.since);
+
+	let out = [];
+
+	for (let one in due) {
+		if (length(out) >= limit)
+			break;
+
+		push(out, one.section);
 	}
 
 	return out;
+};
+
+/** How many members are down and waiting to be redialled. */
+export function queueDepth(st) {
+	let n = 0;
+
+	for (let section in keys(st.sessions)) {
+		let session = st.sessions[section];
+
+		if (session && session.downSince)
+			n++;
+	}
+
+	return n;
 };
 
 /**
@@ -244,8 +259,10 @@ export function redialled(st, section, now) {
 
 	st.redials = st.redials + 1;
 	session.redials = (session.redials ? session.redials : 0) + 1;
+	// Back of the queue, which with no queue is simply "down as of now": one
+	// that does not come back is tried again one `redial_after` later rather
+	// than on every pass.
 	session.downSince = now;
-	push(st.downQueue, { section: section, since: now });
 };
 
 /** Status counts for one pool, every member counted exactly once. */
