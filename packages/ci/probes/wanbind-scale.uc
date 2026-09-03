@@ -704,4 +704,77 @@ says('and says why', bad.reason, /not below direct_pref_base/);
 service.pass();
 check('so the rules are still where they were', length(escapes()), 4);
 
+// ===========================================================================
+// The monitor at five hundred sessions.
+//
+// netifd writes three rules per interface with a routing table of its own, so a
+// router dialling five hundred carries fifteen hundred rules that are the
+// router doing its job - and every row used to carry a paragraph explaining
+// itself, written whether or not anybody was going to read it. At this size the
+// sentences are most of the reply and the plumbing buries everything else.
+
+rtnl.setRules([]);
+
+for (let one in scale.kernelRules())
+	rtnl.request(rtnl.const.RTM_NEWRULE, rtnl.const.NLM_F_CREATE, one);
+
+for (let one in scale.netifdRules(router))
+	rtnl.request(rtnl.const.RTM_NEWRULE, rtnl.const.NLM_F_CREATE, one);
+
+service.pass();
+
+let seenAll = service.rulesReport({ limit: 3000 });
+
+check('every rule the kernel holds is counted', seenAll.raw > 1500, true);
+check('and the rows are fewer, because the plumbing is collapsed', seenAll.count < seenAll.raw, true);
+check('nothing was capped', seenAll.capped, false);
+check('no row carries a sentence unless asked', exists(seenAll.rules[0], 'reason'), false);
+
+let collapsedRows = 0;
+
+for (let row in seenAll.rules) {
+	if (row.owner == 'netifd' && row.count == 3)
+		collapsedRows++;
+}
+
+check('one row per interface netifd routes', collapsedRows, 500);
+says('and it says how many rules it stands for', seenAll.rules[3].selector ?? '', /3 rules for p/);
+
+// The whole reply, at the size that matters, has to fit in a ubus message.
+check('the reply fits inside the message limit', length(sprintf('%J', seenAll)) < 524288, true);
+
+// Paging. The rows are sorted and collapsed before anything is dropped, so a
+// page is a window on one table rather than a different table each time.
+let firstPage = service.rulesReport({ limit: 100, offset: 0 });
+let secondPage = service.rulesReport({ limit: 100, offset: 100 });
+
+check('a page is the size asked for', length(firstPage.rules), 100);
+check('the next one starts where it left off', secondPage.offset, 100);
+check('and is a different window', firstPage.rules[0].pref != secondPage.rules[0].pref, true);
+check('both agree how many rows there are', firstPage.count, secondPage.count);
+check('and say there are more', firstPage.capped, true);
+
+// Sentences are for the page being drawn, and only when asked for.
+let explained = service.rulesReport({ limit: 20, reasons: true, collapse: false });
+
+check('a small page with reasons has them', exists(explained.rules[0], 'reason'), true);
+check('and does not say they were left out', explained.reasonsOmitted, false);
+
+let toobig = service.rulesReport({ limit: 2000, reasons: true, collapse: false });
+
+check('a page too big for them does not carry them', exists(toobig.rules[0], 'reason'), false);
+check('and says so rather than looking like there is nothing to say', toobig.reasonsOmitted, true);
+
+// One rule explained, which is what the page fetches for the row somebody
+// clicked on.
+let picked = service.ruleExplain({ pref: 19000, cidr: '10.9.0.10/32', table: 10001 });
+
+check('the rule is found', picked.found, true);
+check('and it is the one asked for', picked.rule.pref, 19000);
+says('with the sentence the list no longer carries', picked.rule.reason ?? '', /./);
+
+let missing = service.ruleExplain({ pref: 4242, cidr: '10.9.0.99/32', table: 99 });
+check('a rule that is not there is said to be missing', missing.found, false);
+check('rather than being an error', missing.ok, true);
+
 report();

@@ -114,6 +114,13 @@ let assignments = [
 function run(limit) {
 	return monitor.report({
 		limit: limit,
+
+		// Every rule on its own line, with its sentence. The default is the
+		// opposite of both - a page lists rules and explains the one somebody
+		// clicks on - and the collapsing and the paging have their own block at
+		// the foot of this file.
+		collapse: false,
+		reasons: true,
 		band: { base: 19000, span: 1000, top: 19999, usable: true, reason: null },
 		instances: instances,
 		bindings: bindings,

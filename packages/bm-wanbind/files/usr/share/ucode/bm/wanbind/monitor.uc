@@ -47,19 +47,16 @@ const MAX_LIMIT = 5000;
 
 // The kernel's own table numbers, and the names `ip rule` prints for them.
 const MAIN_TABLE = 254;
-const TABLE_NAMES = { '255': 'local', '254': 'main', '253': 'default' };
 
 /**
- * The three rules the kernel puts in every routing policy database.
+ * How many rows one page may carry a sentence for.
  *
- * `ip rule` prints them on a router nobody has touched: priority 0 to the local
- * table, 32766 to main, 32767 to default, each with no selector at all. They
- * are matched on the whole triple rather than on the priority, because 253 is
- * also the table this package ships as its catch-all - a bare rule at 32767 to
- * table 253 is the kernel's, one at 30000 from a LAN to table 253 is an
- * instance fencing that LAN, and calling either of them the other is the
- * difference between "your router is normal" and "your LAN is fenced".
+ * A reason is a paragraph. Two thousand of them is a megabyte, which is the
+ * ubus message limit rather than a page, so a caller that asks for reasons on a
+ * page bigger than this gets the page without them and is told so.
  */
+const REASONS_LIMIT = 500;
+
 const BASELINE = { '255': 0, '254': 32766, '253': 32767 };
 
 /**
@@ -99,6 +96,27 @@ function text(value) {
 function key(value) {
 	return sprintf('%d', value);
 }
+
+/** Whether a priority falls inside one of this daemon's bands. */
+function inBand(pref, band) {
+	let base = intOr(band.base, 0);
+	let top = intOr(band.top, 0);
+
+	return (base >= 1 && pref >= base && pref <= top);
+}
+const TABLE_NAMES = { '255': 'local', '254': 'main', '253': 'default' };
+
+/**
+ * The three rules the kernel puts in every routing policy database.
+ *
+ * `ip rule` prints them on a router nobody has touched: priority 0 to the local
+ * table, 32766 to main, 32767 to default, each with no selector at all. They
+ * are matched on the whole triple rather than on the priority, because 253 is
+ * also the table this package ships as its catch-all - a bare rule at 32767 to
+ * table 253 is the kernel's, one at 30000 from a LAN to table 253 is an
+ * instance fencing that LAN, and calling either of them the other is the
+ * difference between "your router is normal" and "your LAN is fenced".
+ */
 
 /**
  * Whether this is the route everything with nowhere better to go takes.
@@ -731,6 +749,24 @@ export function report(input) {
 	if (limit > MAX_LIMIT)
 		limit = MAX_LIMIT;
 
+	let offset = intOr(asked.offset, 0);
+
+	if (offset < 0)
+		offset = 0;
+
+	// Off by default, and that is the change this release is about. Every row
+	// carried a paragraph explaining itself, written whether or not anybody was
+	// going to read it: at fifteen hundred rules the sentences are most of the
+	// reply, and a page that lists rules and shows the reason for the one you
+	// click on was paying for all of them to draw any of them.
+	let reasons = (asked.reasons === true);
+
+	// And on by default: netifd writes three rules per interface with a routing
+	// table of its own, so a router dialling five hundred sessions carries
+	// fifteen hundred rules that are the router doing its job. Listed one by one
+	// they bury the handful somebody opened the page to find.
+	let collapse = (asked.collapse !== false);
+
 	let band = objectOr(asked.band);
 	let instances = arrayOr(asked.instances);
 	let bindings = arrayOr(asked.bindings);
@@ -766,7 +802,10 @@ export function report(input) {
 			ok: false,
 			read: false,
 			count: 0,
+			raw: 0,
+			offset: offset,
 			capped: false,
+			reasonsOmitted: false,
 			limit: limit,
 			rules: [],
 			bands: bands,
@@ -885,29 +924,117 @@ export function report(input) {
 		high: high
 	};
 
-	let count = length(ordered);
-	let wanted = (count > limit) ? limit : count;
-	let rows = [];
+	// Classified first, and all of it. Classifying is arithmetic - a handful of
+	// lookups per rule - where the sentences below are not, so every rule can be
+	// placed for the cost of the page that will not show most of them.
+	let placed = [];
 	let seen = {};
+	let foreignInBands = 0;
 
-	for (let i = 0; i < wanted; i++) {
-		let one = ordered[i];
+	for (let one in ordered) {
 		let verdict = classify(one, ctx);
 
-		push(rows, {
-			pref: one.pref,
-			cidr: one.cidr,
-			table: one.table,
-			action: one.action,
-			selector: selectorOf(one),
-			owner: verdict.owner,
-			id: verdict.id,
-			instance: verdict.instance,
-			reason: reasonFor(one, verdict, ctx, facts)
-		});
+		push(placed, { rule: one, verdict: verdict });
 
 		if (looksUp(one))
 			seen[key(one.table)] = true;
+
+		// A rule in this daemon's own priority bands that this daemon did not
+		// write. It is the one thing on the page that is always worth knowing
+		// about, and a reader looking for it in fifteen hundred rows will not
+		// find it - so it is counted here, over the whole table, whatever page
+		// is being asked for.
+		if (verdict.owner != 'foreign')
+			continue;
+
+		if (inBand(one.pref, bands.direct) || inBand(one.pref, bands.local)) {
+			foreignInBands++;
+			continue;
+		}
+
+		for (let band in bands.instances) {
+			if (inBand(one.pref, { base: band.base, top: band.top })) {
+				foreignInBands++;
+				break;
+			}
+		}
+	}
+
+	bands.foreign = foreignInBands;
+
+	// netifd's three rules per routing table become one row. They are the
+	// router routing itself and there is nothing to decide about them
+	// individually; what a reader wants to know is that an interface has them.
+	let grouped = [];
+
+	if (collapse) {
+		let byIface = {};
+
+		for (let entry in placed) {
+			if (entry.verdict.owner != 'netifd') {
+				push(grouped, entry);
+				continue;
+			}
+
+			let name = entry.verdict.id;
+			let at = byIface[name];
+
+			if (at == null) {
+				byIface[name] = length(grouped);
+				entry.count = 1;
+				entry.prefs = [ entry.rule.pref ];
+				push(grouped, entry);
+				continue;
+			}
+
+			grouped[at].count = grouped[at].count + 1;
+			push(grouped[at].prefs, entry.rule.pref);
+		}
+	}
+	else {
+		grouped = placed;
+	}
+
+	let count = length(grouped);
+	let raw = length(ordered);
+	let from = (offset < count) ? offset : count;
+	let to = ((from + limit) < count) ? (from + limit) : count;
+
+	// The sentences, only for the page being drawn and only when asked for. A
+	// caller asking for two thousand rows with reasons would be asking for a
+	// megabyte of prose, which is the ubus message limit and not a page.
+	let withReasons = reasons && ((to - from) <= REASONS_LIMIT);
+	let rows = [];
+
+	for (let i = from; i < to; i++) {
+		let entry = grouped[i];
+		let one = entry.rule;
+		let verdict = entry.verdict;
+		let many = intOr(entry.count, 0);
+
+		let row = {
+			pref: one.pref,
+			cidr: one.cidr,
+			dst: one.dst,
+			table: one.table,
+			action: one.action,
+			selector: (many > 1)
+				? sprintf('%d rules for %s', many, verdict.id)
+				: selectorOf(one),
+			owner: verdict.owner,
+			id: verdict.id,
+			instance: verdict.instance
+		};
+
+		if (many > 1) {
+			row.count = many;
+			row.prefs = entry.prefs;
+		}
+
+		if (withReasons)
+			row.reason = reasonFor(one, verdict, ctx, facts);
+
+		push(rows, row);
 	}
 
 	// The main table is always described, whether or not a listed rule names it.
@@ -942,12 +1069,84 @@ export function report(input) {
 	return {
 		ok: true,
 		read: true,
+
+		// Rows after collapsing, which is what a caller pages through, and the
+		// number of rules the kernel is actually holding. They are different
+		// questions and a page that showed one as the other would be telling
+		// somebody their router has a third of the rules it has.
 		count: count,
-		capped: (count > wanted),
+		raw: raw,
+		offset: offset,
+		capped: (to < count),
+		reasonsOmitted: (reasons && !withReasons),
 		limit: limit,
 		rules: rows,
 		bands: bands,
 		main: main,
 		tables: tables
 	};
+};
+
+/**
+ * One rule, and why it is there.
+ *
+ * The page lists rules without their sentences now, so this is how the one
+ * somebody clicked on gets explained. It costs the same two dumps a full report
+ * does, which is why it is a call and not a field.
+ */
+export function explain(input) {
+	let asked = objectOr(input);
+	let want = {
+		pref: intOr(asked.pref, 0),
+		cidr: text(asked.cidr),
+		dst: text(asked.dst),
+		table: intOr(asked.table, 0)
+	};
+
+	// Found first, explained second. A whole table with a sentence on every row
+	// is the thing this release stopped producing - it is a megabyte at five
+	// hundred sessions - so the rule is located in a cheap pass and then one
+	// row is asked for again with its reason.
+	let where = {
+		limit: MAX_LIMIT,
+		reasons: false,
+		collapse: false,
+		band: asked.band,
+		local: asked.local,
+		instances: asked.instances,
+		bindings: asked.bindings,
+		assignments: asked.assignments,
+		interfaces: asked.interfaces
+	};
+
+	let full = report(where);
+
+	if (!full.read)
+		return { ok: false, read: false, found: false, rule: null };
+
+	for (let i = 0; i < length(full.rules); i++) {
+		let row = full.rules[i];
+
+		if (row.pref != want.pref || row.table != want.table)
+			continue;
+
+		if (length(want.cidr) && row.cidr != want.cidr)
+			continue;
+
+		if (length(want.dst) && row.dst != want.dst)
+			continue;
+
+		where.limit = 1;
+		where.offset = i;
+		where.reasons = true;
+
+		let just = report(where);
+
+		if (!just.read || !length(just.rules))
+			return { ok: true, read: true, found: true, rule: row };
+
+		return { ok: true, read: true, found: true, rule: just.rules[0] };
+	}
+
+	return { ok: true, read: true, found: false, rule: null };
 };

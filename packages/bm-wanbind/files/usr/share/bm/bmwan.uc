@@ -46,7 +46,7 @@ const USAGE = 'usage: bmwan <command> [--json] [--instance NAME]\n' +
 	'  waiting         every client that has none, and why\n' +
 	'  wans            every uplink, its table, its zone, and who is on it\n' +
 	'  layout          what this router reads each interface as, and why\n' +
-	'  rules [--limit N]\n' +
+	'  rules [--limit N] [--offset N] [--no-reasons]\n' +
 	'                  every ip rule on this router, whose it is, and why\n' +
 	'  verify          the rules that should be on this router and are not\n' +
 	'  stats           memory, events handled, and the last pass time\n' +
@@ -817,7 +817,17 @@ if (command == 'wans') {
  */
 if (command == 'rules') {
 	let limit = counted('limit', 'how many rules to read at most');
-	let result = call('rules', { limit: (limit === null) ? 0 : limit });
+	let offset = counted('offset', 'how many rows to skip');
+
+	// A console reads the sentences: that is what this command is for, and the
+	// page next door is what does not. `--no-reasons` is for a long table where
+	// the rows themselves are the point.
+	let result = call('rules', {
+		limit: (limit === null) ? 0 : limit,
+		offset: (offset === null) ? 0 : offset,
+		reasons: !exists(opts, 'no-reasons'),
+		collapse: true
+	});
 
 	if (asJson) {
 		printf('%J\n', result);
@@ -867,9 +877,17 @@ if (command == 'rules') {
 			printf('  %s\n', one.reason);
 	}
 
+	if (result.reasonsOmitted) {
+		printf('\nThe reasons are left out above: a page this size carrying one paragraph per rule\n');
+		printf('is more than a ubus message holds. Ask for fewer with `bmwan rules --limit 500`.\n');
+	}
+
 	if (result.capped) {
-		printf('\n%d rule(s) on this router and %d shown, which is the cap - raise it with `bmwan rules --limit N`\n',
-			result.count, length(arrayOr(result.rules)));
+		printf('\n%d row(s) on this router, out of %d rules - netifd writes three per interface\n',
+			result.count, result.raw);
+		printf('and they are counted as one. %d shown from %d; the rest with `bmwan rules --offset %d`\n',
+			length(arrayOr(result.rules)), result.offset,
+			result.offset + length(arrayOr(result.rules)));
 	}
 
 	/*

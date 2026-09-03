@@ -4536,6 +4536,23 @@ export function bindCheck(args) {
  * where it is, including one that outranks everything this daemon does;
  * removing it is a decision for whoever put it there.
  */
+export function ruleExplain(args) {
+	let snap = cfg.snapshot();
+
+	return monitor.explain({
+		pref: count(args.pref),
+		cidr: text(args.cidr),
+		dst: text(args.dst),
+		table: count(args.table),
+		band: cfg.directBand(snap),
+		local: cfg.localBand(snap),
+		instances: cfg.configured(snap),
+		bindings: direct.bindings(),
+		assignments: assignments('').assignments,
+		interfaces: wans.dump(state.bus) ?? []
+	});
+};
+
 export function rulesReport(args) {
 	let snap = cfg.snapshot();
 
@@ -4558,6 +4575,13 @@ export function rulesReport(args) {
 	// held binding is exactly the case where those two differ.
 	return monitor.report({
 		limit: limit,
+		offset: count(args.offset),
+
+		// Both default the way a page wants them: the sentences are fetched for
+		// the row somebody clicks on rather than for all of them, and netifd's
+		// three rules per interface are one line rather than three.
+		reasons: (args.reasons === true),
+		collapse: (args.reasons === true) ? (args.collapse !== false) : (args.collapse !== false),
 		band: cfg.directBand(snap),
 		local: cfg.localBand(snap),
 		instances: cfg.configured(snap),
@@ -4766,6 +4790,12 @@ export const methods = {
 	// The two that only read. `rules` is the monitor - every rule on the router
 	// and who wrote it - and `verify` is the narrower question this daemon can
 	// answer about itself: of the rules it decided on, which are actually there.
-	rules: method({ limit: 0 }, (args) => rulesReport(args)),
+	rules: method({ limit: 0, offset: 0, reasons: false, collapse: true }, (args) => rulesReport(args)),
+
+	// One rule, and why it is there. The list above stopped carrying a
+	// paragraph per row - at fifteen hundred rules the sentences were most of
+	// the reply - so this is how the one somebody clicked on gets explained.
+	rule_explain: method({ pref: 0, cidr: '', dst: '', table: 0 }, (args) => ruleExplain(args)),
+
 	verify: method({ instance: '' }, (args) => verify(args))
 };

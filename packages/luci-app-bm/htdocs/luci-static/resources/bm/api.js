@@ -142,6 +142,13 @@ const calls = {
 	wanbindBindCheck: declare(WANBIND, 'bind_check', BIND_SPEC),
 	wanbindUnbind: declare(WANBIND, 'unbind', { id: '' }),
 
+	// The batch forms. What they are for is the module handing over the
+	// bindings it used to write itself, but the ACL and this table are one
+	// list: a method the daemon publishes and this file does not declare is a
+	// method nothing in the browser can reach.
+	wanbindBindMany: declare(WANBIND, 'bind_many', { bindings: [] }),
+	wanbindUnbindMany: declare(WANBIND, 'unbind_many', { ids: [] }),
+
 	// What this router reads each of its interfaces as, and what it can hand
 	// out. Asked when a form opens rather than on the poll: neither answer
 	// changes while somebody is typing into the box it filled.
@@ -151,7 +158,8 @@ const calls = {
 	// The router's whole ip rule table, and the check that what the daemon
 	// wrote is still in it. Both read-only; `rules` is the only call on this
 	// page that can be capped, and says so in its own reply.
-	wanbindRules: declare(WANBIND, 'rules', { limit: 0 }),
+	wanbindRules: declare(WANBIND, 'rules', { limit: 0, offset: 0, reasons: false, collapse: true }),
+	wanbindRuleExplain: declare(WANBIND, 'rule_explain', { pref: 0, cidr: '', dst: '', table: 0 }),
 	wanbindVerify: declare(WANBIND, 'verify', { instance: '' }),
 
 	// Instances are the router's to write from 2.4.0 on. The browser sends a

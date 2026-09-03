@@ -24,6 +24,7 @@
 					"layout",
 					"wans",
 					"rules",
+					"rule_explain",
 					"settings_get",
 					"verify"
 				],
@@ -65,7 +66,9 @@
 					"flush",
 					"bind",
 					"bind_check",
+					"bind_many",
 					"unbind",
+					"unbind_many",
 					"instance_check",
 					"instance_set",
 					"instance_delete",
