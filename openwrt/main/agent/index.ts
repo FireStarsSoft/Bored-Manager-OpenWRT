@@ -93,6 +93,7 @@ export {
   // writes nothing itself.
   wanbindBind,
   wanbindBindings,
+  bindManyBytes,
   wanbindBindMany,
   wanbindUnbind,
   wanbindUnbindMany,
@@ -117,6 +118,7 @@ export {
 export {
   WANBIND_API,
   type WanbindAssignment,
+  type WanbindBindManyReply,
   type WanbindBindSpec,
   type WanbindBindingState,
   type WanbindBindingsReply,

@@ -15,6 +15,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { bindingCapability, wanbindClient } from '../helpers/wanbind'
+import { bindManyBytes } from '../../openwrt/main/agent'
 
 /** One binding, as 3.3.2 left it in the document. */
 const RECORD = {
@@ -64,6 +65,34 @@ function host(
     moduleEvents: [],
     jobs: []
   }
+}
+
+/**
+ * What dropbear will not accept. It refuses an exec request whose command is
+ * longer than a few kilobytes, before any shell runs - so an oversize call
+ * comes back with nothing to read and nothing on the router to look at.
+ */
+const WIRE_CEILING = 8_000
+
+/**
+ * What the handover budgets itself, in `handover.ts`. Asserted rather than
+ * merely stayed under: the whole point is that the budget is measured against
+ * the command that actually goes out, and a measurement taken of anything
+ * nearer to hand - the unquoted JSON, or its length in characters - overshoots
+ * it without ever breaking the ceiling above on a short name.
+ */
+const HANDOVER_BUDGET = 4_000
+
+/** The longest command this run actually put on the wire, in bytes. */
+function widestCommand(client: { harness: { exec: { mock: { calls: unknown[][] } } } }): number {
+  let widest = 0
+
+  for (const call of client.harness.exec.mock.calls) {
+    const bytes = new TextEncoder().encode(String(call[0])).length
+    if (bytes > widest) widest = bytes
+  }
+
+  return widest
 }
 
 describe('the records this module still holds are offered to the router', () => {
@@ -139,6 +168,56 @@ describe('the records this module still holds are offered to the router', () => 
     }
   })
 
+  it('measures the wire, not the characters, when the names are not Latin', async () => {
+    // The one field a user controls. A name may be eighty characters of any
+    // printable Unicode, and the first attempt at batching counted characters
+    // of the unquoted JSON - which under-counts a Thai name threefold and an
+    // apostrophe fourfold, and put the command back over the limit it was
+    // written to stay under.
+    const many = []
+
+    for (let i = 0; i < 300; i += 1) {
+      many.push({
+        ...RECORD,
+        id: `dir_u${String(i).padStart(4, '0')}`,
+        name: `会議室のプリンタO'`.repeat(8).slice(0, 80),
+        target: { kind: 'ip', ip: `10.0.${Math.floor(i / 250)}.${10 + (i % 240)}` },
+        pref: 19_000 + i
+      })
+    }
+
+    const client = wanbindClient({ hostData: host(many) })
+
+    try {
+      await client.tick()
+
+      expect(client.store.read().direct).toHaveLength(0)
+      expect(widestCommand(client)).toBeLessThan(WIRE_CEILING)
+      expect(widestCommand(client)).toBeLessThanOrEqual(HANDOVER_BUDGET)
+    } finally {
+      client.dispose()
+    }
+  })
+
+  it('counts what the wire carries, not what the string is long', () => {
+    const ascii = bindManyBytes([
+      { id: 'bmdir_a1', name: 'Workshop', ip: '10.0.0.11', wan: 'wan1' }
+    ])
+    const wide = bindManyBytes([
+      { id: 'bmdir_a1', name: '会議室のプリンタ', ip: '10.0.0.11', wan: 'wan1' }
+    ])
+    const quoted = bindManyBytes([
+      { id: 'bmdir_a1', name: "O'Brien'", ip: '10.0.0.11', wan: 'wan1' }
+    ])
+
+    // Eight CJK characters where eight ASCII ones were: sixteen bytes more on
+    // the wire, and not one character more in the string.
+    expect(wide - ascii).toBe(16)
+
+    // And an apostrophe is four bytes once the shell has it, not one.
+    expect(quoted - ascii).toBe(6)
+  })
+
   it('offers five hundred records in batches, not five hundred calls', async () => {
     const many = []
 
@@ -165,15 +244,11 @@ describe('the records this module still holds are offered to the router', () => 
       expect(client.daemon.count('bind')).toBe(0)
       expect(client.store.read().direct).toHaveLength(0)
 
-      // The ceiling that actually binds is the size, not the count: every ubus
-      // call goes out as JSON on an SSH command line, and dropbear refuses an
-      // exec request longer than a few kilobytes before any shell runs. Two
-      // hundred specs is about thirty kilobytes, which fails outright.
       for (const payload of client.daemon.payloads('bind_many')) {
-        const specs = payload.bindings as unknown[]
-        expect(specs.length).toBeLessThanOrEqual(200)
-        expect(JSON.stringify(payload).length).toBeLessThan(8_000)
+        expect((payload.bindings as unknown[]).length).toBeLessThanOrEqual(200)
       }
+
+      expect(widestCommand(client)).toBeLessThan(WIRE_CEILING)
 
       // One line in the trail per batch, not one per record. The module-wide
       // ring holds far fewer than four hundred and fifty entries, so a line

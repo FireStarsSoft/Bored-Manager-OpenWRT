@@ -32,7 +32,15 @@
  *   number sent as a string does not make a weaker call, it makes no call at
  *   all - which on a page looks exactly like the daemon being broken.
  */
-import { hasFeature, objectCall, unwrap, WANBIND_OBJECT, type AgentCallResult, type AgentDeps } from './client'
+import {
+  hasFeature,
+  objectCall,
+  ubusCommandBytes,
+  unwrap,
+  WANBIND_OBJECT,
+  type AgentCallResult,
+  type AgentDeps
+} from './client'
 import type { AgentCapability } from '../probe'
 import {
   WANBIND_API,
@@ -255,6 +263,20 @@ export function wanbindRuleExplain(
     cidr,
     dst,
     table: Math.trunc(table)
+  })
+}
+
+/**
+ * How many bytes a `bind_many` of these specs would put on the wire.
+ *
+ * Here rather than at the call site because this is the file that knows what
+ * `bind_many` actually sends - the `bindArgs` translation included - and a
+ * caller measuring its own idea of the payload would be measuring something
+ * else.
+ */
+export function bindManyBytes(bindings: WanbindBindSpec[]): number {
+  return ubusCommandBytes(WANBIND_OBJECT, 'bind_many', {
+    bindings: bindings.map((one) => bindArgs(one))
   })
 }
 

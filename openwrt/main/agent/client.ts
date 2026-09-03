@@ -125,6 +125,27 @@ export function featureRefusal<T = Record<string, unknown>>(
  * object and the method name come from this module and the payload is
  * serialized, so there is no path from a form field to a shell token.
  */
+/**
+ * The command one ubus call becomes, and the only place that shape is written.
+ *
+ * Exported because a caller sending a list has to know how big the call will be
+ * *before* it makes it: the whole payload travels as one shell argument, and an
+ * SSH server refuses an exec request whose command is longer than a few
+ * kilobytes - before any shell runs, so there is no output to read and nothing
+ * on the router to look at afterwards. Measuring anything less than this - the
+ * unquoted JSON, or its length in characters rather than in bytes - under-counts:
+ * a name typed in Thai costs three bytes a character, and an apostrophe costs
+ * four once it is quoted.
+ */
+export function ubusCommand(object: string, method: string, args: unknown): string {
+  return `ubus -S call ${object} ${method} ${shQuote(JSON.stringify(args))}`
+}
+
+/** That command's length on the wire, in bytes rather than in characters. */
+export function ubusCommandBytes(object: string, method: string, args: unknown): number {
+  return new TextEncoder().encode(ubusCommand(object, method, args)).length
+}
+
 export async function objectCall<T = Record<string, unknown>>(
   deps: AgentDeps,
   object: string,
@@ -161,7 +182,7 @@ export async function objectCall<T = Record<string, unknown>>(
     return refusal('Not connected to the router.') as AgentCallResult<T>
   }
 
-  const command = `ubus -S call ${object} ${method} ${shQuote(JSON.stringify(args))}`
+  const command = ubusCommand(object, method, args)
 
   try {
     const result = await deps.ctx.exec(command, { timeoutMs })

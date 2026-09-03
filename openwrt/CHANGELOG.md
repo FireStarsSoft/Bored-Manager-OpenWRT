@@ -192,8 +192,12 @@ routers this is, and what stops it.
 
 **A GitHub update undid itself.** `bmctl update` arms a commit-confirm guard and
 deliberately leaves it armed for a person to confirm; the module ran the command
-and stopped, so the countdown expired, the router put the previous packages
-back, and the job reported success. It reads the router back and confirms now.
+and stopped, so the countdown expired, the router put back the
+configuration it had before the update and reloaded its network, and the job
+reported success. The packages stay installed through that - `bmctl rollback` is
+what undoes those - so what a user lost was their configuration, quietly, two
+minutes after being told the update was done. It reads the router back and
+confirms now, retrying once across the restart the update schedules.
 
 **The readiness card called a daemon this module cannot drive "ok".** The
 binding row was the only feature row not gated on the contract version, so a

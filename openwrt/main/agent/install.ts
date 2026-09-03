@@ -52,6 +52,8 @@ const DOWNLOAD_TIMEOUT_MS = 180_000
  * cost of waiting is a few seconds on a step nobody watches and the cost of not
  * waiting is an install that worked being reported as broken.
  */
+const RESTART_GRACE_MS = 6_000
+
 /**
  * The guard window the module asks `bmctl update` for.
  *
@@ -61,8 +63,6 @@ const DOWNLOAD_TIMEOUT_MS = 180_000
  * the agent will accept and comfortably outside what any of that takes.
  */
 const GUARD_WINDOW_SEC = 300
-
-const RESTART_GRACE_MS = 6_000
 
 function clean(result: ModuleExecResult): string {
   return `${result.stderr || ''}\n${result.stdout || ''}`
@@ -339,8 +339,11 @@ function jobItems(runtime: AgentRuntime, plan: FrozenInstallPlan): JobItemSpec[]
     // config confirm` to keep this, or leave it and the router restores
     // snapshot X on its own". That is exactly right for a person at a
     // terminal, and exactly wrong for a job nobody is watching: the countdown
-    // ran out, the router put the previous packages back, and the module read
-    // the update as having succeeded because apk had said so.
+    // ran out, the router put back the configuration it had before the update
+    // and reloaded its network, and the module read the update as having
+    // succeeded because apk had said so. The packages stay installed either
+    // way - `bmctl rollback` is the command that undoes those - so what a user
+    // lost was their configuration rather than the release.
     //
     // So the router is read back first - the guard is only worth confirming if
     // what it is guarding actually works - and confirmed after. A confirm that
