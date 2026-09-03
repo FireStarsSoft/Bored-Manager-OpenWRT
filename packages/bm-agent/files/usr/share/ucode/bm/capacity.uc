@@ -540,6 +540,14 @@ function neededFor(load, hardware, software) {
 		// instance read `unstable` against a ceiling it was already inside; and
 		// the fix offered raises the ceiling to about the range size, so it
 		// could never clear the row it was offered for.
+		//
+		// What this does not model is two LANs: a range on one and the leases on
+		// another are different addresses, and the larger of the two under-states
+		// what the router as a whole hands out. Getting that right means a
+		// per-LAN model, and the ceiling it would be compared against is itself a
+		// mix of a router-wide `dhcpleasemax` and the lowest per-LAN `limit`. The
+		// direction of the error is the milder one - this row advises, it does not
+		// gate - and over-stating it was the failure that had to go.
 		leaseMax: ((load.configured.rangedClients > clients)
 			? load.configured.rangedClients
 			: clients) + K.LEASE_HEADROOM,
