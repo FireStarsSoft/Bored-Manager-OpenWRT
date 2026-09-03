@@ -23,6 +23,21 @@
 
 let store = {};
 
+// What the code under test did to get at the store, rather than what it wrote.
+//
+// The writes are already visible - the store is right there to read back. What
+// was not visible is the *cost*: `info()` opening five cursors to answer one
+// question, or a pass committing the firewall once per binding, are both
+// perfectly correct and both fall over at five hundred. A probe cannot see
+// either without being told, so this counts.
+//
+// Reset between blocks, never between calls: the number a scale assertion wants
+// is "how many did that one call cost", and the only honest way to get it is to
+// zero the counters immediately before the call.
+let opens = 0;
+let commitCounts = {};
+let walkCounts = {};
+
 function pkg(name) {
 	if (!(name in store))
 		store[name] = { order: [], sections: {} };
@@ -122,6 +137,9 @@ const handle = {
 
 	foreach: function(config, kind, fn) {
 		let p = pkg(config);
+		let key = config + '|' + kind;
+
+		walkCounts[key] = (exists(walkCounts, key) ? walkCounts[key] : 0) + 1;
 
 		for (let name in p.order) {
 			let one = p.sections[name];
@@ -134,10 +152,50 @@ const handle = {
 
 	// The real one returns null on failure and the daemons test for exactly
 	// that, so returning true here is what "it committed" looks like.
-	commit: function(config) { return true; },
+	//
+	// Counted because a commit is the expensive one: on a router this is a
+	// write to flash, and the difference between a pass that commits once and a
+	// pass that commits per binding is the difference between a daemon that can
+	// hold five hundred of them and a daemon that wears the flash out.
+	commit: function(config) {
+		commitCounts[config] = (exists(commitCounts, config) ? commitCounts[config] : 0) + 1;
+		return true;
+	},
 	save: function(config) { return true; },
 	changes: function() { return {}; }
 };
 
-export function cursor(config_dir, save_dir) { return handle; };
+/** How many cursors were opened since the counters were last reset. */
+export function opened() {
+	return opens;
+};
+
+/** How many times one package was committed. */
+export function commits(config) {
+	return exists(commitCounts, config) ? commitCounts[config] : 0;
+};
+
+/**
+ * How many times one package's sections of a type were walked.
+ *
+ * The reader that re-parses `/etc/config/network` on every tick and the one
+ * that reads it when the file changes are the same code from the outside, and
+ * this is the only thing that tells them apart.
+ */
+export function foreachCount(config, kind) {
+	let key = config + '|' + kind;
+	return exists(walkCounts, key) ? walkCounts[key] : 0;
+};
+
+export function resetCounters() {
+	opens = 0;
+	commitCounts = {};
+	walkCounts = {};
+};
+
+export function cursor(config_dir, save_dir) {
+	opens++;
+	return handle;
+};
+
 export function error() { return null; };

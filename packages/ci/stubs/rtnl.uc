@@ -72,6 +72,7 @@ let rules = [];
 let rulesReadable = true;
 let lastError = null;
 let dropAdds = false;
+let dumps = 0;
 
 /** Seed the route table a dump will answer with. */
 export function setRoutes(list) {
@@ -95,6 +96,22 @@ export function setRules(list) {
  */
 export function setRulesReadable(flag) {
 	rulesReadable = (flag !== false);
+};
+
+/**
+ * How many rule dumps have been asked for, and a way to start again at zero.
+ *
+ * A dump is the expensive read in this package: at a thousand rules it is a
+ * netlink round trip per pass, and a pass that asks for one per instance rather
+ * than one per pass is correct, invisible, and four times the cost. Nothing but
+ * a counter can tell those apart.
+ */
+export function ruleDumps() {
+	return dumps;
+};
+
+export function resetRuleDumps() {
+	dumps = 0;
 };
 
 /** What the kernel holds now - the witness a probe asserts against. */
@@ -123,8 +140,15 @@ function fail(message) {
 	return false;
 }
 
+// A rule is its priority, its selector and where it sends the packet - and the
+// selector is two things, not one. A rule matching on destination is a different
+// rule from one matching on source at the same priority, and a key that read
+// only `src` made the LAN-local escapes - which have no source at all - collide
+// with each other the moment there was more than one LAN: the second add found
+// the first under the same key, answered EEXIST, and a daemon that had written
+// four rules held one.
 function ruleKey(one) {
-	return sprintf('%d|%s|%d', one.priority ?? 0, one.src ?? '', one.table ?? 0);
+	return sprintf('%d|%s|%s|%d', one.priority ?? 0, one.src ?? '', one.dst ?? '', one.table ?? 0);
 }
 
 function findRule(payload) {
@@ -158,6 +182,7 @@ function addRule(flags, payload) {
 	push(rules, {
 		priority: payload.priority ?? 0,
 		src: payload.src ?? '',
+		dst: payload.dst ?? '',
 		table: payload.table ?? 0,
 		action: payload.action ?? CONSTANTS.FR_ACT_TO_TBL,
 		family: payload.family ?? CONSTANTS.AF_INET
@@ -168,8 +193,13 @@ function addRule(flags, payload) {
 
 function removeRule(payload) {
 	// By the whole selector when one is given, by priority alone when the
-	// caller sent only that - which is what `ip rule del pref N` does.
-	let at = (payload.src == null) ? findByPriority(payload) : findRule(payload);
+	// caller sent only that - which is what `ip rule del pref N` does. Either
+	// selector counts as one: a delete naming a destination has to miss a rule
+	// that carries a different one, or a flush sweeping a band by priority and
+	// a delete aimed at one escape rule would be the same call.
+	let at = (payload.src == null && payload.dst == null)
+		? findByPriority(payload)
+		: findRule(payload);
 
 	if (at < 0)
 		return fail('RTNETLINK answers: No such file or directory');
@@ -276,6 +306,8 @@ export function request(cmd, flags, payload) {
 	let bits = (type(flags) == 'int') ? flags : 0;
 
 	if (cmd == CONSTANTS.RTM_GETRULE) {
+		dumps++;
+
 		if (!rulesReadable)
 			return null;
 
