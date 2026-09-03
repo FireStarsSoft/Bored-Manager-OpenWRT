@@ -174,6 +174,46 @@ sessions carries ninety-six of them, and the monitor called every one a
 stranger's. On the router this was found on, that was 96 alarming rows burying
 the handful worth reading.
 
+### What a release audit found on the way out
+
+Six things, all on the paths a user takes to get here from 3.3.x.
+
+**The instance half was never told about instances.** Its page notice asked for
+the one-to-one wording, so a user upgrading with binding instances was told
+nothing at all about them - and a user with both kinds read the one-to-one count
+on the instance tab. Every word of the instance sentence was unreachable.
+
+**The same sentence told the commonest mid-update router the wrong thing.** On
+packages 2.3.0 under this module it said the ip rules "still stand exactly as
+they were". That daemon owns the one-to-one band and removes every rule in it no
+section claims, which is every rule a 3.3.x module wrote: it is taking them off,
+and the page was reporting health. The sentence now says which of the two
+routers this is, and what stops it.
+
+**A GitHub update undid itself.** `bmctl update` arms a commit-confirm guard and
+deliberately leaves it armed for a person to confirm; the module ran the command
+and stopped, so the countdown expired, the router put the previous packages
+back, and the job reported success. It reads the router back and confirms now.
+
+**The readiness card called a daemon this module cannot drive "ok".** The
+binding row was the only feature row not gated on the contract version, so a
+router on bm-wanbind 2.3.0 read "the router assigns clients itself" while every
+WAN Binding surface refused. Its absent-package sentence also still promised the
+SSH fallback this release removed.
+
+**`ip-full` was named as what WAN Binding was missing.** The daemon writes its
+rules over netlink and never opens the binary. The package is still offered -
+a router somebody administers by hand is better off with it - and it is no
+longer the answer the binding tab points at.
+
+**The handover was one call and one flash commit per record.** It is `bind_many`
+in batches of two hundred now, with one document write and one line in the event
+trail per batch rather than per record. Two things fell out of doing it: the
+specs go through the same argument translation the single call does, or
+`when_down` never reaches the daemon; and the batch reply does not carry the
+daemon's own read-back, so the list is read once per batch - written is not the
+same as kept.
+
 ### Capacity: what this router can carry
 
 A fifth leaf on the Dashboard, second in the rail. It says what the hardware is,
