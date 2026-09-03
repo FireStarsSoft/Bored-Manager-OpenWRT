@@ -2741,11 +2741,12 @@ msgstr ""
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:314
 msgid ""
 "This router has more members than this page will list. The ones above are "
-"the first of them; \"bmpppoe list\" at a console reads the rest."
+"the first of them; \"bmpppoe list POOL\" at a console reads one pool at a "
+"time."
 msgstr ""
 "Router này có nhiều thành viên hơn số mà trang này liệt kê. Những dòng trên "
-"là các thành viên đầu tiên; chạy \"bmpppoe list\" ở console để đọc phần còn "
-"lại."
+"là các thành viên đầu tiên; chạy \"bmpppoe list POOL\" ở console để đọc từng "
+"pool một."
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:415
 msgid ""
@@ -3631,6 +3632,14 @@ msgstr "nơi một binding đang giữ được đỗ lại"
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1004
 msgid "whole LAN"
 msgstr "cả LAN"
+
+#~ msgid ""
+#~ "This router has more members than this page will list. The ones above are "
+#~ "the first of them; \"bmpppoe list\" at a console reads the rest."
+#~ msgstr ""
+#~ "Router này có nhiều thành viên hơn số mà trang này liệt kê. Những dòng "
+#~ "trên là các thành viên đầu tiên; chạy \"bmpppoe list\" ở console để đọc "
+#~ "phần còn lại."
 
 #~ msgid ""
 #~ "The bm-agent on this router does not have that call yet. Update the "

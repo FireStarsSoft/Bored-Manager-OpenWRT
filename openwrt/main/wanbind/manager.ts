@@ -59,6 +59,7 @@ import {
   type BindingDeviceView,
   type BindingMonitorInput
 } from './view'
+import { routerNow } from './clock'
 import { assignmentRows, instanceRows, waitingRows } from './rows'
 import { eventRows } from './events'
 import type {
@@ -149,7 +150,7 @@ export class BindingManager {
       cache.info,
       this.runtime.service.latestModel(),
       cache.assignments,
-      Date.now()
+      routerNow(cache.info)
     )
     const wanted = typeof id === 'string' ? id : ''
     const only = typeof scope === 'string' ? scope : ''
@@ -162,7 +163,7 @@ export class BindingManager {
 
   waitingRows(id?: unknown): BindingWaitingRow[] {
     const wanted = typeof id === 'string' ? id : ''
-    const rows = waitingRows(this.runtime.cache.waiting, Date.now())
+    const rows = waitingRows(this.runtime.cache.waiting, routerNow(this.runtime.cache.info))
     return wanted ? rows.filter((row) => row.instanceId === wanted) : rows
   }
 

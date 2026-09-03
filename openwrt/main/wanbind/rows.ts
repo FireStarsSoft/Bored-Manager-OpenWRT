@@ -24,6 +24,7 @@ import type {
   WanbindWaiting
 } from '../agent'
 import { BADGE, badge, countBadges, statusBadges } from '../badges'
+import { durationLabel, routerMs } from './clock'
 import type { RouterModel } from '../types'
 import { poolWans, summarizeWans, wanState, wanView, type PoolWan } from './pool'
 import type {
@@ -48,28 +49,6 @@ import type {
  */
 type InstanceState = WanbindInfo['instances'][number]
 type RouterBinding = WanbindBindingsReply['bindings'][number]
-
-/**
- * The router counts in whole seconds on its own wall clock; this side counts in
- * milliseconds on the app's. Every timestamp that arrives from the daemon is
- * multiplied on the way in, because passed through raw it reports every seat as
- * taken in 1970 - the same mistake `binding/router.ts` documents one folder
- * away, made once per surface until it was done in one place.
- */
-function routerMs(seconds: number): number {
-  return seconds > 0 ? seconds * 1_000 : 0
-}
-
-export function durationLabel(msRaw: number): string {
-  const seconds = Math.max(0, Math.floor(msRaw / 1000))
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ${seconds % 60}s`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ${minutes % 60}m`
-  const days = Math.floor(hours / 24)
-  return `${days}d ${hours % 24}h`
-}
 
 export function emptyDeviceSummary(): BindingDeviceSummary {
   return { total: 0, bound: 0, waiting: 0 }

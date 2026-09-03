@@ -28,6 +28,7 @@ import {
   type WanbindInfo
 } from '../agent'
 import { aggregateWans } from './pool'
+import { routerNow } from './clock'
 import { bindingRows, countDirectTotals, instanceRows } from './rows'
 import { agentDeps, daemonProblem, daemonReady, emptyCache } from './runtime'
 import type {
@@ -378,17 +379,14 @@ export function bindingSnapshot(runtime: BindingRuntime): BindingSnapshot {
   return runtime.latestBinding
 }
 
-export function directSnapshot(
-  runtime: BindingRuntime,
-  now = Date.now()
-): DirectSnapshot {
+export function directSnapshot(runtime: BindingRuntime): DirectSnapshot {
   const cache = runtime.cache
   const notice = directNotice(runtime)
   runtime.latestDirect = {
     t: cache.fetchedAt,
     hookOk: !cache.stale && cache.error === '',
     lastError: cache.error,
-    totals: countDirectTotals(directRows(runtime, now)),
+    totals: countDirectTotals(directRows(runtime)),
     ...(notice ? { notice } : {})
   }
   return runtime.latestDirect
@@ -402,12 +400,14 @@ export function directSnapshot(
  * five hundred rows twice, and every tick would rebuild them whether or not the
  * router had answered since.
  */
-export function directRows(runtime: BindingRuntime, now = Date.now()): DirectRow[] {
+export function directRows(runtime: BindingRuntime): DirectRow[] {
   const at = runtime.cache.fetchedAt
 
   if (runtime.directRows && runtime.directRows.at === at) return runtime.directRows.rows
 
-  const rows = bindingRows(runtime.cache.bindings, now)
+  // The router's clock, not this machine's: every `since` in that reply came
+  // from the router, and the two can disagree by years on a box with no NTP.
+  const rows = bindingRows(runtime.cache.bindings, routerNow(runtime.cache.info))
   runtime.directRows = { at, rows }
   return rows
 }

@@ -168,6 +168,15 @@ export interface WanbindInfo {
   bindingsMaintained: boolean
   interval: number
   uptime: number
+  /**
+   * When the daemon started, on the router's own clock.
+   *
+   * With `uptime` it gives the router's `time()` - which is the clock every
+   * timestamp in this reply was taken from. A duration worked out by
+   * subtracting one of those from this machine's clock is wrong by whatever the
+   * two disagree by, and a router with no NTP disagrees by years.
+   */
+  started?: number
   settings: WanbindSettings
   instances: WanbindInstanceState[]
   configured: WanbindInstanceConfig[]

@@ -107,6 +107,19 @@ export class CapacityManager {
     return pending
   }
 
+  /**
+   * A refresh that cannot be answered by a call older than the caller.
+   *
+   * `refresh()` joins whatever is in flight, which is right for a button press
+   * and wrong after a write: the poller's call may have left before the change
+   * landed, so joining it would show somebody their own fix as not having
+   * happened. This waits for that one to settle and then asks again.
+   */
+  private async askFresh(): Promise<void> {
+    await this.flight?.catch(() => {})
+    await this.refresh()
+  }
+
   reset(): void {
     this.payload = emptyCapacitySnapshot()
     this.flight = null
@@ -167,7 +180,7 @@ export class CapacityManager {
     if (!result.ok) return result
 
     this.deps.event(`capacity fix: ${row.label || row.key}`)
-    await this.refresh()
+    await this.askFresh()
 
     return { ok: true, data: `${row.action} The report has been asked again.` }
   }
@@ -276,7 +289,14 @@ export class CapacityManager {
   }
 
   private publish(next: CapacitySnapshot): void {
-    this.payload = next
-    this.deps.ctx.emit('capacity', next)
+    // Aged at publish time, not only when somebody asks. The page reads this
+    // stream, so a payload that only learned it was stale inside `snapshot()`
+    // could never raise the note that says so - the one case it exists for is a
+    // refresh that keeps failing, where `at` stops moving and the numbers on
+    // screen quietly stop being about now.
+    const out = withStaleness(next, Date.now())
+
+    this.payload = out
+    this.deps.ctx.emit('capacity', out)
   }
 }

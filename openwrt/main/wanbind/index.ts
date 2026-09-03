@@ -26,7 +26,7 @@
  */
 export { BindingManager, type BindingOptionKind } from './manager'
 export { handoverNotice } from './handover-notice'
-export { durationLabel } from './rows'
+export { durationLabel } from './clock'
 export { daemonProblem, daemonReady } from './runtime'
 export type {
   BindingAgentReader,

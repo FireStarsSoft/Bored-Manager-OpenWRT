@@ -311,7 +311,7 @@ return view.extend({
 		// more than four thousand members.
 		if (state.limitHit) {
 			blocks.push(E('p', { 'class': 'alert-message warning' },
-				_('This router has more members than this page will list. The ones above are the first of them; "bmpppoe list" at a console reads the rest.')));
+				_('This router has more members than this page will list. The ones above are the first of them; "bmpppoe list POOL" at a console reads one pool at a time.')));
 		}
 
 		// The pool daemon running on events alone. Every state below is the last

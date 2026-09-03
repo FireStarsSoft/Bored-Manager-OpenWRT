@@ -2428,7 +2428,8 @@ msgstr ""
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:314
 msgid ""
 "This router has more members than this page will list. The ones above are "
-"the first of them; \"bmpppoe list\" at a console reads the rest."
+"the first of them; \"bmpppoe list POOL\" at a console reads one pool at a "
+"time."
 msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:415
