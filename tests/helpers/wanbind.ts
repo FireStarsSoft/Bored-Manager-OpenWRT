@@ -762,6 +762,14 @@ export function wanbindHandover(options: WanbindOptions = {}): WanbindHandover {
 export interface WanbindClient {
   harness: ModuleHarness
   daemon: WanbindDaemon
+  /**
+   * The per-router document, so a test can read what is left in it.
+   *
+   * What the handover does is as much about what it *forgets* as about what it
+   * offers: a record the router took and this module kept would be offered
+   * again on every tick for the life of the machine.
+   */
+  store: HostStore
   manager: BindingManager
   /** Every job the manager started, in order, with what it did when it ran. */
   jobs: Array<{ kind: string; label: string; ok: boolean; error: string }>
@@ -800,6 +808,7 @@ export function wanbindClient(options: WanbindOptions = {}): WanbindClient {
   return {
     harness,
     daemon,
+    store,
     manager,
     jobs,
     tick: async () => {

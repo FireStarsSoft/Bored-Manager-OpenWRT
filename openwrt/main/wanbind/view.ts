@@ -15,6 +15,7 @@
  * anyway is what the whole rearrangement exists to remove. A failed call means
  * the rows are one tick stale, and the snapshot says so.
  */
+import { handoverNotice, handoverPending } from './handover'
 import {
   wanbindAssignments,
   wanbindBindings,
@@ -110,12 +111,36 @@ export function refreshCache(runtime: BindingRuntime, force = false): Promise<vo
       return
     }
 
+    // Before anything is read, and after the connection is known.
+    //
+    // This module used to write instances and one-to-one bindings itself and
+    // kept a record of each. The router owns both now, and the daemon sweeps
+    // its own priority bands - so on a machine upgraded from 3.3.x, every
+    // binding in that document is a rule the daemon will remove within thirty
+    // seconds and a section nothing will ever create. Offering them here is the
+    // whole of what makes that upgrade keep working, and it has to happen
+    // before the refresh decides what the router has.
+    //
+    // It answers rather than raises: a handover that could not finish is a
+    // sentence on the page and another attempt on the next tick, not a reason
+    // to abandon the rows.
+    const handed = await handoverPending(runtime)
+
+    if (generation !== runtime.generation) return
+
+    runtime.handover = handed
+
     if (!daemonReady(runtime)) {
       // No daemon is not staleness: there is nothing to be stale about, and the
       // rows that were here belong to a router that has since had the package
       // removed or replaced. The sentence goes on the snapshot's `daemon`
       // field, which is the only thing that can tell an empty table on a router
       // with no instances from one on a router with no daemon to have any.
+      //
+      // The handover verdict above survives it, on the runtime rather than in
+      // this cache: "there are no packages on this router, so the bindings you
+      // remember are ones nothing is maintaining" is exactly the sentence a
+      // cleared cache would throw away.
       runtime.cache = emptyCache()
       return
     }
@@ -211,18 +236,42 @@ function daemonState(runtime: BindingRuntime): { ready: boolean; problem: string
  * than for its own.
  */
 function bindingNotice(runtime: BindingRuntime): string {
+  // Built before every branch below and joined in front of whatever else this
+  // half has to say. The handover sentence is about records this module is
+  // still holding, which is true whether or not the router answered - and on
+  // the one router where it matters most, the one with no packages on it yet,
+  // every branch below has nothing to say at all.
+  const handed = handoverNotice(runtime.handover, 'binding')
   const info = runtime.cache.info
-  if (!info) return ''
+
+  if (!info) return handed
+
   if (!info.enabled && info.configured.length > 0) {
-    return 'The instance half of the router\'s binding daemon is switched off, so no client is being seated. One-to-one bindings are still maintained.'
+    return join(
+      handed,
+      "The instance half of the router's binding daemon is switched off, so no client is being seated. One-to-one bindings are still maintained."
+    )
   }
+
   const refused = info.configured.filter((config) => !config.usable).length
+
   if (refused > 0) {
-    return refused === 1
-      ? 'The router refused one instance; its row says why.'
-      : `The router refused ${refused} instances; each row says why.`
+    return join(
+      handed,
+      refused === 1
+        ? 'The router refused one instance; its row says why.'
+        : `The router refused ${refused} instances; each row says why.`
+    )
   }
-  return ''
+
+  return handed
+}
+
+/** Two sentences, or whichever of them there is. */
+function join(first: string, second: string): string {
+  if (!first) return second
+  if (!second) return first
+  return `${first} ${second}`
 }
 
 /**
@@ -232,16 +281,28 @@ function bindingNotice(runtime: BindingRuntime): string {
  * somebody has typed an address into a form.
  */
 function directNotice(runtime: BindingRuntime): string {
+  const handed = handoverNotice(runtime.handover, 'binding')
   const reply = runtime.cache.bindings
-  if (!reply) return ''
+
+  if (!reply) return handed
+
   if (!reply.band.usable) {
-    return `The router will not allocate one-to-one rule priorities: ${reply.band.reason ?? 'it did not say why'}`
+    return join(
+      handed,
+      `The router will not allocate one-to-one rule priorities: ${reply.band.reason ?? 'it did not say why'}`
+    )
   }
+
   if (!reply.maintained) {
-    return 'The router is not maintaining one-to-one bindings, so the rows below are sections rather than rules in force.'
+    return join(
+      handed,
+      'The router is not maintaining one-to-one bindings, so the rows below are sections rather than rules in force.'
+    )
   }
+
   const core = runtime.cache.info?.core
-  return core && !core.ready && core.reason ? core.reason : ''
+
+  return join(handed, core && !core.ready && core.reason ? core.reason : '')
 }
 
 /**

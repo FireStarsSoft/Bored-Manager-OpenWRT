@@ -18,6 +18,7 @@
  * the router's to disagree with, and why the shapes below that are really the
  * daemon's are the daemon's own types, unaltered.
  */
+import type { HandoverOutcome } from './handover'
 import type { CheckSession } from '@shared/check'
 import type { ValueBadge } from '@shared/module-ui'
 import type { ModuleContext } from '@shared/modules'
@@ -424,6 +425,16 @@ export interface BindingRuntime {
   busy: Set<string>
   latestBinding: BindingSnapshot
   latestDirect: DirectSnapshot
+  /**
+   * What the last handover attempt did with the records this module still
+   * holds from before the router owned them.
+   *
+   * On the runtime rather than in the cache, because the cache is emptied on
+   * every tick that finds no daemon - and "this router has no packages, so the
+   * bindings you can see are ones nothing is maintaining" is exactly the
+   * sentence that has to survive that.
+   */
+  handover: HandoverOutcome
   /**
    * Bumped by a reset or a dispose, so work already in flight lands nowhere.
    *

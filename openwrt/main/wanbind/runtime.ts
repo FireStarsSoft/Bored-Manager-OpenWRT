@@ -9,6 +9,7 @@
  * else - there is no half-written change on the router to undo, which is the
  * whole point of the arrangement this folder was written for.
  */
+import { NOTHING_HANDED_OVER } from './handover'
 import { createCheckSession } from '@shared/check'
 import type { ModuleContext } from '@shared/modules'
 import type { OkResult } from '@shared/types'
@@ -75,6 +76,7 @@ export function createBindingRuntime(
     service,
     ...(agent ? { agent } : {}),
     store,
+    handover: NOTHING_HANDED_OVER,
     instanceSession: createCheckSession(),
     bindSession: createCheckSession(),
     settingsSession: createCheckSession(),
@@ -105,6 +107,9 @@ export function resetRuntime(runtime: BindingRuntime): void {
   runtime.busy.clear()
   runtime.latestBinding = emptyBindingSnapshot()
   runtime.latestDirect = emptyDirectSnapshot()
+  // A different router has different records to hand over, and this one's
+  // verdict says nothing about it.
+  runtime.handover = NOTHING_HANDED_OVER
 }
 
 /**

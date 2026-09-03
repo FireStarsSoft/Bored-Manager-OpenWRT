@@ -110,6 +110,14 @@ export interface HandoverOutcome {
   stalled: { instances: number; bindings: number }
 }
 
+/** What a router with nothing left to hand over answers with. */
+export const NOTHING_HANDED_OVER: HandoverOutcome = {
+  wrote: 0,
+  dropped: 0,
+  stranded: [],
+  stalled: { instances: 0, bindings: 0 }
+}
+
 const NOTHING: HandoverOutcome = {
   wrote: 0,
   dropped: 0,
