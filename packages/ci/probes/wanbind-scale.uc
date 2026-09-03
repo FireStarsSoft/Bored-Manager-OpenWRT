@@ -10,6 +10,7 @@
 // So this block measures the instruments. It is the only part of the scale work
 // that asserts about the probe library rather than about the router.
 
+import { seed } from 'fs';
 import { cursor } from 'uci';
 
 import * as rtnl from 'rtnl';
@@ -776,5 +777,38 @@ says('with the sentence the list no longer carries', picked.rule.reason ?? '', /
 let missing = service.ruleExplain({ pref: 4242, cidr: '10.9.0.99/32', table: 99 });
 check('a rule that is not there is said to be missing', missing.found, false);
 check('rather than being an error', missing.ok, true);
+
+// ===========================================================================
+// Who is waiting for a WAN, and who is only being left alone.
+//
+// A reserved device is one an instance is deliberately not seating, because a
+// binding already decides its address. Every instance used to hold every
+// binding on the router and list all of them here, so asking "who is waiting"
+// on a router with five hundred bindings under four instances answered with two
+// thousand rows of devices that are not waiting for anything.
+
+seed('/tmp/dhcp.leases', scale.leases(500));
+service.pass();
+
+let queue = service.waiting('', {});
+
+check('the answer is about people who are waiting', queue.counts.reserved > 0, true);
+check('and does not list the ones who are not', length(queue.waiting), queue.counts.queued + queue.counts.held);
+check('the total is what it listed', queue.total, length(queue.waiting));
+
+let everyone = service.waiting('', { include_reserved: true, limit: 50 });
+
+check('asked for, they are there', everyone.total > queue.total, true);
+check('a page is the size asked for', length(everyone.waiting), 50);
+check('and says there are more', everyone.capped, true);
+check('the counts are of the whole answer, not the page', everyone.counts.reserved, queue.counts.reserved);
+
+// Each instance holds only the devices on its own LAN, which is what keeps the
+// set bounded: five hundred bindings spread over four instances is a hundred
+// and twenty-five each, not five hundred each.
+let mine = service.waiting('bmi_lan', { include_reserved: true, limit: 2000 });
+
+check('one instance answers about its own LAN only', mine.counts.reserved <= 130, true);
+check('rather than about every binding on the router', mine.counts.reserved > 0, true);
 
 report();

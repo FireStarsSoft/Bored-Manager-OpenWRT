@@ -440,15 +440,28 @@ export function run(st, ctx) {
 	//
 	// Done after `refreshDevices` because that is what puts this pass's leases
 	// into `st.devices`, and an address can only be turned into a MAC by a lease.
+	//
+	// Only devices this instance is responsible for, which is what keeps the
+	// set bounded: `st.devices` is narrowed to this instance's own leases below,
+	// but the narrowing used to happen *after* this - so on a router with five
+	// hundred bindings under four instances every instance held all five
+	// hundred, and `waiting` answered with two thousand rows of devices that
+	// are not waiting for anything.
 	st.reservedMacs = {};
 
 	for (let mac in st.devices) {
 		let device = st.devices[mac];
 		let ip = (type(device) == 'object' && type(device.ip) == 'string') ? device.ip : '';
 
+		if (!length(ip) || !wans.contains(lanCidr, ip))
+			continue;
+
+		if (ranged && !wans.inRange(st.instance.rangeFrom, st.instance.rangeTo, ip))
+			continue;
+
 		if (st.reserved[mac] !== null)
 			st.reservedMacs[mac] = st.reserved[mac];
-		else if (length(ip) && st.reserved[ip] !== null)
+		else if (st.reserved[ip] !== null)
 			st.reservedMacs[mac] = st.reserved[ip];
 	}
 

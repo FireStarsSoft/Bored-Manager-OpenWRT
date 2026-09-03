@@ -43,7 +43,8 @@ const USAGE = 'usage: bmwan <command> [--json] [--instance NAME]\n' +
 	'  status          instances, how many are bound, how many are waiting\n' +
 	'  instances       every instance in the file, what it binds, and how it is\n' +
 	'  list            every client and the WAN it is on\n' +
-	'  waiting         every client that has none, and why\n' +
+	'  waiting [--reserved]\n' +
+	'                  every client that has none, and why\n' +
 	'  wans            every uplink, its table, its zone, and who is on it\n' +
 	'  layout          what this router reads each interface as, and why\n' +
 	'  rules [--limit N] [--offset N] [--no-reasons]\n' +
@@ -740,7 +741,15 @@ if (command == 'list') {
 }
 
 if (command == 'waiting') {
-	let result = call('waiting', { instance: instance });
+	// `--reserved` adds the devices an instance is deliberately leaving alone
+	// because a binding already decides their address. They are not waiting for
+	// anything, and on a router with five hundred bindings they are most of the
+	// table - so they are asked for rather than assumed.
+	let result = call('waiting', {
+		instance: instance,
+		limit: 2000,
+		include_reserved: exists(opts, 'reserved')
+	});
 
 	if (asJson) {
 		printf('%J\n', result);

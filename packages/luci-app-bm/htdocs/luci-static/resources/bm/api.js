@@ -125,7 +125,7 @@ const calls = {
 	wanbindInfo: declare(WANBIND, 'info'),
 	wanbindStats: declare(WANBIND, 'stats'),
 	wanbindAssignments: declare(WANBIND, 'assignments', { instance: '' }),
-	wanbindWaiting: declare(WANBIND, 'waiting', { instance: '' }),
+	wanbindWaiting: declare(WANBIND, 'waiting', { instance: '', limit: 0, offset: 0, include_reserved: false }),
 	wanbindPin: declare(WANBIND, 'pin', { instance: '', mac: '', wan: '' }),
 	wanbindReassign: declare(WANBIND, 'reassign', { instance: '', mac: '' }),
 	wanbindUnassign: declare(WANBIND, 'unassign', { instance: '', mac: '' }),

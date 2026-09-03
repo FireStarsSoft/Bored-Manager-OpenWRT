@@ -595,7 +595,11 @@ says('a name that is not an instance is refused',
 // not build it at all. Every address on the router read as free, so a button
 // undid what the timer had just decided, on a router where nothing was
 // misconfigured and nothing was logged.
-let leftAlone = service.waiting({});
+// `include_reserved`, because the devices an instance is deliberately leaving
+// alone are not devices waiting for anything - and on a router with five
+// hundred bindings under four instances, listing them by default made the
+// answer to "who is waiting for a WAN" two thousand rows of people who are not.
+let leftAlone = service.waiting('', { include_reserved: true });
 let spokenFor = null;
 
 for (let one in leftAlone.waiting) {

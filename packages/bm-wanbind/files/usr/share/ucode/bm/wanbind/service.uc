@@ -225,6 +225,10 @@ const NETIFD_LOG_EVERY = 60;
 // costs one pass every two seconds and every request is answered inside three.
 const PASS_COALESCE_MS = 2000;
 
+// How many rows `waiting` answers with, and the most it will.
+const WAITING_LIMIT = 500;
+const WAITING_LIMIT_MAX = 2000;
+
 /**
  * How many bindings one `bind_many` may carry.
  *
@@ -1078,8 +1082,26 @@ export function assignments(id) {
 };
 
 /** And who is not, with their place in the queue. */
-export function waiting(id) {
+export function waiting(id, opts) {
+	let options = (type(opts) == 'object') ? opts : {};
+	let limit = count(options.limit);
+	let offset = count(options.offset);
+
+	if (limit < 1)
+		limit = WAITING_LIMIT;
+
+	if (limit > WAITING_LIMIT_MAX)
+		limit = WAITING_LIMIT_MAX;
+
+	// Off by default, and this is the change that makes the answer bounded. A
+	// reserved device is one an instance is deliberately leaving alone because
+	// a binding already decides its address - so on a router with five hundred
+	// bindings under four instances, every instance listed every binding, and
+	// asking "who is waiting for a WAN" produced two thousand rows of devices
+	// that are not waiting for anything.
+	let includeReserved = (options.include_reserved === true);
 	let out = [];
+	let counts = { queued: 0, held: 0, reserved: 0 };
 
 	for (let st in each()) {
 		if (length(id) && st.instance.id != id)
@@ -1087,6 +1109,8 @@ export function waiting(id) {
 
 		for (let mac in st.waiting) {
 			let device = st.devices[mac];
+
+			counts.queued++;
 
 			push(out, {
 				instance: st.instance.id,
@@ -1107,6 +1131,9 @@ export function waiting(id) {
 
 		for (let mac in st.held) {
 			let device = st.devices[mac];
+
+			counts.held++;
+
 			push(out, {
 				instance: st.instance.id,
 				mac: mac,
@@ -1132,6 +1159,11 @@ export function waiting(id) {
 		for (let mac in st.reservedMacs) {
 			let device = st.devices[mac];
 
+			counts.reserved++;
+
+			if (!includeReserved)
+				continue;
+
 			push(out, {
 				instance: st.instance.id,
 				mac: mac,
@@ -1147,7 +1179,28 @@ export function waiting(id) {
 	}
 
 	sort(out, (a, b) => a.order - b.order);
-	return { waiting: out };
+
+	let total = length(out);
+	let from = (offset < total) ? offset : total;
+	let to = ((from + limit) < total) ? (from + limit) : total;
+	let page = [];
+
+	for (let i = from; i < to; i++)
+		push(page, out[i]);
+
+	return {
+		waiting: page,
+
+		// The whole answer, and what it is made of. A page of five hundred out
+		// of two thousand is a different thing from a router with five hundred
+		// devices waiting, and a surface that could not tell them apart would
+		// say the second.
+		total: total,
+		counts: counts,
+		limit: limit,
+		offset: offset,
+		capped: (to < total)
+	};
 };
 
 /** A lease event from /etc/hotplug.d/dhcp/. The fast path. */
@@ -4637,7 +4690,8 @@ export const methods = {
 	lease: method({ action: '', mac: '', ip: '', host: '' }, (args) => lease(args)),
 
 	assignments: method({ instance: '' }, (args) => assignments(text(args.instance))),
-	waiting: method({ instance: '' }, (args) => waiting(text(args.instance))),
+	waiting: method({ instance: '', limit: 0, offset: 0, include_reserved: false },
+		(args) => waiting(text(args.instance), args)),
 
 	pin: method({ instance: '', mac: '', wan: '' }, (args) => pin(args)),
 	reassign: method({ instance: '', mac: '' }, (args) => reassign(args)),
