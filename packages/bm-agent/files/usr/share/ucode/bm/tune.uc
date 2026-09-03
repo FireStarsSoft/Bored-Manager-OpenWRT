@@ -120,6 +120,33 @@ export function flowOffload() {
 };
 
 /**
+ * The same for hardware offload, which is a different option and a different
+ * question: not every target honours it, and on the ones that do it is a choice
+ * rather than a fix - so this is reported and never offered as one.
+ */
+export function flowOffloadHw() {
+	try {
+		let uci = cursor();
+		let value = null;
+
+		uci.foreach('firewall', 'defaults', (entry) => {
+			if (value == null)
+				value = entry.flow_offloading_hw;
+		});
+
+		if (value == null)
+			return false;
+
+		let one = trim('' + value);
+
+		return (one == '1' || one == 'true' || one == 'yes' || one == 'on');
+	}
+	catch (e) {
+		return null;
+	}
+};
+
+/**
  * Current state: each tunable as the kernel holds it right now, what the
  * drop-in pins across reboots, conntrack usage for headroom, and the fw4
  * flow-offload flag. Values are null where the question could not be asked,

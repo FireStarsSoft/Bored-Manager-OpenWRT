@@ -12,6 +12,7 @@ import { connect } from 'ubus';
 
 import { info, stats } from 'bm.agent';
 import { run as configCommand, USAGE as CONFIG_USAGE } from 'bm.cliconfig';
+import { compute as capacityCompute } from 'bm.capacity';
 import { compatibility } from 'bm.meta';
 import { plan, run } from 'bm.migrate';
 import { install as installPackages, report as requirementsReport } from 'bm.requirements';
@@ -43,6 +44,10 @@ const USAGE = 'usage: bmctl <command> [--json] [--dry-run]\n' +
 	'                    bmctl tune conntrack_max=262144 gc_thresh3=16384\n' +
 	'                    keys: conntrack_max gc_thresh1 gc_thresh2 gc_thresh3\n' +
 	'                          flow_offload (0/1, fw4 software offload)\n' +
+	'  capacity        what this router has against what its configuration\n' +
+	'                    needs, where it is estimated to stop, and what to do\n' +
+	'                    about it. Exit 1 when the answer is unstable or\n' +
+	'                    unknown, so a script can watch it\n' +
 	'  help            this text\n';
 
 // Present as a separate question from `info`, because "the files are installed"
@@ -475,6 +480,175 @@ if (command == 'tune') {
 		printf('flow offload %s%s\n', result.flowOffload ? 'on' : 'off',
 			result.reloaded ? ', firewall reloaded' : ' - reload the firewall to apply it');
 	exit(0);
+}
+
+if (command == 'capacity') {
+	// `compute` rather than `report`, because a person at a console asking a
+	// second time means "again", not "the same answer you gave me eight seconds
+	// ago". The daemons are asked over a connection of this command's own, and a
+	// router with neither of them running still gets a report - the load is read
+	// off the files rather than off the daemons.
+	let bus = null;
+
+	try {
+		bus = connect();
+	}
+	catch (e) {
+		bus = null;
+	}
+
+	let found = capacityCompute({ bus: bus });
+
+	if (bus)
+		bus.disconnect();
+
+	if (asJson) {
+		printf('%J\n', found);
+		exit(found.ok ? 0 : 1);
+	}
+
+	if (!found.ok) {
+		printf('%s\n', found.reason);
+		exit(1);
+	}
+
+	let hw = found.hardware;
+	let sw = found.software;
+	let load = found.load;
+	let need = found.needed;
+	let cap = found.ceiling;
+
+	let say = function(value) {
+		return (value == null) ? 'unknown' : sprintf('%d', value);
+	};
+
+	let mb = function(kb) {
+		return (type(kb) != 'int') ? 'unknown' : sprintf('%d MB', kb / 1024);
+	};
+
+	printf('hardware\n');
+	printf('  %-16s %s\n', 'board', length(hw.board) ? hw.board : 'unknown');
+	printf('  %-16s %s x %s (%s, %s)\n', 'cpu', say(hw.cpus),
+		length(hw.cpuModel) ? hw.cpuModel : 'unknown model',
+		length(hw.arch) ? hw.arch : 'unknown arch',
+		length(hw.target) ? hw.target : 'unknown target');
+	printf('  %-16s %s total, %s available%s\n', 'memory', mb(hw.memTotalKb), mb(hw.memAvailableKb),
+		hw.memAvailableEstimated ? ' (estimated)' : '');
+	printf('  %-16s %s free of %s on %s\n', 'flash', mb(hw.flashFreeKb), mb(hw.flashTotalKb),
+		length(hw.flashMount) ? hw.flashMount : 'unknown');
+	printf('  %-16s %s\n', 'ports', hw.nicsKnown ? sprintf('%d', hw.nicCount) : 'unknown');
+	printf('  %-16s %s, load %.2f %.2f %.2f\n', 'kernel',
+		length(hw.kernel) ? hw.kernel : 'unknown', hw.load1, hw.load5, hw.load15);
+
+	printf('\nsoftware\n');
+	printf('  %-16s OpenWrt %s\n', 'release', length(sw.release) ? sw.release : 'unknown');
+	printf('  %-16s agent %s, wanbind %s, pppoe %s, luci %s\n', 'packages',
+		sw.packages.agent,
+		sw.packages.wanbind == null ? 'not installed' : sw.packages.wanbind,
+		sw.packages.pppoe == null ? 'not installed' : sw.packages.pppoe,
+		sw.packages.luci == null ? 'not installed' : sw.packages.luci);
+	printf('  %-16s %s, offload %s (kernel %s, hardware %s)\n', 'firewall',
+		sw.fw4 === true ? 'fw4 present' : 'fw4 missing',
+		sw.flowOffload == null ? 'unknown' : (sw.flowOffload ? 'on' : 'off'),
+		sw.flowOffloadKernel == null ? 'unknown' : (sw.flowOffloadKernel ? 'has it' : 'has no module'),
+		sw.hwOffload.capable);
+	printf('  %-16s conntrack %s of %s, gc_thresh3 %s, dhcp leases %s%s\n', 'limits',
+		say(sw.conntrackCount), say(sw.conntrackMax), say(sw.gcThresh3),
+		say(sw.leaseMax), sw.leaseMaxDefault ? ' (default)' : '');
+
+	printf('\nload\n');
+	printf('  %-16s %d session(s) in %d pool(s), %d binding(s), %d instance(s)\n', 'configured',
+		load.configured.members, length(load.configured.pools),
+		load.configured.bindings, load.configured.instances);
+	printf('  %-16s %s\n', 'pppoe',
+		load.answered.pppoe
+			? sprintf('%d session(s) up', load.live.sessionsUp)
+			: 'bm-pppoe-pool is not answering');
+	printf('  %-16s %s\n', 'wanbind',
+		load.answered.wanbind
+			? sprintf('%d bound, %d lease(s), %s ip rule(s)', load.live.bound, load.live.leases,
+				say(load.live.ipRules))
+			: 'bm-wanbind is not answering');
+
+	printf('\nneeds %s of memory, %d core(s), %s of flash, conntrack %d, gc_thresh3 %d, %d lease(s)\n',
+		mb(need.memKb), need.cpus, mb(need.flashKb), need.conntrackMax, need.gcThresh3, need.leaseMax);
+	printf('ceiling ~%s session(s)%s and ~%s binding(s)%s at this hardware and these\n',
+		say(cap.sessions),
+		length(cap.limitedBy.sessions) ? sprintf(' (limited by %s)', cap.limitedBy.sessions) : '',
+		say(cap.bindings),
+		length(cap.limitedBy.bindings) ? sprintf(' (limited by %s)', cap.limitedBy.bindings) : '');
+	printf('settings - an estimate, not a measurement%s\n',
+		cap.basis.calibrated ? '' : ', from working numbers no rig has measured yet');
+
+	printf('\ntier   sessions %s\n', found.tiers.sessions.label);
+
+	if (found.tiers.sessions.next != null)
+		printf('       next at %d: %s\n', found.tiers.sessions.next.at, found.tiers.sessions.next.label);
+
+	printf('       bindings %s\n', found.tiers.bindings.label);
+
+	if (found.tiers.bindings.next != null)
+		printf('       next at %d: %s\n', found.tiers.bindings.next.at, found.tiers.bindings.next.label);
+
+	printf('\nstability %s - %s\n\n', found.stability.level, found.stability.reason);
+
+	// One list, requirements first, so the reading order is "what this needs"
+	// and then "what is wrong with it right now".
+	let rows = [];
+
+	for (let one in found.requirements)
+		push(rows, one);
+
+	for (let one in found.issues)
+		push(rows, one);
+
+	let mark = function(level) {
+		if (level == 'error')
+			return '!!';
+
+		if (level == 'warning')
+			return '! ';
+
+		if (level == 'pass')
+			return 'ok';
+
+		return '--';
+	};
+
+	for (let one in rows) {
+		printf('%s %s\n', mark(one.level), one.label);
+
+		if (length(one.detail))
+			printf('     %s\n', one.detail);
+
+		if (one.fix == null)
+			continue;
+
+		if (one.fix.kind == 'tune_set') {
+			let pairs = '';
+
+			for (let key in sort(keys(one.fix.args))) {
+				let value = one.fix.args[key];
+
+				pairs += sprintf(' %s=%s', key,
+					type(value) == 'bool' ? (value ? '1' : '0') : sprintf('%d', value));
+			}
+
+			printf('     fix: bmctl tune%s\n', pairs);
+		}
+		else if (one.fix.kind == 'wanbind_reconcile')
+			printf('     fix: bmwan reconcile\n');
+		else if (one.fix.kind == 'wanbind_settings_set')
+			printf('     fix: bmwan settings lan_local=1\n');
+		else if (one.fix.kind == 'wanbind_instance_set')
+			printf('     fix: bmwan instance set %s --raise-dhcp-limits\n', one.fix.args.id);
+		else if (one.fix.kind == 'pool_reconcile')
+			printf('     fix: bmpppoe reconcile\n');
+	}
+
+	// Something a script can watch: 0 while the router is carrying what it is
+	// configured to carry, 1 where it is not or where nobody can tell.
+	exit((found.stability.level == 'unstable' || found.stability.level == 'unknown') ? 1 : 0);
 }
 
 // Everything about snapshots, restore and the guard, in its own file: this one

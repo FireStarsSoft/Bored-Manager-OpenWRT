@@ -16,6 +16,7 @@ import { install as installPackages, report as requirementsReport } from 'bm.req
 import { diff, restore } from 'bm.restore';
 import { bundle as snapshotBundle, list as snapshots, meta as snapshotMeta, remove as removeSnapshot, take } from 'bm.snapshot';
 import { apply as tuneApply, current as tuneCurrent } from 'bm.tune';
+import { openBus, report as capacityReport } from 'bm.capacity';
 import { apply as applyUpdate, check as checkUpdate, last as lastUpdate, rollback } from 'bm.update';
 
 const STARTED = time();
@@ -235,6 +236,14 @@ export const methods = {
 
 	// The router-wide limits that decide whether thousands of sessions fit:
 	// conntrack and the neighbour thresholds, plus fw4's flow offload.
+	// What this router has, against what its configuration needs.
+	//
+	// Additive, so `apiVersion` does not move: an agent without it answers
+	// METHOD_NOT_FOUND, which is what every surface turns into "update the
+	// router packages" rather than into an error nobody can act on.
+	capacity: method({ refresh: false },
+		(args) => capacityReport({ bus: openBus(), refresh: args.refresh === true })),
+
 	tune_get: method({}, () => tuneCurrent()),
 
 	tune_set: method(

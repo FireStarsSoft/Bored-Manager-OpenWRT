@@ -13,7 +13,8 @@
 					"guard_status",
 					"update_status",
 					"requirements",
-					"tune_get"
+					"tune_get",
+					"capacity"
 				],
 				"bm.wanbind": [
 					"info",

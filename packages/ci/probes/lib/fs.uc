@@ -19,6 +19,10 @@ let files = {};
 let mtimes = {};
 let tick = 1000000;
 
+// What the code under test asked for, rather than what it got back.
+let readCounts = {};
+let writeCount = 0;
+
 function touch(path) {
 	tick = tick + 1;
 	mtimes[path] = tick;
@@ -33,13 +37,38 @@ export function seed(path, content) {
 export function wipe() {
 	files = {};
 	mtimes = {};
+	readCounts = {};
+	writeCount = 0;
 };
 
 export function readfile(path, limit) {
+	readCounts[path] = (exists(readCounts, path) ? readCounts[path] : 0) + 1;
 	return exists(files, path) ? files[path] : null;
 };
 
+/**
+ * How many times one path was read since the counters were last reset.
+ *
+ * The same reasoning as the uci counters next door: a report that reads
+ * /proc/meminfo is correct, and a daemon pass that reads it five hundred times
+ * a minute is correct too, and nothing but a counter tells the two apart.
+ */
+export function reads(path) {
+	return exists(readCounts, path) ? readCounts[path] : 0;
+};
+
+/** How many writes have happened at all - a read-only path must make none. */
+export function writes() {
+	return writeCount;
+};
+
+export function resetCounters() {
+	readCounts = {};
+	writeCount = 0;
+};
+
 export function writefile(path, data, limit) {
+	writeCount++;
 	files[path] = data;
 	touch(path);
 	return length(data);
