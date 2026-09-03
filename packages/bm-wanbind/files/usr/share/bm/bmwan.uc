@@ -2106,6 +2106,17 @@ if (command == 'flush') {
 	 * `apk del bm-wanbind` leaves an address pointed at a table nothing
 	 * maintains with no service left to explain it.
 	 */
+	// And the LAN-local escapes, which belong to the router rather than to any
+	// instance - so a flush naming one leaves them alone and the uninstall
+	// takes them, for the same reason the bindings are treated that way below.
+	if (!length(instance)) {
+		let band = cfg.localBand();
+		let held = netlink.destRules();
+
+		if (held !== null)
+			removed += ruleset.flushLocal(band.base, band.top, held);
+	}
+
 	let bindings = length(instance) ? { ok: true, removed: 0, swept: 0 } : direct.flush();
 
 	if (!bindings.ok)

@@ -414,6 +414,35 @@ function reservedAddresses() {
 }
 
 /**
+ * The LAN-local escape rules: one per LAN, consulted before every binding.
+ *
+ * A binding sends everything from an address to its WAN's routing table, and
+ * that table knows only how to leave the building - so without these a bound
+ * machine reaches the internet and not the printer on the next desk, and the
+ * packet for the printer leaves by the WAN port addressed to a private network
+ * that drops it.
+ *
+ * Off is a state as much as on is: `lan_local 0` means the band must be empty,
+ * and a band that cannot be trusted to sit below the bindings is left alone
+ * entirely rather than half written.
+ */
+function localEscapes(snap, view) {
+	let local = cfg.localBand(snap);
+
+	if (!local.usable)
+		return 0;
+
+	let present = netlink.destRules();
+
+	if (present === null)
+		return 0;
+
+	let cidrs = local.enabled ? ruleset.localEscapeCidrs(view) : [];
+
+	return ruleset.installLocalEscapes(local.base, local.top, cidrs, present);
+}
+
+/**
  * One full pass over every instance, and over every one-to-one binding.
  *
  * The bindings are reconciled here rather than only when somebody asks, which
@@ -485,6 +514,13 @@ export function pass() {
 	// interfaces are this router's own LANs and which are ways out of it, and
 	// two passes over one dump answer the same question twice.
 	let view = layout.classify(ifaces, layout.statements());
+
+	// Before the instances and before the bindings, and that order is
+	// load-bearing on the first pass after an upgrade: the escapes have to be
+	// in the kernel before a rule that sends an address to a WAN's table is
+	// verified against it, or there is a window in which a bound machine cannot
+	// reach the network it is sitting on.
+	localEscapes(snap, view);
 
 	// Read before the instances run, from the rows the last binding pass left,
 	// so that every instance on the router is told the same thing about which
@@ -788,6 +824,7 @@ function openConfig() {
 function settingsRead(snap) {
 	let main = cfg.main(snap);
 	let band = cfg.directBand(snap);
+	let local = cfg.localBand(snap);
 
 	let out = {
 		enabled: main.enabled,
@@ -800,7 +837,15 @@ function settingsRead(snap) {
 		wan_warn_uptime: WAN_WARN_UPTIME,
 		wan_error_grace: WAN_ERROR_GRACE,
 		release_grace: RELEASE_GRACE,
-		band: band
+		band: band,
+
+		// Whether a bound address may still reach the networks this router
+		// serves, and where the rules that let it sit. On by default: a binding
+		// that cut a machine off its own LAN is not what anybody asked for when
+		// they pinned it to a WAN.
+		lan_local: local.enabled,
+		local_pref_base: local.base,
+		local: local
 	};
 
 	// Off the snapshot rather than out of a cursor of its own. The defaults
@@ -895,7 +940,13 @@ export function info() {
 		// Whether the daemon can see the router at all. Everything above is a
 		// decision made from netifd's interface list, so a page that drew them
 		// without this would be showing the last good pass as though it were now.
-		netifd: netifdState()
+		netifd: netifdState(),
+
+		// And whether a bound address can still reach the networks this router
+		// serves. A page that showed a row as bound while this was unusable
+		// would be describing a machine that has the internet and cannot reach
+		// the printer beside it.
+		local: cfg.localBand(snap)
 	};
 };
 
@@ -1380,6 +1431,18 @@ export function flush(args) {
 	let snap = cfg.snapshot();
 
 	let id = text(args.instance);
+
+	// A flush naming one instance takes that instance's rules off and nothing
+	// else. The escapes are the router's, not any instance's, so only a flush
+	// of everything takes them.
+	if (!length(id)) {
+		let local = cfg.localBand(snap);
+		let held = netlink.destRules();
+
+		if (held !== null)
+			ruleset.flushLocal(local.base, local.top, held);
+	}
+
 	let present = netlink.rules();
 
 	if (present === null)
@@ -3994,7 +4057,9 @@ export function settingsSet(args) {
 		wan_table_base: pickNumber(args, 'wan_table_base', previous.wan_table_base),
 		wan_warn_uptime: pickNumber(args, 'wan_warn_uptime', previous.wan_warn_uptime),
 		wan_error_grace: pickNumber(args, 'wan_error_grace', previous.wan_error_grace),
-		release_grace: pickNumber(args, 'release_grace', previous.release_grace)
+		release_grace: pickNumber(args, 'release_grace', previous.release_grace),
+		lan_local: pickFlag(args, 'lan_local', previous.lan_local),
+		local_pref_base: pickNumber(args, 'local_pref_base', previous.local_pref_base)
 	};
 
 	let refuse = function(reason) {
@@ -4024,6 +4089,22 @@ export function settingsSet(args) {
 		return refuse(sprintf('only %d ip rule priorities between rule_pref_base %d and catch_all_pref_base %d; at least %d are needed, and that number is also the most clients one instance could seat',
 			want.catch_all_pref_base - want.rule_pref_base, want.rule_pref_base,
 			want.catch_all_pref_base, MIN_PREF_SPAN));
+	}
+
+	// The escapes have to be read before every binding and before every
+	// assignment, which is what being below both bases means. Refused rather
+	// than corrected: a base that reaches into the binding band is the same as
+	// having no escapes at all, silently, on a router where every page reads
+	// bound.
+	if (want.local_pref_base < 1 || want.local_pref_base + previous.local.span - 1 > MAX_PREF) {
+		return refuse(sprintf('local_pref_base %d cannot hold the %d ip rule priorities the LAN-local band is',
+			want.local_pref_base, previous.local.span));
+	}
+
+	if (want.local_pref_base + previous.local.span > want.direct_pref_base) {
+		return refuse(sprintf('local_pref_base %d opens a band of %d that reaches %d, which is not below direct_pref_base %d. The LAN-local rules have to be read before every binding, or a bound address is sent out of its WAN addressed to a network on the other side of this router',
+			want.local_pref_base, previous.local.span,
+			want.local_pref_base + previous.local.span - 1, want.direct_pref_base));
 	}
 
 	if (want.catch_all_table < 1 || want.catch_all_table > MAX_TABLE)
@@ -4080,6 +4161,8 @@ export function settingsSet(args) {
 	uci.set(PACKAGE, 'main', 'wan_warn_uptime', sprintf('%d', want.wan_warn_uptime));
 	uci.set(PACKAGE, 'main', 'wan_error_grace', sprintf('%d', want.wan_error_grace));
 	uci.set(PACKAGE, 'main', 'release_grace', sprintf('%d', want.release_grace));
+	uci.set(PACKAGE, 'main', 'lan_local', want.lan_local ? '1' : '0');
+	uci.set(PACKAGE, 'main', 'local_pref_base', sprintf('%d', want.local_pref_base));
 
 	if (uci.commit(PACKAGE) === null)
 		return refuse('the settings would not commit to /etc/config/bm_wanbind; the file may be read-only or the overlay full');
@@ -4476,6 +4559,7 @@ export function rulesReport(args) {
 	return monitor.report({
 		limit: limit,
 		band: cfg.directBand(snap),
+		local: cfg.localBand(snap),
 		instances: cfg.configured(snap),
 		bindings: direct.bindings(),
 		assignments: assignments('').assignments,
@@ -4608,7 +4692,13 @@ export const methods = {
 		wan_table_base: 0,
 		wan_warn_uptime: 0,
 		wan_error_grace: 0,
-		release_grace: 0
+		release_grace: 0,
+
+		// Whether a bound address may still reach the networks this router
+		// serves, and where the rules that let it sit. Off is a real answer, so
+		// the flag is a boolean and not a number that would read as "unchanged".
+		lan_local: false,
+		local_pref_base: 0
 	}, (args) => settingsSet(args)),
 
 	// One instance, created or edited. The template is declared once here and

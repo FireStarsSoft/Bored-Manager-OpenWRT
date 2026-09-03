@@ -410,6 +410,29 @@ function readInstances(uci) {
 const DIRECT_PREF_BASE = 19000;
 const DIRECT_PREF_SPAN = 1000;
 
+/**
+ * Where the LAN-local escape rules sit, and how many there may be.
+ *
+ * One rule per LAN this router serves, `to <that LAN> lookup main`, and every
+ * one of them has to be read *before* any binding rule - which is what putting
+ * them below `direct_pref_base` means.
+ *
+ * What they are for is one sentence. A one-to-one binding sends everything from
+ * an address to its WAN's routing table, and that table knows only how to leave
+ * the building: with no escape, a bound machine reaches the internet and not
+ * the printer on the next desk, and the packet for the printer goes out of the
+ * WAN port addressed to a private network that drops it. The daemon already
+ * understood this everywhere else - a held address gets the connected routes
+ * beside its blackhole, and an instance's catch-all table would take the router
+ * off its own LAN without them. A bound address was the one case left out.
+ *
+ * Sixty-four is the span because it is one rule per LAN and a router with
+ * sixty-four LANs is not a thing this package has ever seen; the width is
+ * checked against `direct_pref_base` rather than assumed to fit.
+ */
+const LOCAL_PREF_BASE = 18000;
+const LOCAL_PREF_SPAN = 64;
+
 // The kernel's own ceiling for an ip rule priority.
 const MAX_PREF = 0x7fffffff;
 
@@ -501,6 +524,57 @@ function bandFrom(uci, list) {
 		reason: reason,
 		usable: (reason == null),
 		fallbackReason: fallbackReason
+	};
+}
+
+/**
+ * Where the LAN-local escape rules may sit, and whether they may.
+ *
+ * Refused rather than corrected, for the reason the direct band is: a base that
+ * reaches into the binding band would put an escape rule *after* a binding's
+ * own rule, which is the same as having no escape at all - and silently, on a
+ * router where every page reads bound.
+ */
+function localFrom(uci, band, list) {
+	let enabled = true;
+	let base = LOCAL_PREF_BASE;
+
+	try {
+		if (uci != null) {
+			enabled = flag(uci.get(PACKAGE, 'main', 'lan_local'), true);
+			base = number(uci.get(PACKAGE, 'main', 'local_pref_base'), LOCAL_PREF_BASE);
+		}
+	}
+	catch (e) {
+		debug('cannot read ' + PACKAGE + ': ' + e);
+	}
+
+	let reason = null;
+
+	if (base < 1 || base + LOCAL_PREF_SPAN - 1 > MAX_PREF) {
+		reason = sprintf('local_pref_base %d cannot hold %d ip rule priorities', base, LOCAL_PREF_SPAN);
+	}
+	else if (base + LOCAL_PREF_SPAN > band.base) {
+		reason = sprintf('local_pref_base %d opens a band of %d that reaches %d, which is not below direct_pref_base %d. The LAN-local rules have to be read before every binding, or a bound address is sent out of its WAN addressed to a network on the other side of this router. Lower local_pref_base, or raise direct_pref_base',
+			base, LOCAL_PREF_SPAN, base + LOCAL_PREF_SPAN - 1, band.base);
+	}
+	else {
+		for (let one in list) {
+			if (base + LOCAL_PREF_SPAN > one.rulePrefBase) {
+				reason = sprintf('local_pref_base %d opens a band of %d that reaches %d, which is not below instance %s\'s rule_pref_base %d. The LAN-local rules have to be read before every assignment, or a seated client is sent out of its WAN addressed to a network on the other side of this router. Lower local_pref_base, or raise that instance\'s rule_pref_base',
+					base, LOCAL_PREF_SPAN, base + LOCAL_PREF_SPAN - 1, one.id, one.rulePrefBase);
+				break;
+			}
+		}
+	}
+
+	return {
+		enabled: enabled,
+		base: base,
+		span: LOCAL_PREF_SPAN,
+		top: base + LOCAL_PREF_SPAN - 1,
+		reason: reason,
+		usable: (reason == null)
 	};
 }
 
@@ -771,6 +845,11 @@ export function snapshot(opts) {
 	if (band.fallbackReason)
 		push(refusals, band.fallbackReason);
 
+	let local = localFrom(uci, band, usable);
+
+	if (local.reason)
+		push(refusals, local.reason);
+
 	let direct = readDirect(uci, { base: band.base, top: band.top, instances: usable });
 	let bindings = [];
 
@@ -806,6 +885,7 @@ export function snapshot(opts) {
 		instances: instances,
 		usable: usable,
 		band: band,
+		local: local,
 		direct: direct,
 		bindings: bindings,
 		instanceById: instanceById,
@@ -870,6 +950,14 @@ export function instance(id, snap) {
 /** Where a one-to-one binding's priorities may sit, and whether they may. */
 export function directBand(snap) {
 	return given(snap).band;
+};
+
+/**
+ * The LAN-local escape band: whether it is wanted, where it sits, and whether
+ * it may sit there.
+ */
+export function localBand(snap) {
+	return given(snap).local;
 };
 
 /** Every binding in the file, refused ones included, in file order. */

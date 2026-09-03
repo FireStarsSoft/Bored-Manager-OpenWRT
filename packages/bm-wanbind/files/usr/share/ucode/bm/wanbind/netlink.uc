@@ -387,6 +387,35 @@ export function allRules() {
 };
 
 /**
+ * Every rule that matches on a destination and nothing else.
+ *
+ * Which is what a LAN-local escape is: no source, a destination network, and a
+ * table to send it to. `rules()` above drops them - it keeps only what has a
+ * source, because that is the shape the reconcile pass writes - so the escapes
+ * need a reader of their own rather than a widened one. Widening `rules()`
+ * would put netifd's own `to <interface address> lookup <its table>` rules in
+ * front of a flush that sweeps a band by priority, and that flush would take
+ * them off the router.
+ */
+export function destRules() {
+	let all = allRules();
+
+	if (all === null)
+		return null;
+
+	let out = [];
+
+	for (let one in all) {
+		if (length(one.cidr) || !length(one.dst) || one.table <= 0)
+			continue;
+
+		push(out, { pref: one.pref, dst: one.dst, table: one.table });
+	}
+
+	return out;
+};
+
+/**
  * Every IPv4 route on the router, from every table.
  *
  * The device is read from `oif`, which is the key ucode's rtnl module answers

@@ -46,6 +46,10 @@ import * as wans from 'bm.wanbind.wans';
 const UNREACHABLE = 7;
 const LINK_SCOPE = 253;
 
+// The router's own routing table: everything it knows how to reach directly,
+// which is what a LAN-local escape sends traffic back to.
+const MAIN_TABLE = 254;
+
 /**
  * Whether a table really holds `unreachable default`, asked of the kernel.
  *
@@ -482,6 +486,130 @@ export function removeHold(table) {
  * instance's `rule_pref_base` - and a rule at a priority nothing here names
  * belongs to another tool or to the person administering the router.
  */
+/**
+ * Every network this router serves, as one sorted list of subnets.
+ *
+ * Taken from the classifier's own verdicts rather than from the configuration,
+ * because the question is which networks the router is *on* - a LAN with no
+ * address is not a network anything can reach, and one added by hand at a shell
+ * is one the escapes have to cover on the next pass without anybody editing
+ * this package's configuration.
+ *
+ * Sorted and de-duplicated so that the priority a given LAN's rule sits at does
+ * not move when netifd happens to answer in a different order, which would make
+ * every pass rewrite every escape.
+ */
+export function localEscapeCidrs(view) {
+	let verdicts = (type(view) == 'object' && type(view.byName) == 'object') ? view.byName : {};
+	let seen = {};
+	let out = [];
+
+	for (let name in keys(verdicts)) {
+		let one = verdicts[name];
+
+		if (type(one) != 'object' || one.role != 'lan')
+			continue;
+
+		let cidr = (type(one.cidr) == 'string') ? one.cidr : '';
+
+		if (!length(cidr) || seen[cidr] === true)
+			continue;
+
+		seen[cidr] = true;
+		push(out, cidr);
+	}
+
+	return sort(out);
+};
+
+/**
+ * One rule per LAN, `to <that LAN> lookup main`, numbered from `base`.
+ *
+ * The whole band is compared against what the kernel holds and rewritten only
+ * when the two differ, which is the same shape `installCatchAll` uses and for
+ * the same reason: a pass that wrote its rules again every thirty seconds would
+ * be a window, thirty times an hour, in which the address has no rule at all.
+ *
+ * An empty list is not a no-op - it is `lan_local 0`, or a router whose LANs
+ * have no addresses, and it means the band must be empty.
+ */
+export function installLocalEscapes(base, top, cidrs, present) {
+	let blocks = (type(cidrs) == 'array') ? cidrs : [];
+	let held = (type(present) == 'array') ? present : [];
+
+	let wanted = [];
+	let n = 0;
+
+	for (let cidr in blocks) {
+		if (base + n > top) {
+			err(sprintf('there are more LANs than the %d priorities from %d, so %s and anything after it has no escape rule and a bound address on it cannot reach its own network',
+				top - base + 1, base, cidr));
+			break;
+		}
+
+		push(wanted, sprintf('%d|%s|%d', base + n, cidr, MAIN_TABLE));
+		n++;
+	}
+
+	let have = [];
+
+	for (let one in held) {
+		if (one.pref < base || one.pref > top)
+			continue;
+
+		push(have, sprintf('%d|%s|%d', one.pref, one.dst, one.table));
+	}
+
+	if (join(chr(10), sort(wanted)) == join(chr(10), sort(have)))
+		return length(wanted);
+
+	// Away and back rather than edited in place: a rule's priority is its
+	// identity to the kernel, so a LAN that moved one place up the list is a
+	// different rule at both numbers.
+	for (let one in held) {
+		if (one.pref < base || one.pref > top)
+			continue;
+
+		netlink.removeDest(one.pref, one.dst, one.table);
+	}
+
+	let written = 0;
+
+	for (let key in wanted) {
+		let parts = split(key, '|');
+
+		if (!netlink.addDest(int(parts[0]), parts[1], int(parts[2]))) {
+			err(sprintf('the LAN-local escape rule for %s could not be written, so a bound address on that network cannot reach it', parts[1]));
+			continue;
+		}
+
+		written++;
+	}
+
+	if (written) {
+		notice(sprintf('%d LAN-local escape rule(s) at %d-%d: traffic to %s is decided before any binding, so a bound machine still reaches the network it is on',
+			written, base, base + written - 1, join(', ', blocks)));
+	}
+
+	return written;
+};
+
+/** Take the whole escape band off the router, whatever is in it. */
+export function flushLocal(base, top, present) {
+	let held = (type(present) == 'array') ? present : [];
+	let removed = 0;
+
+	for (let one in held) {
+		if (one.pref < base || one.pref > top)
+			continue;
+
+		if (netlink.removeDest(one.pref, one.dst, one.table))
+			removed++;
+	}
+
+	return removed;
+};
+
 export function directOwned(rules, base, top, stamped) {
 	let out = [];
 	let claimed = type(stamped) == 'object' ? stamped : {};

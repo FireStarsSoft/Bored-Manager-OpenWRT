@@ -20,6 +20,7 @@ import * as service from 'bm.wanbind.service';
 import * as cfg from 'bm.wanbind.config';
 import * as direct from 'bm.wanbind.direct';
 import * as prepare from 'bm.wanbind.prepare';
+import * as netlink from 'bm.wanbind.netlink';
 
 import { check, report, says } from 'probe';
 
@@ -619,5 +620,88 @@ check('every one removed', dropped.removed, 200);
 check('in one commit', uciLib.commits('bm_wanbind'), 1);
 check('with a pass owed', dropped.pending, true);
 check('and the sections are gone', uci.get('bm_wanbind', 'bmhand_000'), null);
+
+// ===========================================================================
+// A bound address still reaches the network it is on.
+//
+// A binding sends everything from an address to its WAN's routing table, and
+// that table knows only how to leave the building. Without an escape a bound
+// machine reaches the internet and not the printer on the next desk - and the
+// packet for the printer leaves by the WAN port addressed to a private network
+// that drops it.
+
+service.attach(scale.busFor(router, {}));
+service.pass();
+
+function escapes() {
+	let out = [];
+
+	for (let one in netlink.destRules()) {
+		if (one.pref >= 18000 && one.pref <= 18063)
+			push(out, one);
+	}
+
+	return out;
+}
+
+let escaped = escapes();
+
+check('one rule per LAN this router serves', length(escaped), 4);
+check('numbered from the base', escaped[0].pref, 18000);
+check('and sorted, so a LAN keeps its number between passes', escaped[0].dst, '10.9.0.0/24');
+check('the last is the fourth LAN', escaped[3].dst, '10.9.3.0/24');
+check('every one of them goes to the main table', escaped[3].table, 254);
+check('below every binding', escaped[3].pref < 19000, true);
+
+// Written once. A pass that rewrote them every thirty seconds would be a window,
+// thirty times an hour, in which a bound address has no way back to its LAN.
+rtnl.resetRuleDumps();
+service.pass();
+check('a second pass writes nothing', length(escapes()), 4);
+check('and the rules are the same ones', escapes()[0].pref, 18000);
+
+// Removed by hand, put back by the next pass - the same contract every other
+// rule this daemon writes has.
+netlink.removeDest(18001, '10.9.1.0/24', 254);
+check('one taken off by hand', length(escapes()), 3);
+
+service.pass();
+check('is put back', length(escapes()), 4);
+check('at the number it had', escapes()[1].pref, 18001);
+check('for the network it had', escapes()[1].dst, '10.9.1.0/24');
+
+// The monitor knows whose they are. Reported as a stranger's, four rules with
+// no source and a destination would read as somebody steering traffic by hand.
+let seen = service.rulesReport({ limit: 3000 });
+let localRows = 0;
+
+for (let row in seen.rules) {
+	if (row.owner == 'local')
+		localRows++;
+}
+
+check('the monitor knows whose they are', localRows, 4);
+
+// Switched off is a state, not an absence: the band has to end up empty.
+let off = service.settingsSet({ lan_local: false });
+check('the setting is accepted', off.ok, true);
+
+service.pass();
+check('and the rules come off', length(escapes()), 0);
+
+let on = service.settingsSet({ lan_local: true });
+check('switched back on', on.ok, true);
+
+service.pass();
+check('they come back', length(escapes()), 4);
+
+// A base that reaches into the binding band is the same as having no escapes at
+// all, and silently, so it is refused rather than corrected.
+let bad = service.settingsSet({ local_pref_base: 19000 });
+check('a base inside the binding band is refused', bad.ok, false);
+says('and says why', bad.reason, /not below direct_pref_base/);
+
+service.pass();
+check('so the rules are still where they were', length(escapes()), 4);
 
 report();

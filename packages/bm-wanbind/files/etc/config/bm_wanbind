@@ -68,6 +68,28 @@ config wanbind 'main'
 	# instance it would collide with.
 	option direct_pref_base '19000'
 
+	# Whether a bound address may still reach the networks this router serves.
+	#
+	# A binding sends everything from an address to its WAN's routing table, and
+	# that table knows only how to leave the building. With this off, a bound
+	# machine reaches the internet and not the printer on the next desk - and
+	# the packet for the printer goes out of the WAN port addressed to a private
+	# network that drops it.
+	#
+	# On, the daemon writes one rule per LAN this router has an address on,
+	# `to <that LAN> lookup main`, numbered from local_pref_base and therefore
+	# read before any binding or assignment. Turning it off is a real choice -
+	# an address that must not see the rest of the router at all - and the band
+	# is emptied rather than left behind.
+	option lan_local '1'
+
+	# Where those rules sit: sixty-four priorities from here, one per LAN.
+	#
+	# It has to end below direct_pref_base and below every instance's
+	# rule_pref_base in this file, because a rule read after a binding's own is
+	# a rule that never decides anything. `bmwan check` says so if it does not.
+	option local_pref_base '18000'
+
 	# What an instance is given when it does not say for itself.
 	#
 	# The seven below are defaults and nothing else. Every instance carries its

@@ -551,6 +551,17 @@ function classify(one, ctx) {
 		}
 	}
 
+	// The LAN-local escapes: a destination, no source, straight to main. Asked
+	// before netifd's own shape because netifd writes `to <its address> lookup
+	// <its table>` rules that are the same shape from a distance - what tells
+	// them apart is the table and the band, and both are exact here.
+	if (!length(one.cidr) && length(one.dst) && one.table == MAIN_TABLE &&
+		ctx.bands.local.base >= 1 && one.pref >= ctx.bands.local.base && one.pref <= ctx.bands.local.top) {
+		out.owner = 'local';
+		out.id = one.dst;
+		return out;
+	}
+
 	let parked = ctx.parked[key(one.table)];
 
 	if (parked != null) {
@@ -589,6 +600,11 @@ function classify(one, ctx) {
 
 /** One rule, as one sentence somebody can act on. */
 function reasonFor(one, verdict, ctx, facts) {
+	if (verdict.owner == 'local') {
+		return sprintf('This daemon wrote it. Traffic from any bound or pooled address to %s, one of this router\'s own LANs, is sent to the main table before any binding is consulted, so a bound machine can still reach the network beside it rather than being sent out of its WAN addressed to a private network that would drop it.',
+			verdict.id);
+	}
+
 	if (verdict.owner == 'netifd') {
 		// Said as plumbing rather than as policy, because that is what it is
 		// and because there are three of them per interface: a router dialling
@@ -720,8 +736,11 @@ export function report(input) {
 	let bindings = arrayOr(asked.bindings);
 	let assignments = arrayOr(asked.assignments);
 
+	let local = objectOr(asked.local);
+
 	let bands = {
 		direct: { base: intOr(band.base, 0), top: intOr(band.top, 0) },
+		local: { base: intOr(local.base, 0), top: intOr(local.top, 0) },
 		instances: []
 	};
 
@@ -851,6 +870,7 @@ export function report(input) {
 
 	let ctx = {
 		band: bands.direct,
+		bands: bands,
 		tableOwner: tableOwner,
 		views: instanceViews(instances, ordered),
 		bindingById: bindingById,
