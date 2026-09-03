@@ -1925,6 +1925,44 @@ by accident.
     outranking the module, rather than going quiet for the five minutes the
     address is hardest to account for.
 
+Items 70 to 74 are what module 3.4.0 and packages 2.4.0 added on top of that.
+
+70. **The capacity report agrees with itself in three places.** On a router with
+    packages 2.4.0, open Dashboard → Capacity, the Capacity card on the LuCI
+    Overview, and run `bmctl capacity` at a console. The stability verdict, the
+    two ceilings, the dimension named as the limit and the tier must be the same
+    on all three - they are one reply rendered three ways, and any disagreement
+    is a second model somewhere that should not exist. Then
+    `bmctl capacity --json | wc -c`: under 16 KB on a router carrying five
+    hundred sessions, because it travels over ubus.
+71. **A fix writes what the row says, and nothing else.** With fw4 flow offload
+    off and a pool of more than sixty-four members, the report must carry a
+    `flow-offload` error with a Fix button. Press it, confirm, and check
+    `uci get firewall.@defaults[0].flow_offloading` is `1` and the row turns
+    green on the refresh that follows. Then the case that matters more: on a
+    router whose kernel has no flowtable - `ls /lib/modules/$(uname -r)/` with no
+    `nft_flow_offload.ko` and nothing in `/proc/modules` - the same finding must
+    appear with **no button at all** and a detail naming `apk add
+    kmod-nft-offload`. A button there leaves a router whose firewall does not
+    load at the next boot.
+72. **A stale report refuses.** Open Capacity, leave the tab for six minutes
+    without refreshing, and press a Fix. It must refuse in a sentence saying how
+    many minutes old the report is, and nothing may reach the router. Press
+    Refresh and the same button must work.
+73. **An older agent says what to do rather than failing.** Downgrade to packages
+    2.3.0. The Capacity tab must show one panel naming 2.4.0 and Router packages,
+    with no failed call in the log and nothing asked of the router on the poll -
+    it decides from the release it already has. The LuCI card must say the same.
+    Everything else on both must keep working, and Router limits under Module
+    settings must still read and write.
+74. **The monitor shows the whole table.** On a router carrying more than five
+    hundred collapsed rows - five hundred sessions is enough - open the Monitor.
+    The table must hold every row, not the first five hundred, and "Rules seen"
+    must equal `ip -4 rule show | wc -l` on the router rather than the number of
+    rows rendered. Open one row: the Why panel must fetch its sentence when it
+    opens rather than having carried it all along. In LuCI the same table pages
+    the same way, and its Explain link asks for one rule.
+
 ## Safety and limitations
 
 - Binding is IPv4 only. Disable or separately design IPv6 on a scoped LAN

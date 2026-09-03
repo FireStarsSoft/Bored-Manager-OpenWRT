@@ -15,6 +15,16 @@ set -eu
 
 RIG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 WORK="$RIG_DIR/work"
+
+# The SDK and everything it builds live on the WSL filesystem rather than under
+# the repo, and that is not a preference: the repo is on `/mnt/f`, which is NTFS
+# through drvfs and case-insensitive, and OpenWrt's own prerequisite check
+# refuses to build there. `Makefile` and `makefile` being the same file is not
+# something a build can be talked round.
+#
+# Nothing here is committed, so where it lives is invisible from the repo; what
+# is not invisible is a first run that fails on its slowest step.
+BUILD="${RIG_BUILD:-$HOME/bm-rig}"
 OUT="$RIG_DIR/out"
 SECRETS="$RIG_DIR/.secrets"
 

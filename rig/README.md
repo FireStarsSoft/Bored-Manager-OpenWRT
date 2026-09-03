@@ -57,6 +57,12 @@ capacity report says out loud.
 `rig/.secrets/` and `rig/work/` are gitignored. Nothing in either is ever
 committed.
 
+The SDK and everything it builds live in `~/bm-rig` rather than under the repo,
+and that is not a preference. The repo is on a Windows drive through drvfs,
+which is case-insensitive, and OpenWrt refuses to build there - `Makefile` and
+`makefile` being the same file is not something a build can be talked round. Set
+`RIG_BUILD` to move it.
+
 ## The matrix
 
 `verify.sh` checks fifteen claims and prints the number behind each one. A claim
@@ -67,6 +73,20 @@ no matrix.
 `verify.sh --calibrate` writes `work/calibration.json`: memory used at this
 load, the reply sizes, the rule and neighbour counts, and the timings. Those are
 the measurements the constants in `bm/capacity.uc` are meant to be fitted to.
+
+## What has been run, and what has not
+
+The package build has: `rig/build-packages.sh` fetches the OpenWrt 25.12.5 SDK,
+points a feed at this repo and builds all four packages against the same
+toolchain the released images come from. That is what proves the ucode compiles
+under the real interpreter's own build, that every file the Makefiles list is
+installed, and that the two daemons record `bm-agent>=2.4.0` in their package
+metadata rather than in a comment.
+
+The rest of `up.sh` has not been run. Every step of it needs `sudo` - the
+bridges, the namespaces, the loop mount that seeds the image, accel-ppp - and
+this WSL asks for a password, which is the operator's to type. Run it yourself
+and the matrix and the calibration follow.
 
 ## Calibration
 

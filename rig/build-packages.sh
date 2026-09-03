@@ -10,33 +10,47 @@
 . "$(dirname "$0")/lib.sh"
 
 REPO="$(cd "$RIG_DIR/.." && pwd)"
-SDK="$WORK/$SDK_NAME"
+SDK="$BUILD/sdk"
+
+# The feed is a copy rather than a symlink into the repo, for the same reason
+# the SDK is not under it: a `src-link` pointing at `/mnt/f` puts every package
+# source back on the case-insensitive filesystem the build refuses to run on.
+FEED="$BUILD/packages"
 
 fetch_sdk() {
+	mkdir -p "$BUILD" "$WORK/dl"
 	[ -d "$SDK" ] && return 0
 
-	mkdir -p "$WORK/dl"
 	local tarball="$WORK/dl/${SDK_NAME}.tar.zst"
 
 	if [ ! -s "$tarball" ]; then
-		log "downloading the SDK (about 200 MB)"
+		log "downloading the SDK (about 270 MB)"
 		curl -fL --retry 3 -o "$tarball.part" "$MIRROR/${SDK_NAME}.tar.zst"
 		mv "$tarball.part" "$tarball"
 	fi
 
-	log "unpacking the SDK"
-	tar -I zstd -xf "$tarball" -C "$WORK"
+	log "unpacking the SDK onto $BUILD"
+	tar -I zstd -xf "$tarball" -C "$BUILD"
+	mv "$BUILD/$SDK_NAME" "$SDK"
 	[ -d "$SDK" ] || die "the SDK did not unpack to $SDK"
 }
 
+# The sources the feed builds, copied out of the repo every time so a build is
+# never against something stale. rsync rather than a symlink: see `FEED`.
+sync_feed() {
+	mkdir -p "$FEED"
+	rsync -a --delete "$REPO/packages/" "$FEED/"
+}
+
 prepare_feeds() {
+	sync_feed
 	[ -f "$SDK/.bm-feeds" ] && return 0
 
 	log "setting up the feeds"
 	(
 		cd "$SDK"
 		cp feeds.conf.default feeds.conf
-		echo "src-link bm $REPO/packages" >> feeds.conf
+		echo "src-link bm $FEED" >> feeds.conf
 		./scripts/feeds update -a >/dev/null 2>&1 || ./scripts/feeds update -a
 		./scripts/feeds install -a -p bm >/dev/null 2>&1 || :
 		./scripts/feeds install luci-base >/dev/null 2>&1 || :
@@ -57,8 +71,8 @@ build() {
 		make defconfig >/dev/null
 		make package/bm-agent/compile package/bm-wanbind/compile \
 			package/bm-pppoe-pool/compile package/luci-app-bm/compile \
-			-j"$(nproc)" V=s > "$WORK/build.log" 2>&1 \
-			|| die "the build failed - the tail of $WORK/build.log says why"
+			-j"$(nproc)" > "$BUILD/build.log" 2>&1 \
+			|| die "the build failed - the tail of $BUILD/build.log says why"
 	)
 
 	rm -f "$OUT"/*.apk 2>/dev/null || :
