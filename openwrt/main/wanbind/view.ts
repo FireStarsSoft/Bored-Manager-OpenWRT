@@ -17,7 +17,8 @@
  */
 import type { DirectRow } from './types'
 import { diffAssignments, recordEvents } from './events'
-import { handoverNotice, handoverPending } from './handover'
+import { handoverPending } from './handover'
+import { handoverNotice } from './handover-notice'
 import {
   wanbindAssignments,
   wanbindBindings,
@@ -273,7 +274,12 @@ function bindingNotice(runtime: BindingRuntime): string {
   // still holding, which is true whether or not the router answered - and on
   // the one router where it matters most, the one with no packages on it yet,
   // every branch below has nothing to say at all.
-  const handed = handoverNotice(runtime.handover, 'binding')
+  //
+  // `'instance'`, because this is the instance half's notice. It asked for the
+  // one-to-one wording, which meant a 3.3.x user with instances was told
+  // nothing at all about them - and a user with both kinds read the one-to-one
+  // count on the instance tab.
+  const handed = handoverNotice(runtime.handover, 'instance')
   const info = runtime.cache.info
 
   if (!info) return handed

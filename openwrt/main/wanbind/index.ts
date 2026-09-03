@@ -25,7 +25,7 @@
  * Import this barrel, never a file inside it.
  */
 export { BindingManager, type BindingOptionKind } from './manager'
-export { handoverNotice } from './handover'
+export { handoverNotice } from './handover-notice'
 export { durationLabel } from './rows'
 export { daemonProblem, daemonReady } from './runtime'
 export type {

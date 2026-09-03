@@ -61,7 +61,13 @@ export const PACKAGE_GROUPS: readonly PackageGroup[] = [
     // not "ip rule" in general, it is numeric tables, which is what the probe
     // now tests for.
     packages: ['ip-full'],
-    purpose: 'Per-device WAN binding',
+    // Not "Per-device WAN binding" any more. That was true while this module
+    // wrote the rules itself; bm-wanbind writes them over netlink and never
+    // opens /sbin/ip, so this package buys the ability to read and change
+    // policy routing at a shell rather than the feature working at all. It is
+    // still offered - a router somebody administers by hand is better off with
+    // it - and it is no longer named as what WAN Binding is missing.
+    purpose: 'Reading and changing policy routing by hand at a router shell',
     capability: 'hasIpRule'
   },
   {

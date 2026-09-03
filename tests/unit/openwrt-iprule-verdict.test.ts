@@ -201,8 +201,13 @@ describe('what the install surfaces are told about the same three routers', () =
     const caps = buildReadiness(facts({ hasIpRule: false }))
 
     expect(groups(caps)).toContain('ipfull')
-    expect(caps.missingFor.binding).toBe(true)
     expect(caps.setupNeeded).toBe(true)
+
+    // But not as the thing WAN Binding is missing, which it was until 3.4.0.
+    // The daemon writes its rules over netlink and never opens the binary, so
+    // the Binding tab offering `ip-full` sent people to install a package that
+    // would not have changed anything about the feature that was refusing.
+    expect(caps.missingFor.binding).toBe(false)
   })
 
   it('offers nothing when the package is on disk and the link never switched', () => {

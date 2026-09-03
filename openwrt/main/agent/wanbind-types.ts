@@ -494,6 +494,23 @@ export interface WanbindCheckReply {
   reason?: string
 }
 
+/**
+ * What `bind_many` answers: one row per spec, in the order they were sent.
+ *
+ * `pref` and `table` are what the daemon stamped the section with, which for a
+ * handover is what the rule already standing was written at - the caller sent
+ * them and the daemon adopting them is the whole point of the call.
+ */
+export interface WanbindBindManyReply {
+  ok: boolean
+  written: number
+  refused: number
+  pending?: boolean
+  due?: number
+  reason?: string
+  results: Array<{ id: string; ok: boolean; pref: number; table: number; reason: string }>
+}
+
 /** What `unbind_many` answers: one row per id, whether or not it went. */
 export interface WanbindUnbindManyReply {
   ok: boolean

@@ -346,7 +346,7 @@ things simply cannot be done from the far end of one, however good the code is:
 So [`packages/`](../packages/README.md) builds a small agent that runs on the
 router, and Module settings has a **Router packages** section that installs,
 updates and removes it. A router without one is in **compatibility mode**: it
-works exactly as it always did, the Dashboard and Connection pages carry a
+keeps the dashboard, the interfaces, the device table and the history over SSH, and has neither automation until the router packages are installed, the Dashboard and Connection pages carry a
 banner saying so, and the readiness verdict is `attention` rather than `ready` -
 not because anything is broken, but because the difference is worth a banner
 rather than a sentence three pages deep.
@@ -1988,9 +1988,9 @@ Items 70 to 74 are what module 3.4.0 and packages 2.4.0 added on top of that.
   measurement yet. Both the report and `rig/README.md` say so.
 - Handing over the bindings this module wrote before 3.4.0 is done in batches of
   two hundred, which is what `bind_many` takes in one call.
-- PPPoE pools need the router packages; there is no SSH path for them. A router
-  that cannot take the packages can still be monitored and can still bind, but
-  its PPPoE is its own to configure.
+- PPPoE pools and WAN Binding both need the router packages, and neither has an
+  SSH path any more. A router that cannot take them keeps the dashboard, the
+  tables and the history; its PPPoE and its binding are its own to configure.
 - Only firewall4 is supported by the two automations, and it is the one missing
   piece the module will not install for you: putting fw4 under a running fw3
   would take the firewall down rather than fix anything. A router on fw3 is not
@@ -2077,7 +2077,7 @@ Three rules hold that shape, and all three are what make a file findable rather
 than a matter of taste.
 
 **The barrel is the only entrance.** Every folder has an `index.ts`, and a file
-in one folder imports `../binding`, never `../binding/reconcile`. That is why
+in one folder imports `../wanbind`, never `../wanbind/reconcile`. That is why
 splitting the main half into folders changed no call site at all - every import
 path the module and its whole test suite already used still resolves - and why a
 folder can be rearranged again tomorrow without touching one. A folder's barrel
@@ -2086,13 +2086,13 @@ folder is meant to have it.
 
 **The layering is one-way, and a domain imports another only downward.**
 `runtime/` may import anything below it and nothing imports `runtime/` back.
-Below it are the domains that do the work - `service/`, `pppoe/`, `binding/`,
-`direct/`, `scan/`, `setup/` - then `probe/`, whose verdict `setup/` and
+Below it are the domains that do the work - `service/`, `pppoe/`, `wanbind/`,
+`scan/`, `capacity/`, `setup/` - then `probe/`, whose verdict `setup/` and
 `runtime/` both read, then the shared libraries (`agent/`, `uci/`, `store/`,
 `config/`, and the loose `*.ts` files, which may import each other), then
 `@shared/*`.
 
-`pppoe/` contains no mention of `binding/` and vice versa, and neither knows
+`pppoe/` contains no mention of `wanbind/` and vice versa, and neither knows
 `service/` exists. Where two of them genuinely need each other - the PPPoE
 delete asking which carriers a binding instance is running on, the binding
 engine asking the collector for a fresh interface dump - they meet
@@ -2100,13 +2100,13 @@ through a small dependency object written in `runtime/container.ts` and passed i
 at construction. That file is the only place in the module where all the domains
 appear together, and it is where to look first for how any two of them interact.
 
-`direct/` and `scan/` are the one deliberate exception, and it is a one-way
-one: both import `binding/`'s barrel, and `binding/` imports neither back. The
-alternative was a second copy of the pieces that decide what a firewall
-forwarding, a routing-table claim, a WAN's usability or a rule chunk looks like
-- and two copies of those would eventually disagree about the same router,
-which is the failure this whole layer exists to make impossible. What they take
-is named in `binding/index.ts` like anything else a folder is allowed to have.
+`scan/` and `capacity/` are the deliberate exceptions, and both are one-way:
+each imports what it needs through a barrel and nothing imports either back.
+`capacity/` is the newer of the two and takes the least - it renders one reply
+and calls write paths that already exist, so it names `agent/`, `probe/` and
+`requirements.ts` and nothing in `wanbind/` or `pppoe/` at all. The rule the
+exception protects is the one this whole layer exists for: two copies of a
+decision about the same router eventually disagree.
 
 **A big class becomes a runtime record, free functions, and a thin facade.** The
 mutable state lives on a small `Runtime` object; each thing the class used to do

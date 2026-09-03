@@ -358,13 +358,36 @@ describe('openwrt readiness: five states instead of one sentence', () => {
           ...AGENT,
           provides: ['binding', 'pppoe'],
           features: [
-            { name: 'bm-wanbind', version: '2.0.0', apiVersion: 1, provides: ['binding'] },
+            { name: 'bm-wanbind', version: '2.4.0', apiVersion: 2, provides: ['binding'] },
             { name: 'bm-pppoe-pool', version: '2.0.0', apiVersion: 2, provides: ['pppoe'] }
           ]
         }
       })
     )
     expect(check(full, 'feature-binding').status).toBe('ok')
+
+    // A fourth state, and the one every router passes through between a module
+    // update and its own: the package is there and speaks a contract this
+    // module stopped driving. It read `ok` - "the router assigns clients
+    // itself" - while every WAN Binding surface refused with the opposite.
+    const stale = buildReadiness(
+      facts({
+        agent: {
+          ...emptyAgentFacts(),
+          installed: true,
+          running: true,
+          ...AGENT,
+          provides: ['binding', 'pppoe'],
+          features: [
+            { name: 'bm-wanbind', version: '2.3.0', apiVersion: 1, provides: ['binding'] },
+            { name: 'bm-pppoe-pool', version: '2.3.0', apiVersion: 2, provides: ['pppoe'] }
+          ]
+        }
+      })
+    )
+    expect(check(stale, 'feature-binding').status).toBe('warn')
+    expect(check(stale, 'feature-binding').detail).toContain('2.3.0')
+    expect(check(stale, 'feature-binding').detail).toContain('Update the router packages')
     expect(check(full, 'feature-pppoe').status).toBe('ok')
     // Still not a failure anywhere: these rows never make a router unusable.
     expect(full.checks.some((entry) => entry.key.startsWith('feature-') && entry.status === 'bad'))

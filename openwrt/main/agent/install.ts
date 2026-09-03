@@ -24,6 +24,7 @@ import { shQuote } from '@shared/shell'
 import type { OkResult } from '@shared/types'
 import type { JobItemSpec } from '../jobs'
 import { isRecord, textField } from '../util'
+import { agentCall, unwrap } from './client'
 import {
   NOTHING_PINNED,
   PINNED_BASE,
@@ -315,6 +316,61 @@ function jobItems(runtime: AgentRuntime, plan: FrozenInstallPlan): JobItemSpec[]
         }
       }
     })
+
+    // The step that makes the update stick.
+    //
+    // `bmctl update` arms a commit-confirm guard around the whole thing and
+    // then deliberately leaves it armed - at a console it prints "run `bmctl
+    // config confirm` to keep this, or leave it and the router restores
+    // snapshot X on its own". That is exactly right for a person at a
+    // terminal, and exactly wrong for a job nobody is watching: the countdown
+    // ran out, the router put the previous packages back, and the module read
+    // the update as having succeeded because apk had said so.
+    //
+    // So the router is read back first - the guard is only worth confirming if
+    // what it is guarding actually works - and confirmed after. A confirm that
+    // fails is a warning rather than a failure: the update itself landed, and
+    // what happens next is the router restoring on its own, which is the safe
+    // direction and is what the guard is for.
+    items.push({
+      name: 'Read the router back and keep the change',
+      run: async (): Promise<void | { warning: string }> => {
+        let next = await deps.reprobe()
+
+        if (!next.agent.running) {
+          await new Promise((resolve) => setTimeout(resolve, RESTART_GRACE_MS))
+          next = await deps.reprobe()
+        }
+
+        if (!next.agent.installed || !next.agent.running) {
+          throw new Error(
+            'the router updated itself and its agent is not answering afterwards - ' +
+              'the guard it armed will restore the previous packages within its timeout'
+          )
+        }
+
+        // One call, the way `guardedJobs` confirms its own. Reaching this item
+        // at all is the proof that matters: the update landed and the router is
+        // answering over a connection that is evidently still carrying
+        // commands. An agent too old to have a guard answers this the same way
+        // it answers everything else it does not have, and that is not a
+        // failure either - there was nothing counting down.
+        const kept = unwrap(
+          await agentCall({ ctx: deps.ctx, capability: deps.agent }, 'guard_confirm')
+        )
+
+        if (!kept.ok) {
+          return {
+            warning:
+              `${next.agent.release} is installed and answering, but the guard it armed was ` +
+              `not confirmed: ${kept.error ?? 'the agent did not answer'}. Unless \`bmctl ` +
+              'config confirm\` is run on the router, it will restore the packages it had ' +
+              'before, within the guard\'s timeout.'
+          }
+        }
+      }
+    })
+
     return items
   }
 

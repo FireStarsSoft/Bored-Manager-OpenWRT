@@ -93,6 +93,7 @@ export {
   // writes nothing itself.
   wanbindBind,
   wanbindBindings,
+  wanbindBindMany,
   wanbindUnbind,
   wanbindUnbindMany,
   wanbindAssignments,

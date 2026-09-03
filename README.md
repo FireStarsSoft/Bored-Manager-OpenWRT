@@ -26,7 +26,9 @@ It installs **switched off** — enable it in the same place. The 2.x line needs
 Bored Manager **0.4.1** or newer, which is also the first app release that does
 not bundle the module, **and OpenWrt 25.12 or newer** on the router — 25.12.0
 replaced opkg with apk, and 2.x speaks only apk, so it refuses a 24.10 router
-outright rather than half-managing it. The 1.0.x line still runs on **0.3.3**.
+outright rather than half-managing it. From **3.3.0** the module needs Bored Manager **0.7.0**, and from **3.4.0** it
+needs the router packages at **2.4.0** as well - WAN Binding is the router's
+now, and a router without them has none. The 1.0.x line still runs on **0.3.3**.
 An app already carrying 1.0.7 keeps it across the update, and updating to 1.0.8
 or 2.x from here keeps its rules, per-router state and history.
 

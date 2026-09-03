@@ -13,6 +13,7 @@
  */
 import { IP_FULL_PATH } from './command'
 import { APK_REQUIRED, FW4_MISSING, SPACE_BAD_KB, SPACE_WARN_KB } from './text'
+import { WANBIND_API } from '../agent'
 import { featureApi, PPPOE_POOL_API } from './types'
 import type {
   AgentCapability,
@@ -233,7 +234,10 @@ function featureCheck(
       status: 'warn',
       detail:
         `${packageName} ${found?.version || ''} speaks version ${featureApi(agent, feature)} of its contract and this module drives ${minApi}. ` +
-        'Update the router packages from Router packages, in Module settings - the pools it holds keep dialling meanwhile, but nothing here can read or change them.',
+        'Update the router packages from Router packages, in Module settings - ' +
+        (feature === 'binding'
+          ? 'what it holds keeps steering meanwhile, but nothing here can read or change it, and any binding this module created before the router kept its own is handed over the moment the update lands.'
+          : 'the pools it holds keep dialling meanwhile, but nothing here can read or change them.'),
       required: false,
       install: null,
       card: 'agent'
@@ -330,8 +334,10 @@ function ipRuleCheck(facts: ProbeFacts): CheckSeed {
     detail:
       `This is the BusyBox \`ip\`${aliased ? ` (${at} -> ${facts.ip.real})` : ''}, which ` +
       `answers \`ip rule show\` but rejects a numeric routing table - ` +
-      `\`invalid argument to 'table ID'\`. Every rule WAN binding writes names one, so it would ` +
-      `create an instance and then fail on the first line that steers anything.`,
+      `\`invalid argument to 'table ID'\`. That does not stop WAN Binding: bm-wanbind writes ` +
+      `its rules over netlink and never opens this binary. What it stops is reading them - ` +
+      `\`ip -4 rule show\` here cannot print a table number, so checking the router by hand ` +
+      `against what the Monitor says is not possible until iproute2 is installed.`,
     install: 'ipfull'
   }
 }
@@ -519,10 +525,18 @@ export function observedChecks(input: CheckInput): CheckSeed[] {
     featureCheck(
       agent,
       'binding',
-      'One-to-one WAN binding',
+      'WAN Binding',
       'bm-wanbind',
       'The router assigns clients itself: a lease binds in milliseconds rather than at the next poll, and the rules are written over netlink.',
-      'Binding is done over SSH. It works, and it reconciles on a poll rather than on the lease, so a client waits up to one sweep for its WAN.'
+      // Not "it is done over SSH" any more, which it was until 3.4.0 and is
+      // now the opposite of true: this module writes no rule at all, so a
+      // router without the daemon has no WAN Binding rather than a slower one.
+      'Without it this router has no WAN Binding: from 3.4.0 the module writes no rule of its own, and both create forms refuse until the package is there.',
+      // Gated on the contract, like the pool row beside it. Without this a
+      // router still running bm-wanbind 2.3.0 - which is every router between
+      // a module update and its own - reported a green row saying the router
+      // was assigning clients itself, while every WAN Binding surface refused.
+      WANBIND_API
     ),
     featureCheck(
       agent,

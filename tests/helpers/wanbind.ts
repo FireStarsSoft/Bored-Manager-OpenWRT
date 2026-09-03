@@ -530,6 +530,66 @@ export function fakeWanbind(seed: Partial<WanbindState> = {}): WanbindDaemon {
     },
     bindings: (args) => bindingsReply(args),
     bind,
+    // The batch form, which is what a handover uses. Each spec goes through the
+    // same `bind` the single form does, so a test that makes the daemon refuse
+    // one id sees it refused here too - and every spec gets a row whether or
+    // not it was written, which is the property the caller keeps records on.
+    bind_many: (args) => {
+      const specs = Array.isArray(args.bindings) ? args.bindings : []
+      const results = specs.map((one) => {
+        const spec = (one ?? {}) as Record<string, unknown>
+        const id = String(spec.id ?? '')
+        // Through the override, not past it. A test that says "this router
+        // refuses dir_a1" with `on('bind', ...)` means the router, and a batch
+        // form that consulted only the default would let the handover succeed
+        // against a daemon the test had made hostile.
+        const answer = overrides.get('bind') ?? bind
+        const reply = answer(spec, state)
+        // An override may answer either shape - a plain reply, or the exec
+        // result a test uses to say "the router answered this on stdout" - so
+        // both are read here the way the transport reads them.
+        const answered = (isExecResult(reply)
+          ? (JSON.parse(reply.stdout || '{}') as Record<string, unknown>)
+          : ((reply ?? {}) as Record<string, unknown>)) as {
+          ok?: boolean
+          binding?: { pref?: number; table?: number }
+          reason?: string
+        }
+
+        if (answered.ok !== true) {
+          return { id, ok: false, pref: 0, table: 0, reason: answered.reason ?? 'refused' }
+        }
+
+        // A real daemon that wrote a section lists it afterwards, whatever its
+        // own reader then makes of it - and the caller reads that list back to
+        // tell "written" from "kept". An override answering with a row has
+        // therefore written one, so the state has to hold it or the read-back
+        // sees a router that took the section and lost it.
+        if (answered.binding && overrides.has('bind')) {
+          const row = answered.binding as unknown as RouterBinding
+          const seen = state.bindings.findIndex((entry) => entry.id === row.id)
+          if (seen >= 0) state.bindings[seen] = row
+          else state.bindings.push(row)
+        }
+
+        return {
+          id,
+          ok: true,
+          pref: answered.binding?.pref ?? 0,
+          table: answered.binding?.table ?? 0,
+          reason: ''
+        }
+      })
+      const written = results.filter((one) => one.ok).length
+      return {
+        ok: true,
+        written,
+        refused: results.length - written,
+        pending: true,
+        due: 2,
+        results
+      }
+    },
     bind_check: () => ({ ok: true, findings: [] }),
     unbind: (args) => {
       const id = String(args.id ?? '')

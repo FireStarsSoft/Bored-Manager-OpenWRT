@@ -48,6 +48,7 @@ import {
   type WanbindLayoutReply,
   type WanbindSettings,
   type WanbindStats,
+  type WanbindBindManyReply,
   type WanbindUnbindManyReply,
   type WanbindUnbindReply,
   type WanbindWansReply,
@@ -255,6 +256,36 @@ export function wanbindRuleExplain(
     dst,
     table: Math.trunc(table)
   })
+}
+
+/**
+ * Write many bindings in one call: one commit and one pass, not N of each.
+ *
+ * The daemon takes at most two hundred specs, so a caller batches. What this
+ * exists for is the handover - a module upgrading from 3.3.x offers every
+ * binding it still holds, and five hundred separate `bind` calls would be five
+ * hundred commits to flash and five hundred reconcile passes on somebody's
+ * router while they watch a stale page.
+ *
+ * Every spec gets a row in the reply whether or not it was written, so the
+ * caller can keep the records the router refused and say which.
+ */
+export async function wanbindBindMany(
+  deps: AgentDeps,
+  bindings: WanbindBindSpec[]
+): Promise<AgentCallResult<WanbindBindManyReply>> {
+  return unwrap(
+    await call<WanbindBindManyReply>(
+      deps,
+      'bind_many',
+      // Through `bindArgs`, exactly as the single form goes: the daemon's
+      // template declares `when_down`, and ubus drops a key a template does
+      // not have - so a spec sent raw arrives without it and the binding is
+      // written with the default instead of what it was created with.
+      { bindings: bindings.map((one) => bindArgs(one)) },
+      MUTATE_TIMEOUT_MS
+    )
+  )
 }
 
 /**

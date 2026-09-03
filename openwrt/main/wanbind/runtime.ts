@@ -183,6 +183,24 @@ export function daemonProblem(runtime: BindingRuntime): string {
 }
 
 /**
+ * A bm-wanbind this module cannot drive, but which is running all the same.
+ *
+ * The difference between the two routers this module cannot hand records over
+ * to, and it decides a sentence rather than a behaviour. A router with no
+ * bm-wanbind leaves the rules this module wrote standing exactly as they were:
+ * nothing is maintaining them, and nothing is removing them either. A router
+ * with bm-wanbind 2.3.x is not that at all - that daemon owns priorities
+ * 19000-19999 and removes every rule in the band no `config direct` section
+ * claims, and the rules a 3.3.x module wrote have no sections. So it is taking
+ * them off, on a timer, and telling somebody the rules still stand would report
+ * health about a router that is quietly losing its bindings.
+ */
+export function olderDaemonRunning(runtime: BindingRuntime): boolean {
+  const agent = capability(runtime)
+  return agent.usable && agent.provides.includes('binding') && !hasBindingDaemon(agent)
+}
+
+/**
  * One line in the event trail: the per-instance ring when it belongs to an
  * instance, the module-wide one when it does not.
  *

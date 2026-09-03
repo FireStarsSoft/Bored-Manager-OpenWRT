@@ -6,8 +6,10 @@ opens nearly full screen - both of them app features this module can only opt
 into. OpenWRT 2.x and 3.0.0 to 3.2.1 need **0.4.1**, for the `statusCards` and
 `meter` blocks, badge columns and forms that open pre-filled; every one of them
 needs OpenWrt **25.12** on the router. The 1.0.x line needs **0.3.3**, for the
-`subnav` and `note` blocks and the `file` form input. From 3.0.0, PPPoE pools
-also need the router packages at **2.x** - the rest of the module does not.
+`subnav` and `note` blocks and the `file` form input. From 3.0.0 PPPoE pools
+need the router packages at **2.x**, and from **3.4.0** WAN Binding needs them
+at **2.4.0** - the dashboard, the interfaces and the device table still work
+without them, and nothing else does.
 Which release a module build installs is pinned in `main/agent/manifest.ts`.
 
 ## 3.4.0

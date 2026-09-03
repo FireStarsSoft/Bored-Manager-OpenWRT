@@ -69,13 +69,15 @@
  */
 import { safeUciWord, wanbindSection } from '../uci'
 import {
-  wanbindBind,
+  wanbindBindMany,
+  wanbindBindings,
   wanbindInstanceSet,
   type AgentDeps,
+  type WanbindBindSpec,
   type WanbindInstanceSpec
 } from '../agent'
 import type { BindingInstanceRecord, DirectBindingRecord } from '../store'
-import { agentDeps, daemonReady, recordEvent } from './runtime'
+import { agentDeps, daemonReady, olderDaemonRunning, recordEvent } from './runtime'
 import type { BindingRuntime } from './types'
 
 /** Which half a record belongs to. The two are worded differently throughout. */
@@ -108,6 +110,16 @@ export interface HandoverOutcome {
    * router that has them.
    */
   stalled: { instances: number; bindings: number }
+  /**
+   * The router has a bm-wanbind, and it is one this module cannot drive.
+   *
+   * Only meaningful beside a non-zero `stalled`, and it changes what that
+   * sentence may claim: a 2.3.x daemon owns the one-to-one priority band and
+   * removes every rule in it that no section claims, which is every rule a
+   * 3.3.x module wrote. On that router the records are not merely unmaintained,
+   * they are being taken off.
+   */
+  sweeping: boolean
 }
 
 /** What a router with nothing left to hand over answers with. */
@@ -115,14 +127,16 @@ export const NOTHING_HANDED_OVER: HandoverOutcome = {
   wrote: 0,
   dropped: 0,
   stranded: [],
-  stalled: { instances: 0, bindings: 0 }
+  stalled: { instances: 0, bindings: 0 },
+  sweeping: false
 }
 
 const NOTHING: HandoverOutcome = {
   wrote: 0,
   dropped: 0,
   stranded: [],
-  stalled: { instances: 0, bindings: 0 }
+  stalled: { instances: 0, bindings: 0 },
+  sweeping: false
 }
 
 /**
@@ -161,7 +175,8 @@ export async function handoverPending(runtime: BindingRuntime): Promise<Handover
       wrote: 0,
       dropped: 0,
       stranded: [],
-      stalled: { instances: data.instances.length, bindings: data.direct.length }
+      stalled: { instances: data.instances.length, bindings: data.direct.length },
+      sweeping: olderDaemonRunning(runtime)
     }
   }
 
@@ -171,7 +186,8 @@ export async function handoverPending(runtime: BindingRuntime): Promise<Handover
     wrote: 0,
     dropped: 0,
     stranded: [],
-    stalled: { instances: 0, bindings: 0 }
+    stalled: { instances: 0, bindings: 0 },
+    sweeping: false
   }
 
   // Checked between records for the reason every mutation in this folder checks
@@ -182,10 +198,8 @@ export async function handoverPending(runtime: BindingRuntime): Promise<Handover
 
   // Both lists are copied before they are walked, because forgetting a record
   // replaces the array being walked with a shorter one.
-  for (const record of [...data.direct]) {
-    if (!alive()) return outcome
-    await handOverBinding(runtime, deps, record, outcome)
-  }
+  await handOverBindings(runtime, deps, [...data.direct], outcome, alive)
+
   for (const record of [...data.instances]) {
     if (!alive()) return outcome
     await handOverInstance(runtime, deps, record, outcome)
@@ -237,51 +251,161 @@ function refusal(
  * One one-to-one binding, offered with the priority and the table its rule was
  * written at.
  */
-async function handOverBinding(
+/** How many specs `bind_many` takes in one call, on the daemon's own limit. */
+const HANDOVER_CHUNK = 200
+
+/**
+ * Every one-to-one binding this module still holds, offered in batches.
+ *
+ * One call per two hundred rather than one per record, and at the size this
+ * release is about that is the difference between three round trips and five
+ * hundred - each of which would be its own commit to the router's flash and its
+ * own reconcile pass, while the page showed nothing.
+ *
+ * The verdict on each record is unchanged and is still per record: the reply
+ * carries a row for every spec sent, and a batch that succeeded as a whole can
+ * still hold a binding the daemon's own reader refused. A record whose row says
+ * so is kept and named, exactly as it was when each was its own call.
+ *
+ * A batch that fails as a whole strands every record in it with the transport's
+ * own sentence and leaves them all in the document, so the next tick offers
+ * them again. Every spec carries the numbers the rule already standing was
+ * written at, so re-offering one the router already has is a call it finds
+ * nothing to change in - which is what makes an interrupted handover a retry
+ * rather than a repair.
+ */
+async function handOverBindings(
   runtime: BindingRuntime,
   deps: AgentDeps,
+  records: DirectBindingRecord[],
+  outcome: HandoverOutcome,
+  alive: () => boolean
+): Promise<void> {
+  const pending: Array<{ record: DirectBindingRecord; id: string; spec: WanbindBindSpec }> = []
+
+  for (const record of records) {
+    const id = wanbindSection(record.id)
+
+    // The last gate before either name reaches a section on the router, checked
+    // here rather than trusted from the create gate that let the record in: a
+    // per-router document can be edited by hand, and an allowlist two files
+    // away is not a guarantee.
+    if (!safeUciWord(record.wan) || (record.lan !== '' && !safeUciWord(record.lan))) {
+      strand(
+        outcome,
+        'binding',
+        id,
+        record.name,
+        `it names an interface this module will not write to the router's configuration ("${record.wan}")`
+      )
+      continue
+    }
+
+    pending.push({
+      record,
+      id,
+      spec: {
+        id,
+        name: record.name,
+        ...(record.target.kind === 'ip' ? { ip: record.target.ip } : { mac: record.target.mac }),
+        wan: record.wan,
+        ...(record.lan ? { lan: record.lan } : {}),
+        whenDown: record.whenDown,
+        // Stamped. See the note at the top: these are the numbers the rule
+        // already on the router was written at, and sending them is what makes
+        // the daemon adopt that rule instead of writing a second one somewhere
+        // else.
+        pref: record.pref,
+        table: record.table,
+        enabled: record.enabled
+      }
+    })
+  }
+
+  for (let at = 0; at < pending.length; at += HANDOVER_CHUNK) {
+    if (!alive()) return
+
+    const batch = pending.slice(at, at + HANDOVER_CHUNK)
+    const reply = await wanbindBindMany(deps, batch.map((one) => one.spec))
+
+    if (!alive()) return
+
+    if (!reply.ok || !reply.data || reply.data.ok === false) {
+      const why =
+        reply.data?.reason ?? reply.error ?? 'the router did not say why it would not take them'
+
+      for (const one of batch) strand(outcome, 'binding', one.id, one.record.name, why)
+      continue
+    }
+
+    const rows = new Map(reply.data.results.map((row) => [row.id, row]))
+
+    // The batch reply says what was *written*, and written is not the same as
+    // kept: the daemon's own configuration reader runs afterwards, and a
+    // section it throws out is on the router and is still not a binding - it
+    // installs no rule and seats nobody. The single form got that verdict back
+    // in the same reply; the batch form does not carry it, so the list is read
+    // once per batch rather than once per record.
+    //
+    // A list this module cannot read is not taken as approval. Every record in
+    // the batch is kept and named, and the next tick offers them again - which
+    // costs one repeated call and never drops a record on a silence.
+    const listed = await wanbindBindings(deps)
+    const held = new Map(
+      (listed.ok && listed.data ? listed.data.bindings : []).map((row) => [row.id, row])
+    )
+    const readable = listed.ok && Boolean(listed.data)
+
+    for (const one of batch) {
+      const row = rows.get(one.id)
+
+      if (!row) {
+        strand(
+          outcome,
+          'binding',
+          one.id,
+          one.record.name,
+          'the router accepted the batch but did not say what it did with it'
+        )
+        continue
+      }
+
+      if (!row.ok) {
+        strand(outcome, 'binding', one.id, one.record.name, row.reason || 'the router refused it')
+        continue
+      }
+
+      outcome.wrote += 1
+
+      if (!readable) {
+        strand(
+          outcome,
+          'binding',
+          one.id,
+          one.record.name,
+          'the router took it and then would not list what it now holds, so this module cannot tell whether the section it wrote is one the daemon will act on'
+        )
+        continue
+      }
+
+      const refused = refusal({ ok: true, error: null }, held.get(one.id))
+
+      if (refused) {
+        strand(outcome, 'binding', one.id, one.record.name, refused)
+        continue
+      }
+
+      forgetOne(runtime, one.record, outcome)
+    }
+  }
+}
+
+/** Drop one record the router has confirmed, and say so in the trail. */
+function forgetOne(
+  runtime: BindingRuntime,
   record: DirectBindingRecord,
   outcome: HandoverOutcome
-): Promise<void> {
-  const id = wanbindSection(record.id)
-
-  // The last gate before either name reaches a section on the router, checked
-  // here rather than trusted from the create gate that let the record in: a
-  // per-router document can be edited by hand, and an allowlist two files away
-  // is not a guarantee.
-  if (!safeUciWord(record.wan) || (record.lan !== '' && !safeUciWord(record.lan))) {
-    strand(
-      outcome,
-      'binding',
-      id,
-      record.name,
-      `it names an interface this module will not write to the router's configuration ("${record.wan}")`
-    )
-    return
-  }
-
-  const written = await wanbindBind(deps, {
-    id,
-    name: record.name,
-    ...(record.target.kind === 'ip' ? { ip: record.target.ip } : { mac: record.target.mac }),
-    wan: record.wan,
-    ...(record.lan ? { lan: record.lan } : {}),
-    whenDown: record.whenDown,
-    // Stamped. See the note at the top: these are the numbers the rule already
-    // on the router was written at, and sending them is what makes the daemon
-    // adopt that rule instead of writing a second one somewhere else.
-    pref: record.pref,
-    table: record.table,
-    enabled: record.enabled
-  })
-
-  if (written.ok) outcome.wrote += 1
-  const refused = refusal(written, written.data?.binding)
-  if (refused) {
-    strand(outcome, 'binding', id, record.name, refused)
-    return
-  }
-
+): void {
   forget(
     runtime,
     'binding',
@@ -418,71 +542,4 @@ function forget(
   // record that no longer exists, and a line written into it would be a line
   // about something the reader can find nowhere else on the page.
   recordEvent(runtime, 'handover', message)
-}
-
-// --------------------------------------------------------------- the sentence
-
-const NOUN: Record<HandoverKind, { one: string; many: string }> = {
-  instance: { one: 'binding instance', many: 'binding instances' },
-  binding: { one: 'one-to-one binding', many: 'one-to-one bindings' }
-}
-
-/**
- * What has stopped happening, per half, on a router with no daemon to hand
- * these to.
- *
- * Stated as what is no longer maintained rather than as what the rules are
- * doing, because the rules are still standing and still steering traffic: the
- * failure is that nothing reacts to a change any more, and a sentence that said
- * "these are not working" about addresses that are working perfectly well would
- * send somebody hunting for a fault that is not there.
- */
-const UNMAINTAINED: Record<HandoverKind, string> = {
-  instance:
-    'a device that joins one of those LANs is given no WAN of its own, and a WAN that fails is not routed around',
-  binding:
-    'a device that picks up a different address is not followed to it, and a WAN that fails is not routed around'
-}
-
-/**
- * The sentence one half's page carries beneath its table, or empty.
- *
- * Kept out of `lastError` by the caller for the reason the snapshot's own
- * `notice` exists: neither of these is a call that failed, and a page whose
- * error panel reported them would be blaming a router that is answering
- * perfectly.
- */
-export function handoverNotice(outcome: HandoverOutcome, kind: HandoverKind): string {
-  const noun = NOUN[kind]
-  const parts: string[] = []
-
-  const stalled = kind === 'instance' ? outcome.stalled.instances : outcome.stalled.bindings
-  if (stalled > 0) {
-    const one = stalled === 1
-    parts.push(
-      `This module still holds ${stalled} ${one ? noun.one : noun.many} it created before ` +
-        `the router kept its own. The ip rules ${one ? 'it was' : 'they were'} given still ` +
-        `stand exactly as they were, but nothing is maintaining them now: ${UNMAINTAINED[kind]}. ` +
-        `Installing the router packages hands ${one ? 'it' : 'them'} over by itself, and ` +
-        'nothing here has to be pressed.'
-    )
-  }
-
-  // Named one at a time, newest problem or not: a count on its own tells
-  // somebody to be worried without telling them what about, and the reason is
-  // the only thing that can be acted on.
-  const refused = outcome.stranded.filter((entry) => entry.kind === kind)
-  const first = refused[0]
-  if (first) {
-    const one = refused.length === 1
-    parts.push(
-      `${refused.length} ${one ? noun.one : noun.many} created by this module ` +
-        `${one ? 'has' : 'have'} not been taken over by the router - "${first.name}" ` +
-        `${first.reason}. This module writes no rule on a router that keeps its own ` +
-        `binding, so nothing on either side is maintaining ${one ? 'it' : 'them'} meanwhile. ` +
-        'The handover is retried on every pass, so fixing the reason is all that is needed.'
-    )
-  }
-
-  return parts.join(' ')
 }

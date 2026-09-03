@@ -349,7 +349,10 @@ export function buildReadiness(facts: ProbeFacts): OpenWrtCapabilities {
     // offering a form that would refuse is worse than one saying nothing.
     missingFor: {
       pppoe: canInstall && missingGroups.has('pppoe'),
-      binding: canInstall && (missingGroups.has('ipfull') || missingGroups.has('dnsmasq'))
+      // dnsmasq alone. `ip-full` was here while this module wrote the rules
+      // itself; the daemon writes them over netlink, so offering it on the
+      // binding tab pointed at a package that would not have helped.
+      binding: canInstall && missingGroups.has('dnsmasq')
     },
     canInstall
   }

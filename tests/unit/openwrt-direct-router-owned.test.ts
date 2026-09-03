@@ -291,7 +291,9 @@ describe('the bindings this module wrote, on the day the router learns to keep t
     const outcome = await run.run()
 
     expect(outcome).toMatchObject({ wrote: 1, dropped: 1, stranded: [] })
-    const sent = run.daemon.payloads('bind')
+    const sent = (run.daemon.payloads('bind_many')[0]?.bindings ?? []) as Array<
+      Record<string, unknown>
+    >
     expect(sent).toHaveLength(1)
     expect(sent[0]?.id).toBe(SECTION)
     // Stamped, not allocated. The rule on the router right now was written at
@@ -318,7 +320,7 @@ describe('the bindings this module wrote, on the day the router learns to keep t
     await run.run()
     await run.run()
 
-    expect(run.daemon.count('bind')).toBe(1)
+    expect(run.daemon.count('bind_many')).toBe(1)
     expect(kept(run)).toEqual([])
     // The claim on the WAN's routing table goes with it. The `option ip4table`
     // stays on the router - the daemon never takes one back either - but which
