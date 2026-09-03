@@ -40,13 +40,34 @@ function expiresAt(lease: Lease): number {
   return lease.expires * 1_000
 }
 
+/**
+ * What the binding half is asked, for the one table that is about devices
+ * rather than about bindings.
+ *
+ * Declared here rather than imported so this file does not depend on
+ * `wanbind/`: the dashboard's device table is the router's lease list with a
+ * column saying where each machine goes out, and where it goes out is the one
+ * thing only the daemon knows.
+ */
+export interface DeviceBindingReader {
+  /** Whether the daemon has answered at all. */
+  answered(): boolean
+  /** Address -> the WAN it leaves by, and whose decision that was. */
+  deviceView(): Map<string, { wan: string; instanceId: string; instanceName: string }>
+  /** Addresses an instance is holding out of its pool by hand. */
+  heldKeys(): Set<string>
+  /** LAN -> the instance serving it, and whether it is running. */
+  instanceLans(): Map<string, { id: string; running: boolean }>
+}
+
 /** Builders for potentially-thousands-row invoke tables; every source is RAM. */
 export class Queries {
   constructor(
     private model: () => RouterModel | null,
     private uciTables: () => Record<string, number>,
     private config: ConfigStore,
-    private store: HostStore
+    private store: HostStore,
+    private binding: DeviceBindingReader
   ) {}
 
 
@@ -85,7 +106,21 @@ export class Queries {
     }
 
     const byName = ifaceIndex(model)
-    const configuredLans = new Set(data.instances.map((instance) => instance.lan))
+
+    // From the daemon, not from this module's own document.
+    //
+    // The instances live on the router now, so `data.instances` is empty on
+    // every 3.4.0 machine - and with it empty this table drew every client on
+    // the LAN as unmanaged, whichever WAN it was actually leaving by, because
+    // the only other source was a rule window that excludes the one-to-one
+    // band entirely.
+    const answered = this.binding.answered()
+    const seats = answered ? this.binding.deviceView() : new Map()
+    const held = answered ? this.binding.heldKeys() : new Set<string>()
+    const lans = answered ? this.binding.instanceLans() : new Map()
+    const configuredLans = new Set(
+      answered ? [...lans.keys()] : data.instances.map((instance) => instance.lan)
+    )
     const lanIfaces = model.ifaces
       .filter(
         (iface) =>
@@ -106,17 +141,25 @@ export class Queries {
             iface.ipv4 != null &&
             sameSubnet(iface.ipv4.addr, lease.ip, iface.ipv4.mask)
         )?.name ?? ''
-      const instance = data.instances.find((entry) => entry.lan === lan)
-      const assignment = assignmentByIp.get(lease.ip)
+      const instance = answered
+        ? lans.get(lan)
+        : data.instances.find((entry) => entry.lan === lan)
+
+      // The daemon's answer where there is one, and the rule window only as a
+      // fallback for a router that has not answered yet.
+      const seat = seats.get(lease.ip)
+      const assignment = seat ?? assignmentByIp.get(lease.ip)
       const wan = assignment?.wan ?? ''
       const wanIface = wan ? byName.get(wan) : undefined
       const status = assignment
         ? !wanIface || ifaceStatus(wanIface) !== 'up'
           ? 'wan-error'
           : 'bound'
-        : instance?.running
-          ? 'waiting'
-          : 'unmanaged'
+        : held.has(lease.ip)
+          ? 'held'
+          : instance?.running
+            ? 'waiting'
+            : 'unmanaged'
       return {
         host: lease.host,
         mac: lease.mac,

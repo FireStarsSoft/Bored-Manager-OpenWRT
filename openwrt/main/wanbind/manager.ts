@@ -164,6 +164,46 @@ export class BindingManager {
     return wanted ? rows.filter((row) => row.instanceId === wanted) : rows
   }
 
+  /**
+   * Whether the daemon has answered at all, and therefore whether the two
+   * readers below are describing this router or nothing.
+   *
+   * A page that could not tell "nobody is seated" from "nobody has asked yet"
+   * would report an unread router as an empty one, which for the device table
+   * means every client on the LAN drawn as unmanaged.
+   */
+  answered(): boolean {
+    return this.runtime.cache.fetchedAt > 0 && this.runtime.cache.info != null
+  }
+
+  /** Addresses an instance is holding out of its pool by hand. */
+  heldKeys(): Set<string> {
+    const out = new Set<string>()
+
+    for (const row of this.runtime.cache.waiting) {
+      if (row.held && row.ip) out.add(row.ip)
+    }
+
+    return out
+  }
+
+  /** Every instance the router has, by the LAN it serves. */
+  instanceLans(): Map<string, { id: string; running: boolean }> {
+    const out = new Map<string, { id: string; running: boolean }>()
+    const info = this.runtime.cache.info
+
+    if (!info) return out
+
+    const running = new Set(info.instances.filter((one) => one.ready).map((one) => one.id))
+
+    for (const config of info.configured) {
+      if (!config.lan || out.has(config.lan)) continue
+      out.set(config.lan, { id: config.id, running: running.has(config.id) })
+    }
+
+    return out
+  }
+
   directRows(): DirectRow[] {
     return viewDirectRows(this.runtime)
   }

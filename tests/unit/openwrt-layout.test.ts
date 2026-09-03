@@ -113,7 +113,14 @@ describe('a rule change under a running router', () => {
     const store = new HostStore(harness.ctx, () => config.effectiveRules())
     const model = structuredClone(MODEL)
     model.rules = [{ pref: DEFAULT_RULES.rulePrefBase, from: '192.168.1.20/32', table: 10_001 }]
-    const queries = new Queries(() => model, () => ({}), config, store)
+    // No daemon in this fixture: the table falls back to what the rules say,
+    // which is what it does on a router that has not answered yet.
+    const queries = new Queries(() => model, () => ({}), config, store, {
+      answered: () => false,
+      deviceView: () => new Map(),
+      heldKeys: () => new Set<string>(),
+      instanceLans: () => new Map()
+    })
 
     expect(config.effectiveRules().tableBase).toBe(12_000)
     expect(queries.deviceRows()[0]).toMatchObject({ ip: '192.168.1.20', wan: 'pd00001' })

@@ -178,7 +178,16 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
     () => service.latest,
     () => service.uciTables,
     config,
-    store
+    store,
+    // Read lazily, the way the capability latch is: the device table is built
+    // on demand and has to see whatever the binding half last heard, not what
+    // it had heard when this container was assembled.
+    {
+      answered: () => binding.answered(),
+      deviceView: () => binding.deviceView(),
+      heldKeys: () => binding.heldKeys(),
+      instanceLans: () => binding.instanceLans()
+    }
   )
   // No topology lock any more, and nothing to lock. The settings this editor
   // holds were once the priority bands the rules on the router had been written

@@ -407,7 +407,15 @@ describe('the interface index every reader shares', () => {
       () => model,
       () => ({}),
       config,
-      store
+      store,
+      // No daemon in this fixture: the table falls back to what the rules say,
+      // which is what it does on a router that has not answered yet.
+      {
+        answered: () => false,
+        deviceView: () => new Map(),
+        heldKeys: () => new Set<string>(),
+        instanceLans: () => new Map()
+      }
     )
 
     queries.deviceRows()
