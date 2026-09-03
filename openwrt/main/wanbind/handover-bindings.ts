@@ -106,10 +106,11 @@ const HANDOVER_BYTES = 4_000
 /**
  * Every one-to-one binding this module still holds, offered in batches.
  *
- * One call per two hundred rather than one per record, and at the size this
- * release is about that is the difference between three round trips and five
+ * One call per batch rather than one per record, and at the size this release
+ * is about that is the difference between about twenty round trips and five
  * hundred - each of which would be its own commit to the router's flash and its
- * own reconcile pass, while the page showed nothing.
+ * own reconcile pass, while the page showed nothing. A batch is bounded by
+ * bytes rather than by count; see `HANDOVER_BYTES`.
  *
  * The verdict on each record is unchanged and is still per record: the reply
  * carries a row for every spec sent, and a batch that succeeded as a whole can

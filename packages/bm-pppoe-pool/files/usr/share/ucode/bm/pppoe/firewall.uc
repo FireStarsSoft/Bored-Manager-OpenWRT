@@ -343,7 +343,13 @@ export function reconcile(pools, retiring) {
 
 		uci.delete(FIREWALL, section, 'network');
 
-		if (!wanbindPresent()) {
+		// Empty means empty in both lists. `devices` here is what is left after
+		// this daemon's own patterns were taken out, so anything in it is a
+		// device the operator put there by hand - and deleting the zone would
+		// take it with them, along with whatever else they had set on the zone.
+		// A zone with no networks and no devices of anybody's is the one this
+		// daemon made and can remove.
+		if (!length(devices) && !wanbindPresent()) {
 			uci.delete(FIREWALL, section);
 			notice('removed the empty firewall zone ' + name);
 		}

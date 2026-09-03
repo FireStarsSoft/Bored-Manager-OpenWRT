@@ -3,7 +3,6 @@ import type {
   IpRule,
   Lease,
   PppoeErrorCode,
-  PppoeListResult,
   ProcNetDevSnapshot,
   RouterSystemState
 } from './types'
@@ -217,62 +216,6 @@ export function parseProcNetDev(text: string): ProcNetDevSnapshot {
 function nonNegative(value: unknown): number {
   const parsed = typeof value === 'number' ? value : Number(value)
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
-}
-
-function splitPppoeLine(line: string): string[] | null {
-  if (line.includes('\t')) return line.split(/\t+/).map((part) => part.trim())
-  if (line.includes(',')) return line.split(',').map((part) => part.trim())
-  if (line.includes(';')) return line.split(';').map((part) => part.trim())
-  if (line.includes('|')) return line.split('|').map((part) => part.trim())
-  if (/\s/.test(line)) return line.trim().split(/\s+/)
-  return null
-}
-
-/** Parse an uploaded/pasted PPPoE account list without retaining it anywhere. */
-export function parsePppoeList(text: string): PppoeListResult {
-  const rows: PppoeListResult['rows'] = []
-  const errors: PppoeListResult['errors'] = []
-  const duplicates: string[] = []
-  const seen = new Set<string>()
-  const duplicateSeen = new Set<string>()
-
-  for (const [offset, raw] of String(text ?? '').split(/\r?\n/).entries()) {
-    const lineNumber = offset + 1
-    const line = raw.trim()
-    if (!line || line.startsWith('#')) continue
-    const fields = splitPppoeLine(line)
-    if (!fields || fields.length < 2 || fields.length > 3) {
-      errors.push({
-        line: lineNumber,
-        reason: 'expected username and password, with an optional VLAN'
-      })
-      continue
-    }
-    const [user = '', pass = '', vlanRaw = ''] = fields
-    if (user.length < 1 || user.length > 64) {
-      errors.push({ line: lineNumber, reason: 'username must contain 1-64 characters' })
-      continue
-    }
-    if (pass.length < 1 || pass.length > 64) {
-      errors.push({ line: lineNumber, reason: 'password must contain 1-64 characters' })
-      continue
-    }
-    let vlan: number | undefined
-    if (vlanRaw !== '') {
-      vlan = Number(vlanRaw)
-      if (!Number.isInteger(vlan) || vlan < 1 || vlan > 4094) {
-        errors.push({ line: lineNumber, reason: 'VLAN must be a whole number from 1 to 4094' })
-        continue
-      }
-    }
-    if (seen.has(user) && !duplicateSeen.has(user)) {
-      duplicateSeen.add(user)
-      duplicates.push(user)
-    }
-    seen.add(user)
-    rows.push(vlan == null ? { user, pass } : { user, pass, vlan })
-  }
-  return { rows, errors, duplicates }
 }
 
 /** Quote one UCI batch value using POSIX single-quote escaping. */

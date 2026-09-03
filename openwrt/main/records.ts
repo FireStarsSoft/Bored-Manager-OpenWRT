@@ -35,14 +35,6 @@ export interface ManagedLayout {
   zoneName: string
 }
 
-export const MANAGED_LAYOUT_KEYS = [
-  'tableBase',
-  'rulePrefBase',
-  'catchAllPrefBase',
-  'catchAllTable',
-  'zoneName'
-] as const satisfies ReadonlyArray<keyof ManagedLayout>
-
 /** Copy exactly the five, so a record never carries a snapshot of every rule. */
 export function managedLayout(rules: ManagedLayout): ManagedLayout {
   return {

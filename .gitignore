@@ -48,3 +48,7 @@ luci-src/
 rig/work/
 rig/out/
 rig/.secrets/
+
+# gettext and editor backups, for the same reason as *.uc.bc above: build or
+# tool output that `git add -A` would otherwise sweep in.
+*~

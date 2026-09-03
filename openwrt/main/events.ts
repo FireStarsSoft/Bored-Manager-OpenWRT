@@ -67,7 +67,21 @@ export class EventLog<TData extends EventStoreData = EventStoreData> {
 
   constructor(
     private ctx: Pick<ModuleContext, 'emit' | 'log'>,
-    private store: EventStore<TData>
+    private store: EventStore<TData>,
+    /**
+     * Instance ids to the names a person gave them, asked of whoever holds
+     * them now.
+     *
+     * The ring keys its rows on an id, and the names used to sit beside them in
+     * the same document. From 3.4.0 the router keeps the instances, so that
+     * half of the document is empty on every machine - and this column went
+     * back to printing `bmi_a3f9k2` at somebody who had called it "Office LAN",
+     * on the one table whose whole job is to say what happened and to what.
+     *
+     * Injected lazily rather than read from a cache, because the answer is a
+     * round trip old at best and this is drawn on demand.
+     */
+    private instanceNames: () => ReadonlyMap<string, string> = () => new Map()
   ) {}
 
   /**
@@ -114,7 +128,12 @@ export class EventLog<TData extends EventStoreData = EventStoreData> {
         ? Math.min(Math.trunc(limitRaw), DEFAULT_ROW_LIMIT)
         : DEFAULT_ROW_LIMIT
     const data = this.store.read()
+    // The router's names first, and the document's only for a machine still
+    // holding records from before 3.4.0 - which is exactly the window where
+    // both can be non-empty.
     const names = new Map(data.instances.map((instance) => [instance.id, instance.name]))
+
+    for (const [id, name] of this.instanceNames()) names.set(id, name)
     const binding: ModuleEventRow[] = []
     const module: ModuleEventRow[] = []
 

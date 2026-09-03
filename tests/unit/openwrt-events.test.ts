@@ -102,6 +102,26 @@ describe('module event log', () => {
     expect(new Set(rows.map((row) => row.id)).size).toBe(3)
   })
 
+  it('names the instance from the router, which is where the names are now', () => {
+    // The state every 3.4.0 machine is actually in: the document holds the ring
+    // and no instances at all, because the router keeps those. Reading names
+    // out of the document printed `bmi_a3f9k2` at somebody who had called it
+    // Office LAN, on the one table whose job is to say what happened and to
+    // what - while the live panel on the same page had the name.
+    const store = memoryStore({
+      instances: [],
+      events: [['bmi_a3f9k2', 1_000, 'assigned', 'aa:bb went to pd00001']],
+      moduleEvents: []
+    })
+    const log = new EventLog(
+      { log: () => {}, emit: () => {} },
+      store,
+      () => new Map([['bmi_a3f9k2', 'Office LAN']])
+    )
+
+    expect(log.rows('')[0]).toMatchObject({ source: 'binding', instance: 'Office LAN' })
+  })
+
   it('names the origin as its own field, not only inside the rendered line', () => {
     const { log, emits } = recorder()
 

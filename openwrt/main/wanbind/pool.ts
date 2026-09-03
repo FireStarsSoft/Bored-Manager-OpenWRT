@@ -85,18 +85,6 @@ export function poolWans(
   return result
 }
 
-/** Whether this WAN could take a client right now. */
-export function wanUsable(wan: PoolWan, warnUptimeSec: number): boolean {
-  return (
-    wan.table != null &&
-    wan.up &&
-    !wan.pending &&
-    Boolean(wan.ipv4) &&
-    !wan.errorCode &&
-    wan.uptimeSec >= warnUptimeSec
-  )
-}
-
 /**
  * The same question as a word instead of a boolean, because a surface has to
  * say which of the three ways a WAN is unusable this one is: still dialing,

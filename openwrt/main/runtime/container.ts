@@ -61,7 +61,9 @@ export interface OpenWrtRuntime {
 export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
   const config = new ConfigStore(ctx)
   const store = new HostStore(ctx, () => config.effectiveRules())
-  const events = new EventLog<OwrtHostData>(ctx, store)
+  // The names come from `binding`, which is built below - reached lazily, the
+  // same way the two automations reach each other.
+  const events = new EventLog<OwrtHostData>(ctx, store, () => binding.instanceNames())
   const jobs = new Jobs<OwrtHostData>(ctx, store)
 
   let pppoe!: PppoeManager

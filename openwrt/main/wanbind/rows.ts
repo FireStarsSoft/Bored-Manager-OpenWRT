@@ -50,10 +50,6 @@ import type {
 type InstanceState = WanbindInfo['instances'][number]
 type RouterBinding = WanbindBindingsReply['bindings'][number]
 
-export function emptyDeviceSummary(): BindingDeviceSummary {
-  return { total: 0, bound: 0, waiting: 0 }
-}
-
 // -------------------------------------------------------------- instance rows
 
 /**

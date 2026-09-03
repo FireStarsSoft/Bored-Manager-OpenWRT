@@ -399,6 +399,29 @@ uci.set('dhcp', 'lan', 'limit', '1000');
 
 let leaseRaised = compute({});
 
+// A range-scoped instance raises the requirement to cover its range - and does
+// not also charge the router for the clients already inside it. Summing the two
+// made an ordinary router read `unstable` against a ceiling it was inside, with
+// a fix that could never clear the row.
+baseline(2097152, 1600000);
+uci.set('dhcp', 'cfg01', 'dnsmasq');
+uci.set('dhcp', 'cfg01', 'dhcpleasemax', '150');
+uci.set('dhcp', 'lan', 'dhcp');
+uci.set('dhcp', 'lan', 'interface', 'lan');
+uci.set('dhcp', 'lan', 'limit', '150');
+uci.set('bm_wanbind', 'home', 'instance');
+uci.set('bm_wanbind', 'home', 'lan', 'lan');
+uci.set('bm_wanbind', 'home', 'range_from', '192.168.1.100');
+uci.set('bm_wanbind', 'home', 'range_to', '192.168.1.249');
+leases(40);
+
+let ranged = compute({});
+
+check('a range of 150 is what the DHCP ceiling has to cover', ranged.needed.leaseMax,
+	150 + K.LEASE_HEADROOM);
+check('and 40 leases inside it are not charged a second time',
+	ranged.needed.leaseMax < (150 + 40), true);
+
 check('a raised ceiling is read', leaseRaised.software.leaseMax, 1000);
 check('and the row passes', levelOf(leaseRaised, 'lease-max'), 'pass');
 

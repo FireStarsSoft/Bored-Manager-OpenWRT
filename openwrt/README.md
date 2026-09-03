@@ -1450,7 +1450,7 @@ wrong.
 | Data | Location | Notes |
 |---|---|---|
 | Module rules and hint preference | `data/user-settings/module-config/openwrt.json` | Shared preference document; no credentials. |
-| Sticky MAC hints, binding events, PPPoE and router events, finished jobs | `data/module-data/openwrt/<hostKey>.json` | Per router; kept below the 512 KiB module-data limit. A file written by an earlier release is read as-is - the batch records a 2.x file carries are deliberately not read, because the router's own pool records replaced them as the truth. Neither the instances nor the one-to-one bindings are here any more: both are sections in `/etc/config/bm_wanbind`, written by the daemon. A file from before 3.4.0 that still holds them is read once, handed to the daemon in batches of two hundred, and the records dropped only as the router confirms each one. The two event rings are kept apart so binding churn cannot push out the rarer PPPoE and router entries, and each binding instance gets its own share of its ring so one busy LAN cannot empty a quiet instance's ring. |
+| Sticky MAC hints, binding events, PPPoE and router events, finished jobs | `data/module-data/openwrt/<hostKey>.json` | Per router; kept below the 512 KiB module-data limit. A file written by an earlier release is read as-is - the batch records a 2.x file carries are deliberately not read, because the router's own pool records replaced them as the truth. Neither the instances nor the one-to-one bindings are here any more: both are sections in `/etc/config/bm_wanbind`, written by the daemon. A file from before 3.4.0 that still holds them is read once, handed to the daemon in batches, and the records dropped only as the router confirms each one. The two event rings are kept apart so binding churn cannot push out the rarer PPPoE and router entries, and each binding instance gets its own share of its ring so one busy LAN cannot empty a quiet instance's ring. |
 | Pool records - members, credentials, zone, table base | `/etc/config/bm_pppoe` on OpenWRT | The daemon's own; `0600`; snapshotted and restored by `bm-agent` with the rest. |
 | PPPoE interface definitions and passwords | `/etc/config/network` on OpenWRT | Router is the source of truth. |
 | Binding instances and one-to-one bindings | `/etc/config/bm_wanbind` on OpenWRT | The daemon's own. It writes the sections, the rules and the firewall forwardings, and re-checks all three every pass. |
@@ -1986,8 +1986,13 @@ Items 70 to 74 are what module 3.4.0 and packages 2.4.0 added on top of that.
   measured ceiling: `rig/` stands a router up with exactly that on it, and the
   constants the capacity report estimates from have not been fitted to a
   measurement yet. Both the report and `rig/README.md` say so.
-- Handing over the bindings this module wrote before 3.4.0 is done in batches of
-  two hundred, which is what `bind_many` takes in one call.
+- Handing over the bindings this module wrote before 3.4.0 is done in batches,
+  and the batch is bounded by bytes rather than by count: the whole call travels
+  as one argument on an SSH command line, and an SSH server refuses a command
+  longer than a few kilobytes before any shell runs. About two dozen a call, and
+  never more than the two hundred `bind_many` takes. A batch the router does not
+  answer at all is halved and tried again, so a number this module gets wrong
+  about somebody else's SSH server cannot cost a user their bindings.
 - PPPoE pools and WAN Binding both need the router packages, and neither has an
   SSH path any more. A router that cannot take them keeps the dashboard, the
   tables and the history; its PPPoE and its binding are its own to configure.
@@ -2069,7 +2074,7 @@ ui/widgets/*.json   the Overview widget spec
 | `main/parse.ts` | OpenWRT output parsers, and the UCI value quoting. |
 | `main/queries.ts` | Large table rows built from the in-memory model. |
 | `main/badges.ts` | One colour per meaning, for every status shown anywhere. |
-| `main/util.ts` | The helpers more than one of the folders above needs - among them `uciBoolean`, the module's single reader of a UCI boolean, and `ifaceDevices`, the netdev names a firewall zone written with `list device` has to be matched against. Both are here rather than beside any one caller because each had been written down several times and the copies had drifted. |
+| `main/util.ts` | The helpers more than one of the folders above needs - among them `uciBoolean`, the module's single reader of a UCI boolean. It is here rather than beside any one caller because it had been written down several times and the copies had drifted. |
 | `main/records.ts` | The stored shapes, and the caps on them, that two folders share. |
 | `main/types.ts` | The shapes the halves above pass between themselves. |
 

@@ -36,24 +36,6 @@ export function uciBoolean(value: string): boolean {
   return UCI_TRUE.has(value)
 }
 
-/**
- * The netdev names one interface answers to, for the firewall zone that names
- * its members by device rather than by network.
- *
- * Both are offered because they differ on exactly the interfaces this matters
- * on: a PPPoE uplink terminates on `eth1` and carries `pppoe-wan`, and a zone
- * may legitimately be written against either. Deduplicated because on every
- * other interface they are the same string, and an empty one is not a name.
- *
- * It is here rather than beside the classifier because the check that decides a
- * zone and the apply that re-reads it have to answer this question the same way
- * or the apply throws "the LAN firewall zone changed" on the very routers the
- * device lookup exists to unblock.
- */
-export function ifaceDevices(iface: IfaceState): string[] {
-  return [...new Set([iface.device, iface.l3Device].filter((device) => device !== ''))]
-}
-
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -183,52 +165,6 @@ export function subnetsOverlap(first: ParsedSubnet, second: ParsedSubnet): boole
   const prefix = Math.min(first.prefix, second.prefix)
   const mask = prefixMask(prefix)
   return ((first.network & mask) >>> 0) === ((second.network & mask) >>> 0)
-}
-
-/**
- * The smallest set of CIDR blocks that covers the inclusive range from `from`
- * to `to` exactly, ascending; `[]` when either address does not parse or the
- * range runs backwards.
- *
- * A binding instance scoped to an IP range still needs its fail-closed
- * catch-all, and it has to be written as exactly this set of source rules. The
- * single whole-LAN rule a LAN-scoped instance installs would blackhole every
- * device in the LAN that sits *outside* the range: the planner filters leases
- * to the range, so those devices never get an assignment rule to lift them back
- * out of the catch-all, and creating one range instance would have taken the
- * rest of the LAN off the internet with nothing on the page to say so.
- */
-export function rangeToCidrs(fromRaw: string, toRaw: string): string[] {
-  const from = ipv4ToInt(fromRaw)
-  const to = ipv4ToInt(toRaw)
-  if (from == null || to == null || from > to) return []
-  const blocks: string[] = []
-  let current = from
-  // 62 blocks is the worst an IPv4 range can need, so a loop still going at 64
-  // is a bug in the arithmetic below rather than an unusually awkward range -
-  // and this feeds a rule set, so spinning is the one outcome worse than
-  // refusing. The caller reads `[]` as "this range cannot be expressed", which
-  // is where the check refuses the instance.
-  for (let guard = 0; guard < 64; guard++) {
-    // Widen while the block still starts exactly here and still ends inside
-    // the range. `prefixMask` returns unsigned and `&` does not, hence the
-    // `>>> 0`: without it every address from 128.0.0.0 up compares as negative
-    // and the first block swallows the whole range. The size is plain
-    // arithmetic rather than a shift for the same reason - `1 << 32` is 1, so
-    // a /0 block would have measured one address instead of all of them.
-    let prefix = 32
-    while (prefix > 0) {
-      const wider = prefix - 1
-      const network = (current & prefixMask(wider)) >>> 0
-      if (network !== current || network + 2 ** (32 - wider) - 1 > to) break
-      prefix = wider
-    }
-    blocks.push(`${intToIpv4(current)}/${prefix}`)
-    const next = current + 2 ** (32 - prefix)
-    if (next > to) return blocks
-    current = next
-  }
-  return []
 }
 
 /**

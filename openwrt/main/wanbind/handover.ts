@@ -329,6 +329,18 @@ function forget(
     if (kind === 'instance') {
       data.instances = data.instances.filter((entry) => entry.id !== id)
       data.stickyMap = data.stickyMap.filter((entry) => entry[0] !== id)
+
+      // The history moves with the instance. Its ring is keyed on the id this
+      // module gave it, and the row drawer that shows it asks by the section
+      // the router now holds - so an upgraded instance kept every line of its
+      // own history and could not reach one of them.
+      const section = wanbindSection(id)
+
+      if (section !== id) {
+        data.events = data.events.map((entry) =>
+          entry[0] === id ? [section, entry[1], entry[2], entry[3]] : entry
+        )
+      }
     } else {
       data.direct = data.direct.filter((entry) => entry.id !== id)
     }

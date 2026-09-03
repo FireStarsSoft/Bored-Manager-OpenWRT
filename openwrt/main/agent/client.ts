@@ -51,9 +51,6 @@ export type AgentFeature = 'binding' | 'pppoe' | 'direct'
 /** ubus is local to the router; anything slower than this is a fault. */
 const CALL_TIMEOUT_MS = 30_000
 
-/** Downloading and installing packages, which is minutes rather than seconds. */
-export const LONG_CALL_TIMEOUT_MS = 300_000
-
 export interface AgentCallResult<T = Record<string, unknown>> {
   ok: boolean
   /** Parsed reply on success. */

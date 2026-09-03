@@ -532,7 +532,17 @@ function neededFor(load, hardware, software) {
 		gcThresh2: advice.gc_thresh2,
 		gcThresh3: advice.gc_thresh3,
 		conntrackMemCapped: advice.mem_capped,
-		leaseMax: clients + load.configured.rangedClients + K.LEASE_HEADROOM,
+		// The larger of the two, not their sum. `clients` is the live lease count
+		// and `rangedClients` is the addresses an instance's range claims - and
+		// on the router that raised this, they are the same addresses. Adding
+		// them charged the router twice for every client the range exists to
+		// seat, which on stock DHCP settings made an ordinary range-scoped
+		// instance read `unstable` against a ceiling it was already inside; and
+		// the fix offered raises the ceiling to about the range size, so it
+		// could never clear the row it was offered for.
+		leaseMax: ((load.configured.rangedClients > clients)
+			? load.configured.rangedClients
+			: clients) + K.LEASE_HEADROOM,
 		prefs: bindings,
 		pools: (wantPools > pools) ? int(wantPools) : pools
 	};
