@@ -5051,6 +5051,27 @@
                                       }
                                     },
                                     {
+                                      "key": "lan_local",
+                                      "label": "Keep LAN traffic local",
+                                      "input": "checkbox",
+                                      "initialFrom": {
+                                        "kind": "invoke",
+                                        "method": "bindingSettingsGet",
+                                        "path": "lan_local"
+                                      }
+                                    },
+                                    {
+                                      "key": "local_pref_base",
+                                      "label": "LAN-local rule priority base",
+                                      "input": "number",
+                                      "placeholder": "18000",
+                                      "initialFrom": {
+                                        "kind": "invoke",
+                                        "method": "bindingSettingsGet",
+                                        "path": "local_pref_base"
+                                      }
+                                    },
+                                    {
                                       "key": "direct_pref_base",
                                       "label": "One-to-one rule priority base",
                                       "input": "number",
@@ -5127,6 +5148,8 @@
                                         "New-WAN warning window - 0 to 3600 seconds, default 5. A WAN that has just come up is held in Warning this long and is not handed to a device, so a flapping uplink shows as flapping instead of being given out and taken back.",
                                         "WAN error grace - 0 to 3600 seconds, default 20. A failed WAN has to stay failed this long before an instance set to remap moves its client somewhere else.",
                                         "Lease release grace - 0 to 86400 seconds, default 120. How long a WAN stays reserved for a device after its DHCP lease disappears, so a machine that reboots comes back to the line it had.",
+                                        "Keep LAN traffic local - on by default. One rule per LAN, `to <that LAN> lookup main`, numbered from the LAN-local base and consulted before every binding rule, so a bound device still reaches the devices beside it. Off, a one-to-one rule sends every packet from that address out of its WAN - the ones for its own LAN included, which leave by the WAN port addressed to a private network that drops them.",
+                                        "LAN-local rule priority base - 1000 to 27999, default 18000. Sixty-four priorities from here, one per LAN. It has to end below the one-to-one base and below every instance's assignment base, because a rule read after a binding's own decides nothing.",
                                         "One-to-one rule priority base - 1000 to 28000, default 19000. A binding placed by hand takes one priority from a band 1000 wide starting here, and that band has to end before the assignment base. A binding numbered inside the instance band is adopted by that instance as one of its own seats, found to have no lease behind it and deleted on the next pass - once every pass, for ever, with nothing anywhere saying why that address keeps losing its WAN.",
                                         "Assignment rule priority base - 1000 to 28999, default 20000. Where an instance starts numbering its client rules. They run from here up to, but not including, the catch-all base, so that gap is also the most clients one instance could ever seat; at least 64 have to be left in it.",
                                         "Catch-all rule priority base - 2000 to 29999, default 30000. Each instance takes one priority from here for its fail-closed rule, the one that stops a device it has not seated yet from leaking out through the router’s default connection.",

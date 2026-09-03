@@ -57,6 +57,18 @@ export interface WanbindSettings {
   wan_warn_uptime: number
   wan_error_grace: number
   release_grace: number
+  /**
+   * Whether a bound address may still reach the networks this router serves.
+   *
+   * A one-to-one binding sends everything from an address to its WAN's routing
+   * table, and that table knows only how to leave the building - so with this
+   * off a bound machine has the internet and not the printer on the next desk,
+   * and the packet for the printer leaves by the WAN port addressed to a
+   * private network that drops it. On by default.
+   */
+  lan_local: boolean
+  /** Where those rules sit: sixty-four priorities from here, one per LAN. */
+  local_pref_base: number
 }
 
 /** Whether the one-to-one priority band is safe to allocate from, and why not. */

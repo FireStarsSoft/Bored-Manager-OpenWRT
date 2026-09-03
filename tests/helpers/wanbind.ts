@@ -73,7 +73,9 @@ export const DAEMON_SETTINGS: WanbindSettings = {
   wan_table_base: 10_000,
   wan_warn_uptime: 5,
   wan_error_grace: 20,
-  release_grace: 120
+  release_grace: 120,
+  lan_local: true,
+  local_pref_base: 18_000
 }
 
 /** A band with room in it, which is the case nothing below is about. */

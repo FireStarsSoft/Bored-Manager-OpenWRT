@@ -28,7 +28,15 @@ import { agentDeps, daemonProblem, daemonReady, recordEvent } from './runtime'
 import type { BindingRuntime } from './types'
 
 /** Every field of the section except the switch; see `settingsCheck`. */
-type SettingKey = Exclude<keyof WanbindSettings, 'enabled'>
+/**
+ * Every numeric field of the section.
+ *
+ * The two switches are excluded rather than handled here: `enabled` has its own
+ * button, and `lan_local` is a checkbox read below - a boolean through a
+ * numeric reader would be a silently ignored field, which is what happened to
+ * both of them when they were added to the daemon.
+ */
+type SettingKey = Exclude<keyof WanbindSettings, 'enabled' | 'lan_local'>
 
 interface Bound {
   key: SettingKey
@@ -72,8 +80,12 @@ const BOUNDS: readonly Bound[] = [
   { key: 'wan_table_base', label: 'WAN routing table base', min: 1_000, max: 25_000 },
   { key: 'wan_warn_uptime', label: 'New-WAN warning window (s)', min: 0, max: 3_600 },
   { key: 'wan_error_grace', label: 'WAN error grace (s)', min: 0, max: 3_600 },
-  { key: 'release_grace', label: 'Lease release grace (s)', min: 0, max: 86_400 }
+  { key: 'release_grace', label: 'Lease release grace (s)', min: 0, max: 86_400 },
+  { key: 'local_pref_base', label: 'LAN-local rule priority base', min: 1_000, max: 27_999 }
 ]
+
+/** How many priorities the LAN-local band takes, one per LAN. */
+const LOCAL_PREF_SPAN = 64
 
 /**
  * What the daemon runs on when nothing is in the file.
@@ -94,7 +106,9 @@ const DAEMON_DEFAULTS: WanbindSettings = {
   wan_table_base: 10_000,
   wan_warn_uptime: 5,
   wan_error_grace: 20,
-  release_grace: 120
+  release_grace: 120,
+  lan_local: true,
+  local_pref_base: 18_000
 }
 
 /**
@@ -183,6 +197,23 @@ function crossFieldFindings(
         'placed by hand is read by an instance as one of its own and swept on the next pass.'
     })
   }
+  // The escapes have to be read before every binding and before every
+  // assignment, which is what being below both bases means. A base that reaches
+  // into either is the same as having no escapes at all - and silently, on a
+  // router where every row still reads bound.
+  const localTop = after.local_pref_base + LOCAL_PREF_SPAN - 1
+  if (localTop >= after.direct_pref_base) {
+    findings.push({
+      level: 'error',
+      label: `The LAN-local band ${after.local_pref_base}-${localTop} is not below the one-to-one base ${after.direct_pref_base}`,
+      detail:
+        `Every LAN gets one escape rule - \`to <that LAN> lookup main\` - from a band ` +
+        `${LOCAL_PREF_SPAN} wide starting at this base, and each one has to be consulted before ` +
+        'any binding rule. Read after one, it decides nothing and a bound device stops reaching ' +
+        'the printer next to it.'
+    })
+  }
+
   const room = after.catch_all_pref_base - after.rule_pref_base
   if (room < MIN_PREF_SPAN) {
     findings.push({
@@ -202,6 +233,14 @@ export function settingsCheck(runtime: BindingRuntime, raw: unknown): ModuleChec
   const findings: ModuleCheckFinding[] = []
   const current = settingsGet(runtime)
   const entered = readEntered(values, current, findings)
+
+  // The one boolean on this form. Read on its own because a checkbox is not a
+  // number and the reader above only knows numbers: sent through it, this field
+  // was accepted, ignored and reported as saved.
+  const wantsLocal = values.lan_local
+  if (typeof wantsLocal === 'boolean' && wantsLocal !== current.lan_local) {
+    entered.lan_local = wantsLocal
+  }
 
   if (!Object.keys(entered).length && !hasBlockingFinding(findings)) {
     findings.push({
