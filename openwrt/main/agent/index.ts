@@ -117,14 +117,17 @@ export {
   // The monitor's whole vocabulary travels in this one shape: `scan/` names the
   // row and table types by indexing it rather than importing them separately,
   // so an owner the daemon learns cannot be missed by a union copied here.
-  type WanbindRulesReply,
-  type WanbindRuleExplainReply,
-  type WanbindWaitingReply,
   type WanbindSettings,
   type WanbindVerdict,
   type WanbindWaiting,
   type WanbindWan
 } from './wanbind-types'
+export type {
+  WanbindRulesReply,
+  WanbindRuleExplainReply,
+  WanbindWaitingReply
+} from './wanbind-monitor-types'
+
 export {
   TUNE_AGENT_RELEASE,
   agentAtLeast,

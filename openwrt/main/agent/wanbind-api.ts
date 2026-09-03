@@ -46,16 +46,19 @@ import {
   type WanbindInstanceSetReply,
   type WanbindInstanceSpec,
   type WanbindLayoutReply,
-  type WanbindRulesReply,
   type WanbindSettings,
   type WanbindStats,
   type WanbindUnbindReply,
-  type WanbindVerifyReply,
   type WanbindWansReply,
   type WanbindAssignment,
-  type WanbindRuleExplainReply,
-  type WanbindWaitingReply
 } from './wanbind-types'
+import type {
+  WanbindRulesReply,
+  WanbindVerifyReply,
+  WanbindRuleExplainReply,
+  WanbindWaitingReply
+} from './wanbind-monitor-types'
+
 
 /** A pass over four thousand clients is seconds, not milliseconds. */
 const PASS_TIMEOUT_MS = 60_000
