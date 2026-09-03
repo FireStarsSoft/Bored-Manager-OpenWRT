@@ -463,7 +463,21 @@ return view.extend({
 					return null;
 				}
 
-				self.paintCapacity(head, body, result.data ?? {}, refresh);
+				const answer = result.data ?? {};
+
+				// A refusal is a successful call carrying a reason: the agent
+				// answers `{ ok: false, reason }` when a report is already being
+				// worked out, and when working one out threw. Painting it as a
+				// report drew six dashes and an "unknown" pill and said nothing
+				// at all - while the router had handed over the sentence.
+				if (answer.ok === false) {
+					dom.content(head, bmui.pill('idle', _('unknown')));
+					dom.content(body, E('p', { 'class': 'bm-small bm-muted' },
+						String(answer.reason || _('The router would not work out a capacity report, and did not say why.'))));
+					return null;
+				}
+
+				self.paintCapacity(head, body, answer, refresh);
 				return null;
 			});
 		}

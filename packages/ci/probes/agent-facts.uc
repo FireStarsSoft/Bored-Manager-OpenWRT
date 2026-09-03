@@ -207,6 +207,20 @@ uci.set('dhcp', 'lan', 'limit', '1000');
 
 let raised = facts.leaseLimits();
 check('a raised ceiling is read', raised.dnsmasq, 1500);
+
+// A pool that hands nothing out does not get to decide the router's ceiling.
+// A guest network switched off, or one with `limit 0`, made the LAN with five
+// hundred clients on it look like it was allowed none.
+uci.set('dhcp', 'guest', 'dhcp');
+uci.set('dhcp', 'guest', 'interface', 'guest');
+uci.set('dhcp', 'guest', 'limit', '10');
+uci.set('dhcp', 'guest', 'ignore', '1');
+
+uci.set('dhcp', 'iot', 'dhcp');
+uci.set('dhcp', 'iot', 'interface', 'iot');
+uci.set('dhcp', 'iot', 'limit', '0');
+
+check('a switched-off pool does not decide the ceiling', facts.leaseLimits().lan, 1000);
 check('and no longer called a default', raised.dnsmasqDefault, false);
 check('the per-LAN limit is read too', raised.lan, 1000);
 

@@ -506,6 +506,13 @@ export function hwOffloadCapable(target) {
  * can be written for. The 150 each falls back to is dnsmasq's own default and
  * is flagged as a default rather than reported as a setting.
  */
+/** A uci boolean, in the four spellings OpenWrt writes. */
+function flagOf(value) {
+	let one = trim(type(value) == 'string' ? value : '');
+
+	return (one == '1' || one == 'true' || one == 'yes' || one == 'on');
+}
+
 export function leaseLimits() {
 	let out = { dnsmasq: 150, lan: 150, dnsmasqDefault: true, lanDefault: true };
 
@@ -527,12 +534,24 @@ export function leaseLimits() {
 			}
 		}
 
+		// The lowest ceiling among the pools that are actually handing addresses
+		// out. A `dhcp` section with `ignore 1` leases nothing, and one with
+		// `limit 0` is the same thing said differently - counting either as the
+		// router's ceiling made a guest network nobody uses decide what the LAN
+		// with five hundred clients on it was allowed, and the capacity report
+		// then demanded a raise that would have changed nothing.
 		let lowest = null;
 
 		uci.foreach('dhcp', 'dhcp', (section) => {
+			if (flagOf(section.ignore))
+				return;
+
 			let value = digits(section.limit);
 
-			if (value != null && (lowest == null || value < lowest))
+			if (value == null || value < 1)
+				return;
+
+			if (lowest == null || value < lowest)
 				lowest = value;
 		});
 

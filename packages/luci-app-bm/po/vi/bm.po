@@ -35,7 +35,7 @@ msgstr "%d trên %d"
 msgid "%d of no limit"
 msgstr "%d, không giới hạn"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2002
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2021
 msgid ""
 "%d rule(s) the router wrote are not in the kernel, and %d it did not write "
 "are."
@@ -109,7 +109,7 @@ msgstr "%s được giữ ngoài nhóm."
 msgid "%s is pinned to %s."
 msgstr "%s đã được ghim vào %s."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:763
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:777
 msgid "%s is published and signed by key %s."
 msgstr "%s đã được phát hành và ký bằng khóa %s."
 
@@ -162,7 +162,7 @@ msgstr ""
 "1-4 ký tự. Tên giao diện suy ra từ nó: tiền tố fpt, thành viên 101 quay số "
 "thành fpt101 trên pppoe-fpt101."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2121
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2140
 msgid ""
 "1000 to 27999, 18000 by default. The band is 64 wide and has to end below "
 "the binding priority base and below every instance's own."
@@ -265,7 +265,7 @@ msgstr "Agent"
 msgid "All"
 msgstr "Tất cả"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1997
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2016
 msgid ""
 "All %d rule(s) the router meant to write are in the kernel, and it holds "
 "nothing extra in these priorities."
@@ -294,7 +294,7 @@ msgid "Applied, and pinned under /etc/sysctl.d/ so it survives a reboot."
 msgstr ""
 "Đã áp dụng và ghim dưới /etc/sysctl.d/ nên giữ nguyên qua khởi động lại."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:615
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:629
 msgid "Applied. Asking the router again."
 msgstr "Đã áp dụng. Đang hỏi lại router."
 
@@ -302,7 +302,7 @@ msgstr "Đã áp dụng. Đang hỏi lại router."
 msgid "Apply and persist"
 msgstr "Áp dụng và lưu bền"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:612
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:626
 msgid "Apply this fix on the router now? %s"
 msgstr "Áp dụng cách sửa này lên router ngay? %s"
 
@@ -327,7 +327,7 @@ msgid "Asked the router to move %s off %s."
 msgstr "Đã yêu cầu router chuyển %s khỏi %s."
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:392
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:799
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:813
 msgid "Asking the release server..."
 msgstr "Đang hỏi máy chủ phát hành..."
 
@@ -345,12 +345,12 @@ msgstr "Đang hỏi router xem việc này sẽ thay đổi những gì..."
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:401
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:433
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:454
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:482
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:496
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:257
 msgid "Asking the router..."
 msgstr "Đang hỏi router..."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1786
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1799
 msgid "Asking..."
 msgstr "Đang hỏi..."
 
@@ -363,7 +363,7 @@ msgid "Before any of this touched the router"
 msgstr "Trước khi bất cứ thứ gì ở đây chạm vào router"
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1250
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1817
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1836
 msgid "Binding"
 msgstr "Binding"
 
@@ -387,11 +387,11 @@ msgstr "Đã lưu binding %s."
 msgid "Binding %s written. The router has put its rule in."
 msgstr "Đã ghi binding %s. Router đã đặt rule của nó vào."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2115
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2134
 msgid "Binding priority base"
 msgstr "Mức ưu tiên gốc của binding"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:540
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:554
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1309
 msgid "Bindings"
 msgstr "Các binding"
@@ -437,7 +437,7 @@ msgstr "Bằng tay"
 msgid "Cancel"
 msgstr "Huỷ"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:475
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:489
 msgid "Capacity"
 msgstr "Năng lực"
 
@@ -459,12 +459,12 @@ msgstr "Chế độ cổng"
 msgid "Catch-all priority"
 msgstr "Ưu tiên của luật chặn dự phòng"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2117
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2136
 msgid "Catch-all priority base"
 msgstr "Mức ưu tiên gốc của luật chặn dự phòng"
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1179
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2118
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2137
 msgid "Catch-all table"
 msgstr "Bảng của luật chặn dự phòng"
 
@@ -489,7 +489,7 @@ msgid "Check"
 msgstr "Kiểm tra"
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:353
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:808
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:822
 msgid "Check for updates"
 msgstr "Kiểm tra bản cập nhật"
 
@@ -497,7 +497,7 @@ msgstr "Kiểm tra bản cập nhật"
 msgid "Client"
 msgstr "Máy khách"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2116
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2135
 msgid "Client priority base"
 msgstr "Mức ưu tiên gốc của rule máy khách"
 
@@ -602,13 +602,13 @@ msgid "DNS servers"
 msgstr "Máy chủ DNS"
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:937
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2026
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2100
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2045
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2119
 msgid "Daemon settings"
 msgstr "Cài đặt daemon"
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:958
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2094
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2113
 msgid "Daemon settings applied."
 msgstr "Đã áp dụng cài đặt daemon."
 
@@ -617,7 +617,7 @@ msgid "Data schema"
 msgstr "Schema dữ liệu"
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:877
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1855
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1874
 msgid "Default route"
 msgstr "Route mặc định"
 
@@ -820,7 +820,7 @@ msgstr ""
 "nguyên trong khoảng: mức ưu tiên 1 đến 2147483647, bảng 1 đến 65535, hẹn giờ "
 "0 đến 86400 giây."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1811
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1830
 msgid "Explain"
 msgstr "Giải thích"
 
@@ -829,7 +829,7 @@ msgid "Extra pppd options"
 msgstr "Tuỳ chọn pppd thêm"
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1181
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2125
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2144
 msgid "Failure grace"
 msgstr "Thời gian chờ khi lỗi"
 
@@ -863,7 +863,7 @@ msgstr ""
 msgid "Firewall"
 msgstr "Firewall"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:618
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:632
 msgid "Fix"
 msgstr "Sửa"
 
@@ -913,7 +913,7 @@ msgstr ""
 "Hãy cho nó một địa chỉ hoặc một MAC. Không có thì binding này không có gì để "
 "theo."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2108
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2127
 msgid "Hand out WANs to clients"
 msgstr "Cấp WAN cho máy khách"
 
@@ -921,7 +921,7 @@ msgstr "Cấp WAN cho máy khách"
 msgid "Hand-placed bindings have nowhere to sit: %s"
 msgstr "Các binding đặt tay không có chỗ để nằm: %s"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2106
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2125
 msgid ""
 "Hand-placed bindings live in priorities %d to %d. Nothing outside the ranges "
 "below is ever read or written by this package."
@@ -966,7 +966,7 @@ msgstr "Host-Uniq"
 msgid "Hostname"
 msgstr "Tên máy"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2109
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2128
 msgid ""
 "How often the router re-reads its leases and its rules. A lease arriving is "
 "acted on immediately whatever this says."
@@ -998,11 +998,11 @@ msgstr "Có hiệu lực"
 msgid "Inactivity timeout"
 msgstr "Thời gian chờ rỗi"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:729
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:743
 msgid "Install"
 msgstr "Cài đặt"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:768
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:782
 msgid ""
 "Install %s now, under the countdown? The services being replaced include the "
 "ones binding clients and dialling pools."
@@ -1018,7 +1018,7 @@ msgstr ""
 "Cài %s ngay? Trong số các dịch vụ bị thay có cả dịch vụ đang giữ các luật "
 "định tuyến của router này."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:723
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:737
 msgid ""
 "Install %s with apk now? This runs \"apk update\" first and can take a "
 "minute."
@@ -1046,7 +1046,7 @@ msgid "Install them with apk, in one command"
 msgstr "Cài tất cả bằng apk, trong một lệnh"
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:333
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:746
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:760
 msgid "Installed"
 msgstr "Đang cài"
 
@@ -1066,11 +1066,11 @@ msgstr ""
 "Đã cài %s. Đồng hồ đếm ngược ở đầu trang vẫn đang chạy: hãy giữ thay đổi khi "
 "bạn chắc rằng router này vẫn liên lạc được."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:727
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:741
 msgid "Installed. Re-checking what the router has now."
 msgstr "Đã cài. Đang kiểm tra lại xem router hiện có gì."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:772
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:786
 msgid ""
 "Installing. The countdown at the top of the page is running: keep the change "
 "once this router is still reachable."
@@ -1126,7 +1126,7 @@ msgstr ""
 "instance, binding 1-1 hay các con số của daemon từ đây - những lệnh làm việc "
 "ấy chưa có trong nó."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2111
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2130
 msgid "Keep LAN traffic local"
 msgstr "Giữ lưu lượng LAN ở nội bộ"
 
@@ -1156,11 +1156,11 @@ msgstr "Giao diện LAN"
 msgid "LAN-local escape"
 msgstr "Lối ra LAN nội bộ"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2120
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2139
 msgid "LAN-local priority base"
 msgstr "Ưu tiên gốc của LAN nội bộ"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:658
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:672
 msgid ""
 "LAN-local rules go back on, so a bound address still reaches this router's "
 "other networks."
@@ -1182,7 +1182,7 @@ msgstr "Nhãn"
 msgid "Last pass"
 msgstr "Lượt quét gần nhất"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:757
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:771
 msgid "Last update: %s, %s to %s."
 msgstr "Cập nhật gần nhất: %s, %s lên %s."
 
@@ -1191,12 +1191,12 @@ msgid "Last update: %s, %s to %s. Packages: %s."
 msgstr "Cập nhật gần nhất: %s, %s lên %s. Gói: %s."
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:334
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:747
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:761
 msgid "Latest"
 msgstr "Mới nhất"
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1182
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2126
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2145
 msgid "Lease grace"
 msgstr "Thời gian chờ sau khi hết lease"
 
@@ -1228,7 +1228,7 @@ msgstr ""
 msgid "Letters, digits and underscores, up to 32. This is the section name."
 msgstr "Chữ cái, chữ số và gạch dưới, tối đa 32 ký tự. Đây là tên section."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:553
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:567
 msgid "Limited first by %s."
 msgstr "Giới hạn trước tiên bởi %s."
 
@@ -1258,7 +1258,7 @@ msgid "MTU has to be 576 to 9200, or empty for the default."
 msgstr "MTU phải từ 576 đến 9200, hoặc để trống để dùng mặc định."
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:87
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:795
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:809
 #: packages/luci-app-bm/root/usr/share/luci/menu.d/luci-app-bm.json:28
 msgid "Maintenance"
 msgstr "Bảo trì"
@@ -1275,7 +1275,7 @@ msgstr "Nhiều phiên trên một đường mang"
 msgid "Masquerade"
 msgstr "Masquerade"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1817
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1836
 msgid "Matches"
 msgstr "Khớp với"
 
@@ -1288,15 +1288,15 @@ msgstr "Thành viên"
 msgid "Memory"
 msgstr "Bộ nhớ"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:542
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:556
 msgid "Memory available"
 msgstr "Bộ nhớ còn trống"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:541
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:555
 msgid "Memory needed"
 msgstr "Bộ nhớ cần"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2004
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2023
 msgid "Missing: %s"
 msgstr "Thiếu: %s"
 
@@ -1347,7 +1347,7 @@ msgstr ""
 msgid "Neighbour thresholds"
 msgstr "Ngưỡng bảng neighbour"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:544
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:558
 msgid "Next tier at"
 msgstr "Bậc kế tiếp tại"
 
@@ -1438,7 +1438,7 @@ msgstr ""
 "Không có gì khớp %s. Đây không phải một router không có binding nào: nó đang "
 "giữ tất cả %d binding, và nút \"Tất cả\" phía trên liệt kê hết."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1985
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2004
 msgid "Nothing was compared: %s"
 msgstr "Không có gì được so sánh: %s"
 
@@ -1460,7 +1460,7 @@ msgstr ""
 msgid "Nothing would change: the router already matches this snapshot."
 msgstr "Sẽ không có gì thay đổi: router vốn đã khớp với bản lưu này."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2114
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2133
 msgid "Numbering"
 msgstr "Đánh số"
 
@@ -1476,7 +1476,7 @@ msgstr "Tắt nghĩa là nó chờ đúng WAN của mình quay lại."
 msgid "Off means the servers below are used instead."
 msgstr "Tắt thì dùng các máy chủ bên dưới thay cho DNS của ISP."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2108
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2127
 msgid ""
 "Off stops every instance and takes their rules off. Bindings placed by hand "
 "are not an instance and stay in force."
@@ -1484,7 +1484,7 @@ msgstr ""
 "Tắt thì dừng mọi instance và gỡ rule của chúng. Binding đặt tay không phải "
 "instance nên vẫn giữ hiệu lực."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2112
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2131
 msgid ""
 "On by default. One rule per LAN - \"to <LAN subnet> lookup main\" - read "
 "before every binding rule, so a bound device still reaches the devices "
@@ -1581,7 +1581,7 @@ msgstr "Chỉ dành cho người đọc; hiện ở mọi nơi có nhóm này."
 msgid "Overview"
 msgstr "Tổng quan"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1817
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1836
 msgid "Owner"
 msgstr "Của ai"
 
@@ -1603,7 +1603,7 @@ msgstr "PPPoE Dialer"
 msgid "PPPoE sessions up"
 msgstr "Phiên PPPoE đang lên"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2109
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2128
 msgid "Pass interval (s)"
 msgstr "Chu kỳ lượt quét (giây)"
 
@@ -1688,7 +1688,7 @@ msgstr ""
 "Coi như đầu kia đã chết sau ngần này lần echo không hồi đáp, gửi cách nhau "
 "ngần này giây. Để trống thì giữ mặc định của pppd."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1817
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1836
 msgid "Priority"
 msgstr "Mức ưu tiên"
 
@@ -1732,7 +1732,7 @@ msgstr ""
 "trên cùng một sợi dây."
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:436
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:485
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:499
 msgid "Re-check"
 msgstr "Kiểm tra lại"
 
@@ -1811,7 +1811,7 @@ msgstr "Phiên bản"
 msgid "Remember each client's WAN"
 msgstr "Nhớ WAN của từng máy khách"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1947
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1966
 msgid ""
 "Remove every ip rule this package wrote? Every bound client loses its route "
 "until the next pass puts it back, and the fail-closed catch-all goes too."
@@ -1819,7 +1819,7 @@ msgstr ""
 "Gỡ mọi ip rule mà gói này đã ghi? Mọi máy đã gán sẽ mất đường đi cho tới khi "
 "lượt quét kế tiếp đặt lại, và luật chặn dự phòng cũng mất theo."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1953
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1972
 msgid "Remove every rule"
 msgstr "Gỡ mọi luật"
 
@@ -1863,7 +1863,7 @@ msgstr ""
 "diện không bị rớt giữa chừng, nhưng kết nối bạn đang dùng để đọc dòng này "
 "cũng đi qua một trong số chúng."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1855
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1874
 msgid "Role"
 msgstr "Vai trò"
 
@@ -1879,7 +1879,7 @@ msgstr "Đã quay về. Đồng hồ đếm ngược ở đầu trang vẫn đan
 msgid "Router clock"
 msgstr "Đồng hồ router"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1907
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1926
 msgid "Routing tables"
 msgstr "Các bảng định tuyến"
 
@@ -1889,7 +1889,7 @@ msgstr "Ưu tiên"
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1750
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1766
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1879
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1898
 msgid "Rules on this router"
 msgstr "Các rule trên router này"
 
@@ -1901,7 +1901,7 @@ msgstr "Rule do gói này ghi"
 msgid "Rules we wrote, of the %d listed"
 msgstr "Rule do gói này ghi, trong %d rule được liệt kê"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1932
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1951
 msgid "Run a pass now"
 msgstr "Chạy một lượt ngay"
 
@@ -1912,7 +1912,7 @@ msgstr "Chạy migration schema"
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:961
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1141
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1548
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2132
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2151
 msgid "Save"
 msgstr "Lưu"
 
@@ -1933,11 +1933,11 @@ msgid "Seats"
 msgstr "Chỗ"
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1181
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2125
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2144
 msgid "Seconds a WAN has to have been failing before a client is moved off it."
 msgstr "Số giây một WAN phải lỗi liên tục trước khi máy khách bị chuyển đi."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2124
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2143
 msgid "Seconds a WAN has to have been up before it is handed to a client."
 msgstr "Số giây một WAN phải lên trước khi được giao cho máy khách."
 
@@ -1949,7 +1949,7 @@ msgstr ""
 "Số giây một WAN phải lên trước khi được giao cho máy khách. Phiên PPPoE vừa "
 "quay số báo lên trước khi thật sự tải được dữ liệu."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2126
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2145
 msgid "Seconds a client keeps its WAN after its lease disappears."
 msgstr "Số giây một máy khách giữ WAN sau khi lease của nó biến mất."
 
@@ -1973,7 +1973,7 @@ msgstr "Section"
 msgid "Service name"
 msgstr "Tên dịch vụ"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:539
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:553
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:383
 msgid "Sessions"
 msgstr "Số phiên"
@@ -2056,7 +2056,7 @@ msgstr "Flow offload phần mềm"
 msgid "Somebody asked for a snapshot"
 msgstr "Có người yêu cầu chụp một bản lưu"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2009
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2028
 msgid ""
 "Something else on this router is writing into these priorities. A Bored "
 "Manager module older than 3.4.0 does exactly that, every two seconds, while "
@@ -2104,7 +2104,7 @@ msgstr "Dừng tất cả %d giao diện? Ai đang dùng chúng sẽ mất kết
 msgid "Stopped"
 msgstr "Đã dừng"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2091
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2110
 msgid ""
 "Switching the instance half off takes every instance's rules away first. "
 "Hand-placed bindings stay in force. Go on?"
@@ -2114,8 +2114,8 @@ msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:476
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1251
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1817
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1855
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1836
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1874
 msgid "Table"
 msgstr "Bảng"
 
@@ -2147,7 +2147,7 @@ msgstr "Không khớp; chưa có gì được thực hiện."
 msgid "The IPv4 address, or the MAC, this binding is about."
 msgstr "Địa chỉ IPv4, hoặc MAC, mà binding này nói tới."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2084
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2103
 msgid ""
 "The LAN-local base %d opens a band 64 wide that reaches %d, which is not "
 "below the binding base %d. Every LAN escape has to be read before any "
@@ -2207,7 +2207,7 @@ msgid ""
 "The carrier mode of a pool cannot change; delete it and create a new one."
 msgstr "Chế độ cổng của một nhóm không đổi được; hãy xoá nó và tạo nhóm mới."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:779
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:793
 msgid "The check failed and the router did not say why."
 msgstr "Kiểm tra thất bại và router không nói lý do."
 
@@ -2231,7 +2231,7 @@ msgstr ""
 "Thiết bị mà nhóm WAN nằm trên đó. Mọi giao diện trên nó, hoặc trên một VLAN "
 "của nó, đều thuộc nhóm."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2118
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2137
 msgid "The first instance's \"unreachable default\" table."
 msgstr "Bảng chứa \"unreachable default\" của instance đầu tiên."
 
@@ -2248,7 +2248,7 @@ msgstr ""
 "Phần instance đã tắt, nên không nhóm nào cấp cho máy khách một WAN riêng. "
 "Binding đặt tay không phải instance và vẫn đang được giữ hiệu lực."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2074
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2093
 msgid ""
 "The interval is 1-3600 seconds, priorities 1-2147483647, the LAN-local base "
 "1000-27999, tables 1-65535 and the timers 0-86400 seconds."
@@ -2274,7 +2274,7 @@ msgstr ""
 msgid "The one account every member dials with."
 msgstr "Tài khoản duy nhất mà mọi thành viên dùng để quay số."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2101
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2120
 msgid ""
 "The pass timer, and the numbers every instance written after this is cut "
 "from. An instance already on this router keeps the numbers stamped on its "
@@ -2300,7 +2300,7 @@ msgstr ""
 msgid "The release server offers %s; this router is on %s."
 msgstr "Máy chủ phát hành đưa ra %s; router này đang ở %s."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1862
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1881
 msgid ""
 "The router answered and named no routing table at all, not even its own main "
 "one, which is worth a look at a console."
@@ -2308,7 +2308,7 @@ msgstr ""
 "Router đã trả lời và không nêu tên bảng định tuyến nào cả, kể cả bảng main "
 "của chính nó - chuyện đó đáng xem lại ở console."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1823
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1842
 msgid ""
 "The router answered, and there is not one ip rule on it - not even the three "
 "the kernel writes for itself, which is worth a look at a console."
@@ -2386,11 +2386,11 @@ msgstr ""
 "Router không có dịch vụ nào lắng nghe cho lệnh đó. Có thể nó đã dừng, hoặc "
 "gói vừa bị gỡ."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1863
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1882
 msgid "The router has not answered with its routing tables yet."
 msgstr "Router chưa trả về các bảng định tuyến của nó."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1824
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1843
 msgid "The router has not answered with its rule table yet."
 msgstr "Router chưa trả về bảng rule của nó."
 
@@ -2398,7 +2398,7 @@ msgstr "Router chưa trả về bảng rule của nó."
 msgid "The router has re-read netifd and the counters."
 msgstr "Router đã đọc lại netifd và các bộ đếm."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1930
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1949
 msgid "The router has run a full pass."
 msgstr "Router đã chạy một lượt quét đầy đủ."
 
@@ -2410,7 +2410,7 @@ msgstr ""
 "Router giữ một bản sao cấu hình của chính nó trước mọi thay đổi nó thực "
 "hiện, và có thể đưa một bản về mà không cần ai liên lạc được với nó."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1803
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1816
 msgid ""
 "The router no longer has this rule. Something has removed it since this "
 "table was read."
@@ -2466,6 +2466,10 @@ msgstr "Router không chịu làm việc đó, và không nói vì sao."
 msgid "The router would not say why."
 msgstr "Router không nói vì sao."
 
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:476
+msgid "The router would not work out a capacity report, and did not say why."
+msgstr "Router không đưa ra được báo cáo năng lực, và không nói vì sao."
+
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1115
 msgid ""
 "The router would stamp this instance with client priority %d, catch-all "
@@ -2474,7 +2478,7 @@ msgstr ""
 "Router sẽ đóng dấu instance này với mức ưu tiên máy khách %d, mức ưu tiên "
 "luật chặn dự phòng %d và bảng chặn dự phòng %d."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1898
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1917
 msgid ""
 "The router's main table has no default route. Every address this package "
 "does not claim - and every one it hands back when a WAN goes down - is "
@@ -2484,7 +2488,7 @@ msgstr ""
 "nhận - và mọi địa chỉ nó trả lại khi một WAN đã tắt - đều được tra ở đó và "
 "không tìm thấy gì."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1893
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1912
 msgid "The router's own default route leaves by %s%s."
 msgstr "Route mặc định của chính router đi ra bằng %s%s."
 
@@ -2511,7 +2515,7 @@ msgstr ""
 msgid "The row list has not arrived yet."
 msgstr "Danh sách dòng chưa về tới nơi."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1951
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1970
 msgid "The rules are off the router."
 msgstr "Các luật đã được gỡ khỏi router."
 
@@ -2609,7 +2613,7 @@ msgid ""
 msgstr ""
 "Các trang này được dựng từ những gì bm-agent báo cáo, và nó không trả lời: %s"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2104
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2123
 msgid "These priorities do not hold together: %s"
 msgstr "Các mức ưu tiên này không khớp với nhau: %s"
 
@@ -2652,7 +2656,7 @@ msgstr ""
 "Đây là nhóm theo mô hình cũ: các phiên đánh số của nó được gỡ đúng như bản "
 "phát hành đã tạo ra chúng vẫn làm."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1987
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2006
 msgid ""
 "This is not a router whose rules are all in place. What the kernel is "
 "holding is unknown until the read works, and nothing should be concluded "
@@ -2707,7 +2711,7 @@ msgstr ""
 "chúng và tư cách thành viên trong firewall. Ai đang quay số qua chúng sẽ mất "
 "kết nối."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:792
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:806
 msgid ""
 "This router asks the release server only when somebody presses the button; "
 "nothing here runs on its own. The full flow, including rollback, is on the "
@@ -2724,7 +2728,7 @@ msgstr ""
 "Router này chỉ kiểm tra bản phát hành mới khi có người yêu cầu, và chỉ cài "
 "dưới đồng hồ đếm ngược."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1904
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1923
 msgid ""
 "This router has %d ip rules and the list below is the first %d of them, in "
 "the order the kernel walks them. Ask for the rest with \"bmwan rules --"
@@ -2803,11 +2807,11 @@ msgstr "Lưu lượng"
 msgid "Throughput, last five minutes"
 msgstr "Lưu lượng, năm phút gần nhất"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:543
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:557
 msgid "Tier"
 msgstr "Bậc"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2123
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2142
 msgid "Timers"
 msgstr "Các mốc hẹn giờ"
 
@@ -2829,7 +2833,7 @@ msgstr "Gõ %s để xác nhận:"
 msgid "Undo now"
 msgstr "Hoàn tác ngay"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2007
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2026
 msgid "Unexpected: %s"
 msgstr "Ngoài dự kiến: %s"
 
@@ -2850,12 +2854,12 @@ msgstr "Đang lên"
 msgid "Up to date"
 msgstr "Đã là bản mới nhất"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:780
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:794
 msgid "Up to date."
 msgstr "Đã là bản mới nhất."
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:474
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:774
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:788
 msgid "Update now"
 msgstr "Cập nhật ngay"
 
@@ -2864,7 +2868,7 @@ msgid "Update source"
 msgstr "Nguồn cập nhật"
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:343
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:791
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:805
 msgid "Updates"
 msgstr "Cập nhật"
 
@@ -2924,7 +2928,7 @@ msgstr ""
 msgid "VLANs"
 msgstr "VLAN"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1941
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1960
 msgid "Verify"
 msgstr "Xác minh"
 
@@ -2934,7 +2938,7 @@ msgstr "Phiên bản"
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1250
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1575
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1855
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1874
 msgid "WAN"
 msgstr "WAN"
 
@@ -2945,11 +2949,11 @@ msgid "WAN Binding"
 msgstr "Gán WAN"
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1180
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2124
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2143
 msgid "WAN settle time"
 msgstr "Thời gian WAN ổn định"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2119
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2138
 msgid "WAN table base"
 msgstr "Số bảng gốc cho WAN"
 
@@ -3002,7 +3006,7 @@ msgstr ""
 "Ba daemon trên router đang làm gì, mỗi tính năng cần gì, và bản cập nhật đến "
 "từ đâu. Ứng dụng gọi đúng những lệnh này; ở đây không có ý kiến thứ hai."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:477
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:491
 msgid ""
 "What this router has, against what its configuration needs, and roughly "
 "where it stops. Every number is an estimate worked out on the router."
@@ -3010,7 +3014,7 @@ msgstr ""
 "Router này có gì, so với những gì cấu hình hiện tại cần, và điểm dừng ước "
 "chừng. Mọi con số đều là ước lượng do chính router tính ra."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2115
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2134
 msgid ""
 "Where hand-placed bindings are numbered from. They sit below every instance, "
 "so the kernel reads them first."
@@ -3018,7 +3022,7 @@ msgstr ""
 "Nơi các binding đặt tay được đánh số từ đó. Chúng nằm dưới mọi instance, nên "
 "kernel đọc chúng trước."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2119
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2138
 msgid "Where routing tables are handed out from for WANs that have none."
 msgstr "Nơi cấp bảng định tuyến cho những WAN chưa có bảng nào."
 
@@ -3027,11 +3031,11 @@ msgid ""
 "Where the fail-closed rule sits. Nothing outside this range is ever touched."
 msgstr "Nơi đặt luật chặn dự phòng. Không có gì ngoài dải này bị đụng tới."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2116
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2135
 msgid "Where the first instance's client rules start."
 msgstr "Nơi rule máy khách của instance đầu tiên bắt đầu."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2117
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2136
 msgid "Where the first instance's fail-closed rule sits."
 msgstr "Nơi đặt luật chặn dự phòng của instance đầu tiên."
 
@@ -3069,7 +3073,7 @@ msgstr "Cả LAN"
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:135
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1693
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1817
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1836
 msgid "Why"
 msgstr "Vì sao"
 
@@ -3138,7 +3142,7 @@ msgstr ""
 "apk báo thành công nhưng router này vẫn trả lời %s. Xem \"logread -e bm-"
 "agent\"."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:523
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:537
 msgid "at risk"
 msgstr "có rủi ro"
 
@@ -3190,7 +3194,7 @@ msgid "bm-pppoe-pool is not installed. Without it this router dials no pools."
 msgstr ""
 "bm-pppoe-pool chưa được cài. Thiếu nó, router này không quay số pool nào."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:645
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:659
 msgid ""
 "bm-pppoe-pool re-reads netifd, its counters and its firewall zones. The "
 "firewall reloads only if something changed."
@@ -3220,7 +3224,7 @@ msgstr ""
 "hiệu lực. Cài từ mục Router packages trong ứng dụng, hoặc bằng \"apk add bm-"
 "wanbind\"."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:637
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:651
 msgid ""
 "bm-wanbind runs a full pass and puts back every rule it decided and the "
 "kernel does not have."
@@ -3300,7 +3304,7 @@ msgstr ""
 "Đường tắt của fw4 cho các luồng đã thiết lập. Giảm tra rule từng gói tin khi "
 "có hàng nghìn fib rule tuyến tính; được ghi vào cấu hình firewall và nạp lại."
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:679
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:693
 msgid "fw4 software flow offload on, and the firewall reloaded"
 msgstr "bật flow offload phần mềm của fw4, và nạp lại firewall"
 
@@ -3356,7 +3360,7 @@ msgstr "dòng %d: VLAN phải từ 0 đến 4094"
 msgid "looks up no table"
 msgstr "không tra bảng nào"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:709
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:723
 msgid "missing"
 msgstr "thiếu"
 
@@ -3406,7 +3410,7 @@ msgstr "không phản hồi"
 msgid "not asked"
 msgstr "chưa hỏi"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:747
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:761
 msgid "not asked yet"
 msgstr "chưa hỏi"
 
@@ -3430,7 +3434,7 @@ msgstr "không báo cáo"
 msgid "not set"
 msgstr "chưa đặt"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:596
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:610
 msgid "note"
 msgstr "ghi chú"
 
@@ -3438,8 +3442,8 @@ msgstr "ghi chú"
 msgid "nothing was asked - the daemon is not answering"
 msgstr "chưa hỏi gì cả - daemon không trả lời"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:596
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:708
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:610
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:722
 msgid "ok"
 msgstr "ổn"
 
@@ -3493,7 +3497,7 @@ msgstr "tài khoản theo slot"
 msgid "pools stopped"
 msgstr "nhóm đã dừng"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:593
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:607
 msgid "problem"
 msgstr "lỗi"
 
@@ -3513,7 +3517,7 @@ msgstr "giây"
 msgid "shared account"
 msgstr "tài khoản dùng chung"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:522
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:536
 msgid "stable"
 msgstr "ổn định"
 
@@ -3539,11 +3543,11 @@ msgstr "bộ lọc \"Bằng tay\""
 msgid "the priority band is not usable"
 msgstr "dải mức ưu tiên không dùng được"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1986
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2005
 msgid "the router could not read its ip rules"
 msgstr "router không đọc được các ip rule của nó"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2104
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2123
 msgid "the router did not say why"
 msgstr "router không nói vì sao"
 
@@ -3571,8 +3575,9 @@ msgstr "để trống thì giữ nguyên"
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:617
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:461
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:526
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:709
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:474
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:540
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:723
 msgid "unknown"
 msgstr "chưa rõ"
 
@@ -3584,7 +3589,7 @@ msgstr "unreachable default - máy khách rơi vào đây sẽ bị chặn"
 msgid "unset"
 msgstr "chưa đặt"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:524
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:538
 msgid "unstable"
 msgstr "không ổn định"
 
@@ -3602,11 +3607,11 @@ msgstr "chưa ghi"
 msgid "up"
 msgstr "đang lên"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:761
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:775
 msgid "update available"
 msgstr "có bản cập nhật"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1895
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1914
 msgid "via %s"
 msgstr "qua %s"
 
@@ -3614,7 +3619,7 @@ msgstr "qua %s"
 msgid "via %s on %s"
 msgstr "qua %s trên %s"
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:595
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:609
 msgid "warning"
 msgstr "cảnh báo"
 

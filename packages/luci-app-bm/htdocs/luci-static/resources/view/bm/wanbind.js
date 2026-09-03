@@ -1775,9 +1775,22 @@ return view.extend({
 
 		const rows = Array.isArray(data.rules) ? data.rules : [];
 
-		/** A button that fetches this rule's sentence and replaces itself with it. */
+		/**
+		 * A button that fetches this rule's sentence and replaces itself with it.
+		 *
+		 * The sentence is kept in `state.reasons` rather than only in the cell,
+		 * because the rules poll rebuilds this whole table every ten seconds -
+		 * so an answer somebody waited for was replaced by the link again
+		 * before they had finished reading it.
+		 */
 		function explainCell(row) {
 			const cell = E('span', { 'class': 'bm-small' });
+			const key = '%d|%s|%s|%d'.format(row.pref | 0, row.cidr || '', row.dst || '', row.table | 0);
+
+			if (state.reasons && state.reasons[key]) {
+				dom.content(cell, state.reasons[key]);
+				return cell;
+			}
 
 			dom.content(cell, E('a', {
 				'href': '#',
@@ -1804,7 +1817,13 @@ return view.extend({
 							return null;
 						}
 
-						dom.content(cell, String((answer.rule || {}).reason || ''));
+						const said = String((answer.rule || {}).reason || '');
+
+						if (!state.reasons)
+							state.reasons = {};
+
+						state.reasons[key] = said;
+						dom.content(cell, said);
 						return null;
 					});
 				})

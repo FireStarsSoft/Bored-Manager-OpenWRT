@@ -27,7 +27,7 @@ msgstr ""
 msgid "%d of no limit"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2002
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2021
 msgid ""
 "%d rule(s) the router wrote are not in the kernel, and %d it did not write "
 "are."
@@ -95,7 +95,7 @@ msgstr ""
 msgid "%s is pinned to %s."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:763
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:777
 msgid "%s is published and signed by key %s."
 msgstr ""
 
@@ -141,7 +141,7 @@ msgid ""
 "as fpt101 on pppoe-fpt101."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2121
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2140
 msgid ""
 "1000 to 27999, 18000 by default. The band is 64 wide and has to end below "
 "the binding priority base and below every instance's own."
@@ -233,7 +233,7 @@ msgstr ""
 msgid "All"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1997
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2016
 msgid ""
 "All %d rule(s) the router meant to write are in the kernel, and it holds "
 "nothing extra in these priorities."
@@ -257,7 +257,7 @@ msgstr ""
 msgid "Applied, and pinned under /etc/sysctl.d/ so it survives a reboot."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:615
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:629
 msgid "Applied. Asking the router again."
 msgstr ""
 
@@ -265,7 +265,7 @@ msgstr ""
 msgid "Apply and persist"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:612
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:626
 msgid "Apply this fix on the router now? %s"
 msgstr ""
 
@@ -290,7 +290,7 @@ msgid "Asked the router to move %s off %s."
 msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:392
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:799
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:813
 msgid "Asking the release server..."
 msgstr ""
 
@@ -308,12 +308,12 @@ msgstr ""
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:401
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:433
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:454
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:482
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:496
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:257
 msgid "Asking the router..."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1786
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1799
 msgid "Asking..."
 msgstr ""
 
@@ -326,7 +326,7 @@ msgid "Before any of this touched the router"
 msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1250
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1817
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1836
 msgid "Binding"
 msgstr ""
 
@@ -350,11 +350,11 @@ msgstr ""
 msgid "Binding %s written. The router has put its rule in."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2115
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2134
 msgid "Binding priority base"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:540
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:554
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1309
 msgid "Bindings"
 msgstr ""
@@ -396,7 +396,7 @@ msgstr ""
 msgid "Cancel"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:475
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:489
 msgid "Capacity"
 msgstr ""
 
@@ -418,12 +418,12 @@ msgstr ""
 msgid "Catch-all priority"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2117
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2136
 msgid "Catch-all priority base"
 msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1179
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2118
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2137
 msgid "Catch-all table"
 msgstr ""
 
@@ -446,7 +446,7 @@ msgid "Check"
 msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:353
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:808
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:822
 msgid "Check for updates"
 msgstr ""
 
@@ -454,7 +454,7 @@ msgstr ""
 msgid "Client"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2116
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2135
 msgid "Client priority base"
 msgstr ""
 
@@ -549,13 +549,13 @@ msgid "DNS servers"
 msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:937
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2026
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2100
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2045
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2119
 msgid "Daemon settings"
 msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:958
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2094
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2113
 msgid "Daemon settings applied."
 msgstr ""
 
@@ -564,7 +564,7 @@ msgid "Data schema"
 msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:877
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1855
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1874
 msgid "Default route"
 msgstr ""
 
@@ -750,7 +750,7 @@ msgid ""
 "timers 0 to 86400 seconds."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1811
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1830
 msgid "Explain"
 msgstr ""
 
@@ -759,7 +759,7 @@ msgid "Extra pppd options"
 msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1181
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2125
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2144
 msgid "Failure grace"
 msgstr ""
 
@@ -788,7 +788,7 @@ msgstr ""
 msgid "Firewall"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:618
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:632
 msgid "Fix"
 msgstr ""
 
@@ -836,7 +836,7 @@ msgid ""
 "otherwise."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2108
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2127
 msgid "Hand out WANs to clients"
 msgstr ""
 
@@ -844,7 +844,7 @@ msgstr ""
 msgid "Hand-placed bindings have nowhere to sit: %s"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2106
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2125
 msgid ""
 "Hand-placed bindings live in priorities %d to %d. Nothing outside the ranges "
 "below is ever read or written by this package."
@@ -885,7 +885,7 @@ msgstr ""
 msgid "Hostname"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2109
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2128
 msgid ""
 "How often the router re-reads its leases and its rules. A lease arriving is "
 "acted on immediately whatever this says."
@@ -915,11 +915,11 @@ msgstr ""
 msgid "Inactivity timeout"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:729
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:743
 msgid "Install"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:768
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:782
 msgid ""
 "Install %s now, under the countdown? The services being replaced include the "
 "ones binding clients and dialling pools."
@@ -931,7 +931,7 @@ msgid ""
 "this router's routing rules."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:723
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:737
 msgid ""
 "Install %s with apk now? This runs \"apk update\" first and can take a "
 "minute."
@@ -954,7 +954,7 @@ msgid "Install them with apk, in one command"
 msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:333
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:746
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:760
 msgid "Installed"
 msgstr ""
 
@@ -970,11 +970,11 @@ msgid ""
 "the change once you are sure this router is still reachable."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:727
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:741
 msgid "Installed. Re-checking what the router has now."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:772
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:786
 msgid ""
 "Installing. The countdown at the top of the page is running: keep the change "
 "once this router is still reachable."
@@ -1025,7 +1025,7 @@ msgid ""
 "calls that do it are not in it."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2111
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2130
 msgid "Keep LAN traffic local"
 msgstr ""
 
@@ -1055,11 +1055,11 @@ msgstr ""
 msgid "LAN-local escape"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2120
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2139
 msgid "LAN-local priority base"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:658
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:672
 msgid ""
 "LAN-local rules go back on, so a bound address still reaches this router's "
 "other networks."
@@ -1079,7 +1079,7 @@ msgstr ""
 msgid "Last pass"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:757
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:771
 msgid "Last update: %s, %s to %s."
 msgstr ""
 
@@ -1088,12 +1088,12 @@ msgid "Last update: %s, %s to %s. Packages: %s."
 msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:334
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:747
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:761
 msgid "Latest"
 msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1182
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2126
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2145
 msgid "Lease grace"
 msgstr ""
 
@@ -1121,7 +1121,7 @@ msgstr ""
 msgid "Letters, digits and underscores, up to 32. This is the section name."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:553
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:567
 msgid "Limited first by %s."
 msgstr ""
 
@@ -1151,7 +1151,7 @@ msgid "MTU has to be 576 to 9200, or empty for the default."
 msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:87
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:795
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:809
 #: packages/luci-app-bm/root/usr/share/luci/menu.d/luci-app-bm.json:28
 msgid "Maintenance"
 msgstr ""
@@ -1168,7 +1168,7 @@ msgstr ""
 msgid "Masquerade"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1817
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1836
 msgid "Matches"
 msgstr ""
 
@@ -1181,15 +1181,15 @@ msgstr ""
 msgid "Memory"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:542
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:556
 msgid "Memory available"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:541
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:555
 msgid "Memory needed"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2004
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2023
 msgid "Missing: %s"
 msgstr ""
 
@@ -1237,7 +1237,7 @@ msgstr ""
 msgid "Neighbour thresholds"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:544
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:558
 msgid "Next tier at"
 msgstr ""
 
@@ -1309,7 +1309,7 @@ msgid ""
 "all, and \"All\" above lists every one."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1985
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2004
 msgid "Nothing was compared: %s"
 msgstr ""
 
@@ -1328,7 +1328,7 @@ msgstr ""
 msgid "Nothing would change: the router already matches this snapshot."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2114
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2133
 msgid "Numbering"
 msgstr ""
 
@@ -1344,13 +1344,13 @@ msgstr ""
 msgid "Off means the servers below are used instead."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2108
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2127
 msgid ""
 "Off stops every instance and takes their rules off. Bindings placed by hand "
 "are not an instance and stay in force."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2112
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2131
 msgid ""
 "On by default. One rule per LAN - \"to <LAN subnet> lookup main\" - read "
 "before every binding rule, so a bound device still reaches the devices "
@@ -1425,7 +1425,7 @@ msgstr ""
 msgid "Overview"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1817
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1836
 msgid "Owner"
 msgstr ""
 
@@ -1447,7 +1447,7 @@ msgstr ""
 msgid "PPPoE sessions up"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2109
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2128
 msgid "Pass interval (s)"
 msgstr ""
 
@@ -1526,7 +1526,7 @@ msgid ""
 "apart. Empty leaves pppd's default."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1817
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1836
 msgid "Priority"
 msgstr ""
 
@@ -1563,7 +1563,7 @@ msgid ""
 msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:436
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:485
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:499
 msgid "Re-check"
 msgstr ""
 
@@ -1636,13 +1636,13 @@ msgstr ""
 msgid "Remember each client's WAN"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1947
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1966
 msgid ""
 "Remove every ip rule this package wrote? Every bound client loses its route "
 "until the next pass puts it back, and the fail-closed catch-all goes too."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1953
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1972
 msgid "Remove every rule"
 msgstr ""
 
@@ -1680,7 +1680,7 @@ msgid ""
 "goes through one of them."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1855
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1874
 msgid "Role"
 msgstr ""
 
@@ -1696,7 +1696,7 @@ msgstr ""
 msgid "Router clock"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1907
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1926
 msgid "Routing tables"
 msgstr ""
 
@@ -1706,7 +1706,7 @@ msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1750
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1766
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1879
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1898
 msgid "Rules on this router"
 msgstr ""
 
@@ -1718,7 +1718,7 @@ msgstr ""
 msgid "Rules we wrote, of the %d listed"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1932
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1951
 msgid "Run a pass now"
 msgstr ""
 
@@ -1729,7 +1729,7 @@ msgstr ""
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:961
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1141
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1548
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2132
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2151
 msgid "Save"
 msgstr ""
 
@@ -1750,11 +1750,11 @@ msgid "Seats"
 msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1181
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2125
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2144
 msgid "Seconds a WAN has to have been failing before a client is moved off it."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2124
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2143
 msgid "Seconds a WAN has to have been up before it is handed to a client."
 msgstr ""
 
@@ -1764,7 +1764,7 @@ msgid ""
 "dialled PPPoE sessions come up before they carry traffic."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2126
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2145
 msgid "Seconds a client keeps its WAN after its lease disappears."
 msgstr ""
 
@@ -1786,7 +1786,7 @@ msgstr ""
 msgid "Service name"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:539
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:553
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:383
 msgid "Sessions"
 msgstr ""
@@ -1864,7 +1864,7 @@ msgstr ""
 msgid "Somebody asked for a snapshot"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2009
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2028
 msgid ""
 "Something else on this router is writing into these priorities. A Bored "
 "Manager module older than 3.4.0 does exactly that, every two seconds, while "
@@ -1909,7 +1909,7 @@ msgstr ""
 msgid "Stopped"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2091
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2110
 msgid ""
 "Switching the instance half off takes every instance's rules away first. "
 "Hand-placed bindings stay in force. Go on?"
@@ -1917,8 +1917,8 @@ msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/pppoe.js:476
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1251
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1817
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1855
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1836
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1874
 msgid "Table"
 msgstr ""
 
@@ -1950,7 +1950,7 @@ msgstr ""
 msgid "The IPv4 address, or the MAC, this binding is about."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2084
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2103
 msgid ""
 "The LAN-local base %d opens a band 64 wide that reaches %d, which is not "
 "below the binding base %d. Every LAN escape has to be read before any "
@@ -1999,7 +1999,7 @@ msgid ""
 "The carrier mode of a pool cannot change; delete it and create a new one."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:779
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:793
 msgid "The check failed and the router did not say why."
 msgstr ""
 
@@ -2019,7 +2019,7 @@ msgid ""
 "is in the pool."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2118
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2137
 msgid "The first instance's \"unreachable default\" table."
 msgstr ""
 
@@ -2034,7 +2034,7 @@ msgid ""
 "force."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2074
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2093
 msgid ""
 "The interval is 1-3600 seconds, priorities 1-2147483647, the LAN-local base "
 "1000-27999, tables 1-65535 and the timers 0-86400 seconds."
@@ -2055,7 +2055,7 @@ msgstr ""
 msgid "The one account every member dials with."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2101
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2120
 msgid ""
 "The pass timer, and the numbers every instance written after this is cut "
 "from. An instance already on this router keeps the numbers stamped on its "
@@ -2076,13 +2076,13 @@ msgstr ""
 msgid "The release server offers %s; this router is on %s."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1862
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1881
 msgid ""
 "The router answered and named no routing table at all, not even its own main "
 "one, which is worth a look at a console."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1823
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1842
 msgid ""
 "The router answered, and there is not one ip rule on it - not even the three "
 "the kernel writes for itself, which is worth a look at a console."
@@ -2141,11 +2141,11 @@ msgid ""
 "package may have just been removed."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1863
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1882
 msgid "The router has not answered with its routing tables yet."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1824
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1843
 msgid "The router has not answered with its rule table yet."
 msgstr ""
 
@@ -2153,7 +2153,7 @@ msgstr ""
 msgid "The router has re-read netifd and the counters."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1930
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1949
 msgid "The router has run a full pass."
 msgstr ""
 
@@ -2163,7 +2163,7 @@ msgid ""
 "makes, and can put one back without anybody being able to reach it."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1803
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1816
 msgid ""
 "The router no longer has this rule. Something has removed it since this "
 "table was read."
@@ -2211,20 +2211,24 @@ msgstr ""
 msgid "The router would not say why."
 msgstr ""
 
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:476
+msgid "The router would not work out a capacity report, and did not say why."
+msgstr ""
+
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1115
 msgid ""
 "The router would stamp this instance with client priority %d, catch-all "
 "priority %d and catch-all table %d."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1898
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1917
 msgid ""
 "The router's main table has no default route. Every address this package "
 "does not claim - and every one it hands back when a WAN goes down - is "
 "looked up there and finds nothing."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1893
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1912
 msgid "The router's own default route leaves by %s%s."
 msgstr ""
 
@@ -2246,7 +2250,7 @@ msgstr ""
 msgid "The row list has not arrived yet."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1951
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1970
 msgid "The rules are off the router."
 msgstr ""
 
@@ -2328,7 +2332,7 @@ msgid ""
 "These pages are drawn from what bm-agent reports, and it did not answer: %s"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2104
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2123
 msgid "These priorities do not hold together: %s"
 msgstr ""
 
@@ -2360,7 +2364,7 @@ msgid ""
 "release that made them would have."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1987
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2006
 msgid ""
 "This is not a router whose rules are all in place. What the kernel is "
 "holding is unknown until the read works, and nothing should be concluded "
@@ -2401,7 +2405,7 @@ msgid ""
 "connection."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:792
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:806
 msgid ""
 "This router asks the release server only when somebody presses the button; "
 "nothing here runs on its own. The full flow, including rollback, is on the "
@@ -2414,7 +2418,7 @@ msgid ""
 "installs one only under the countdown."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1904
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1923
 msgid ""
 "This router has %d ip rules and the list below is the first %d of them, in "
 "the order the kernel walks them. Ask for the rest with \"bmwan rules --"
@@ -2477,11 +2481,11 @@ msgstr ""
 msgid "Throughput, last five minutes"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:543
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:557
 msgid "Tier"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2123
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2142
 msgid "Timers"
 msgstr ""
 
@@ -2500,7 +2504,7 @@ msgstr ""
 msgid "Undo now"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2007
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2026
 msgid "Unexpected: %s"
 msgstr ""
 
@@ -2521,12 +2525,12 @@ msgstr ""
 msgid "Up to date"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:780
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:794
 msgid "Up to date."
 msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:474
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:774
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:788
 msgid "Update now"
 msgstr ""
 
@@ -2535,7 +2539,7 @@ msgid "Update source"
 msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:343
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:791
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:805
 msgid "Updates"
 msgstr ""
 
@@ -2586,7 +2590,7 @@ msgstr ""
 msgid "VLANs"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1941
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1960
 msgid "Verify"
 msgstr ""
 
@@ -2596,7 +2600,7 @@ msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1250
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1575
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1855
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1874
 msgid "WAN"
 msgstr ""
 
@@ -2607,11 +2611,11 @@ msgid "WAN Binding"
 msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1180
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2124
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2143
 msgid "WAN settle time"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2119
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2138
 msgid "WAN table base"
 msgstr ""
 
@@ -2655,19 +2659,19 @@ msgid ""
 "opinion."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:477
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:491
 msgid ""
 "What this router has, against what its configuration needs, and roughly "
 "where it stops. Every number is an estimate worked out on the router."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2115
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2134
 msgid ""
 "Where hand-placed bindings are numbered from. They sit below every instance, "
 "so the kernel reads them first."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2119
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2138
 msgid "Where routing tables are handed out from for WANs that have none."
 msgstr ""
 
@@ -2676,11 +2680,11 @@ msgid ""
 "Where the fail-closed rule sits. Nothing outside this range is ever touched."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2116
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2135
 msgid "Where the first instance's client rules start."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2117
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2136
 msgid "Where the first instance's fail-closed rule sits."
 msgstr ""
 
@@ -2712,7 +2716,7 @@ msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:135
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1693
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1817
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1836
 msgid "Why"
 msgstr ""
 
@@ -2772,7 +2776,7 @@ msgid ""
 "agent\"."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:523
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:537
 msgid "at risk"
 msgstr ""
 
@@ -2819,7 +2823,7 @@ msgstr ""
 msgid "bm-pppoe-pool is not installed. Without it this router dials no pools."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:645
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:659
 msgid ""
 "bm-pppoe-pool re-reads netifd, its counters and its firewall zones. The "
 "firewall reloads only if something changed."
@@ -2843,7 +2847,7 @@ msgid ""
 "add bm-wanbind\"."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:637
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:651
 msgid ""
 "bm-wanbind runs a full pass and puts back every rule it decided and the "
 "kernel does not have."
@@ -2917,7 +2921,7 @@ msgid ""
 "thousands of linear fib rules; committed to the firewall config and reloaded."
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:679
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:693
 msgid "fw4 software flow offload on, and the firewall reloaded"
 msgstr ""
 
@@ -2971,7 +2975,7 @@ msgstr ""
 msgid "looks up no table"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:709
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:723
 msgid "missing"
 msgstr ""
 
@@ -3016,7 +3020,7 @@ msgstr ""
 msgid "not asked"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:747
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:761
 msgid "not asked yet"
 msgstr ""
 
@@ -3040,7 +3044,7 @@ msgstr ""
 msgid "not set"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:596
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:610
 msgid "note"
 msgstr ""
 
@@ -3048,8 +3052,8 @@ msgstr ""
 msgid "nothing was asked - the daemon is not answering"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:596
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:708
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:610
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:722
 msgid "ok"
 msgstr ""
 
@@ -3103,7 +3107,7 @@ msgstr ""
 msgid "pools stopped"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:593
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:607
 msgid "problem"
 msgstr ""
 
@@ -3123,7 +3127,7 @@ msgstr ""
 msgid "shared account"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:522
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:536
 msgid "stable"
 msgstr ""
 
@@ -3149,11 +3153,11 @@ msgstr ""
 msgid "the priority band is not usable"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1986
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2005
 msgid "the router could not read its ip rules"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2104
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:2123
 msgid "the router did not say why"
 msgstr ""
 
@@ -3181,8 +3185,9 @@ msgstr ""
 
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/maintenance.js:617
 #: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:461
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:526
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:709
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:474
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:540
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:723
 msgid "unknown"
 msgstr ""
 
@@ -3194,7 +3199,7 @@ msgstr ""
 msgid "unset"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:524
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:538
 msgid "unstable"
 msgstr ""
 
@@ -3212,11 +3217,11 @@ msgstr ""
 msgid "up"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:761
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:775
 msgid "update available"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1895
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/wanbind.js:1914
 msgid "via %s"
 msgstr ""
 
@@ -3224,7 +3229,7 @@ msgstr ""
 msgid "via %s on %s"
 msgstr ""
 
-#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:595
+#: packages/luci-app-bm/htdocs/luci-static/resources/view/bm/overview.js:609
 msgid "warning"
 msgstr ""
 

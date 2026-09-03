@@ -314,7 +314,15 @@ export class ScanEngine {
       if (!reply.data.read) return this.fail(generation, UNREADABLE)
 
       pages += 1
-      merged = merged === null ? reply.data : joinPages(merged, reply.data)
+      // The counts come from the newest page, the rows accumulate. `joinPages`
+      // keeps the first page's fields, which is right for the bands and the
+      // main table - they describe the router, not the page - and wrong for
+      // `count`: a rule table that grew or shrank between pages would be judged
+      // against a number taken before it moved.
+      const count = reply.data.count
+      const raw = reply.data.raw
+
+      merged = merged === null ? reply.data : { ...joinPages(merged, reply.data), count, raw }
       offset += reply.data.rules.length
 
       // A page that came back empty ends it whatever the count says: the

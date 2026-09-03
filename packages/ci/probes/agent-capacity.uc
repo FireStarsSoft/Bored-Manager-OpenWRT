@@ -266,8 +266,20 @@ bindings(950);
 let crowded = compute({});
 
 check('950 of the band is a warning', levelOf(crowded, 'band'), 'warning');
-check('and the band is what caps the bindings', crowded.ceiling.limitedBy.bindings, 'band');
-check('with what is left of it', crowded.ceiling.dimensions.band.bindings, K.DIRECT_PREF_SPAN - 950);
+
+// The dimension is a total, like every other one: how many bindings fit, not
+// how many are left. It was the remainder, and because `stabilityOf` compares
+// the configured total against the ceiling, the ceiling fell by one for every
+// binding added and the comparison flipped at 501 - the middle of the range the
+// b2 tier calls ordinary. How much of the band is *taken* is the `band` finding
+// two lines up, which is where that question belongs.
+check('the whole band fits when every section in it is a live binding',
+	crowded.ceiling.dimensions.band.bindings, K.DIRECT_PREF_SPAN);
+// The band warning at 95% makes this at-risk, which is the right verdict. What
+// it is not is over a ceiling: that was the remainder talking.
+check('and what caps the bindings is named', type(crowded.ceiling.limitedBy.bindings), 'string');
+check('and the band is no longer the thing that caps them',
+	crowded.ceiling.dimensions.band.bindings >= 950, true);
 
 baseline(2097152, 1600000);
 bindings(1000);
@@ -275,7 +287,25 @@ bindings(1000);
 let full = compute({});
 
 check('a full band is an error', levelOf(full, 'band'), 'error');
-check('and nothing is left in it', full.ceiling.dimensions.band.bindings, 0);
+
+// Sections that hold a priority and are not a live binding are what the band
+// actually loses: a switched-off one is one `enabled 1` away from wanting its
+// number back.
+baseline(2097152, 1600000);
+bindings(100);
+
+for (let i = 0; i < 40; i++) {
+	let name = sprintf('bmdir_off%04d', i);
+
+	uci.set('bm_wanbind', name, 'direct');
+	uci.set('bm_wanbind', name, 'pref', sprintf('%d', 19500 + i));
+	uci.set('bm_wanbind', name, 'enabled', '0');
+}
+
+let parked = compute({});
+
+check('a switched-off binding still costs its priority',
+	parked.ceiling.dimensions.band.bindings, K.DIRECT_PREF_SPAN - 40);
 
 // The router's own interface list, which every daemon and the firewall read.
 // Past the size where it stops fitting in a ubus message they stop seeing it.

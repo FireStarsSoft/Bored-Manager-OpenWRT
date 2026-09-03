@@ -502,9 +502,16 @@ if (command == 'capacity') {
 	if (bus)
 		bus.disconnect();
 
+	// The same verdict in both modes. `--json` is the mode a script uses, and it
+	// was the one mode that always exited 0 - so a monitor watching this command
+	// would have called an unstable router healthy, which is the opposite of
+	// what the exit code is for. The USAGE text promised otherwise.
+	let verdict = (type(found.stability) == 'object') ? text(found.stability.level) : '';
+	let bad = (!found.ok || verdict == 'unstable' || verdict == 'unknown');
+
 	if (asJson) {
 		printf('%J\n', found);
-		exit(found.ok ? 0 : 1);
+		exit(bad ? 1 : 0);
 	}
 
 	if (!found.ok) {
@@ -648,7 +655,7 @@ if (command == 'capacity') {
 
 	// Something a script can watch: 0 while the router is carrying what it is
 	// configured to carry, 1 where it is not or where nobody can tell.
-	exit((found.stability.level == 'unstable' || found.stability.level == 'unknown') ? 1 : 0);
+	exit(bad ? 1 : 0);
 }
 
 // Everything about snapshots, restore and the guard, in its own file: this one

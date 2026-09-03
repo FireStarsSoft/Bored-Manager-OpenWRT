@@ -4805,10 +4805,6 @@
                                       "label": "Owner",
                                       "format": "badges",
                                       "sortable": false
-                                    },
-                                    {
-                                      "key": "reason",
-                                      "label": "What it does"
                                     }
                                   ],
                                   "sortDefault": {
@@ -4818,8 +4814,7 @@
                                   "filterKeys": [
                                     "ip",
                                     "wan",
-                                    "tableLabel",
-                                    "reason"
+                                    "tableLabel"
                                   ],
                                   "groupModes": [
                                     {

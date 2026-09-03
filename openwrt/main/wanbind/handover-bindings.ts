@@ -147,6 +147,17 @@ async function sendBatch(
   if (reply.ok && reply.data && reply.data.ok !== false) return reply
   if (batch.length < 2 || !alive()) return reply
 
+  // Split only when the call did not reach the daemon.
+  //
+  // `data.ok === false` means the router answered and refused the batch as a
+  // whole - "/etc/config could not be opened", "the overlay may be full" - and
+  // a smaller call gets the same answer. Splitting on it walks the entire tree
+  // for nothing: 2n-1 calls where the old code made log n, each able to sit on
+  // a two-minute timeout, on a pass the page is waiting for. Halving is for the
+  // failure that has no answer at all, which is what an over-long command looks
+  // like, and that is the one this guard lets through.
+  if (reply.data && reply.data.ok === false) return reply
+
   // Both halves, always, and merged per record.
   //
   // Returning on the first half that failed is the obvious shape and it is

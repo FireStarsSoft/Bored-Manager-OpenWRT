@@ -258,6 +258,40 @@ function poolsConfigured(uci) {
 	return out;
 }
 
+/**
+ * How many addresses an instance's range covers, or 0 when it has none.
+ *
+ * Its own parser rather than bm-wanbind's, because the dependency only runs the
+ * other way: the daemons import from this package and this package must not
+ * import from them - they are optional, and ucode resolves an import at load.
+ *
+ * Bounded at the /16 an instance could plausibly seat. A range read out of a
+ * hand-edited file could otherwise put a number in the lease requirement that
+ * makes every other figure on the page look absurd.
+ */
+function rangeSize(from, to) {
+	let a = match(trim(text(from)), /^([0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$/);
+	let b = match(trim(text(to)), /^([0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$/);
+
+	if (!a || !b)
+		return 0;
+
+	let low = 0;
+	let high = 0;
+
+	for (let i = 1; i <= 4; i++) {
+		low = (low * 256) + int(a[i]);
+		high = (high * 256) + int(b[i]);
+	}
+
+	if (high < low)
+		return 0;
+
+	let span = (high - low) + 1;
+
+	return (span > 65536) ? 65536 : span;
+}
+
 function wanbindConfigured(uci) {
 	let out = {
 		instances: 0,
@@ -277,6 +311,14 @@ function wanbindConfigured(uci) {
 				return;
 
 			out.instances++;
+
+			// The clients an instance seats out of a range, which is not the
+			// same as the leases the router is handing out right now - a range
+			// is a claim on addresses whether or not anything is using them,
+			// and the DHCP ceiling has to cover it. Nothing assigned this, so
+			// the lease requirement under-counted every range-scoped instance
+			// by its whole range.
+			out.rangedClients += rangeSize(section.range_from, section.range_to);
 
 			if (!length(out.firstInstance))
 				out.firstInstance = text(section['.name']);
@@ -528,7 +570,24 @@ function dimensions(load, hardware, software, needed) {
 	let pools = length(load.configured.pools);
 	out.pool = { sessions: K.MEMBER_MAX * ((pools > 0) ? pools : 1), bindings: null };
 
-	out.band = { sessions: null, bindings: K.DIRECT_PREF_SPAN - load.configured.prefsClaimed };
+	// A total, like every other dimension here - "how many bindings fit", not
+	// "how many are left". It was the remainder, and every dimension is compared
+	// against the configured total by `stabilityOf`, so the ceiling fell by one
+	// for every binding added and the comparison flipped at 501: exactly the
+	// range the b2 tier calls ordinary. A router with six hundred bindings read
+	// `unstable`, with a sentence about a ceiling of four hundred, printed under
+	// a tier line saying 501 to 1000 is a size this release plans for.
+	//
+	// What the band actually costs is the priorities held by sections that are
+	// not enabled bindings - switched off or refused - because those are one
+	// `enabled 1` away from wanting their number back. Enabled ones are the
+	// thing being counted, so they are not subtracted from their own ceiling.
+	let heldByOthers = load.configured.prefsClaimed - load.configured.bindings;
+
+	if (heldByOthers < 0)
+		heldByOthers = 0;
+
+	out.band = { sessions: null, bindings: K.DIRECT_PREF_SPAN - heldByOthers };
 
 	if (type(software.conntrackMax) == 'int' && software.conntrackMax > 0) {
 		let seats = software.conntrackMax / K.FLOWS_PER_SEAT;

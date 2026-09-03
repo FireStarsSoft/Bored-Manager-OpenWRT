@@ -410,8 +410,11 @@ export function buildScanRows(reply: WanbindRulesReply): ScanRowsResult {
     // and the tile this feeds is the one that says how many rules somebody
     // should go and look at.
     if (!MANAGED_OWNERS.has(rule.owner) && !ROUTER_OWNERS.has(rule.owner)) summary.foreign += 1
-    if (unreachable) summary.unreachable += 1
-    if (!sourceRouted) summary.selectors += 1
+    // `stands`, like `total` and `byOwner` above. These tiles sit under one
+    // heading and were counting different things: a collapsed netifd row is
+    // three rules everywhere else on the page and was one here.
+    if (unreachable) summary.unreachable += stands
+    if (!sourceRouted) summary.selectors += stands
   }
 
   return { rows, summary }
