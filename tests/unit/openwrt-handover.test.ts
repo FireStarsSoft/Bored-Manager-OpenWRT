@@ -166,6 +166,12 @@ describe('the records this module still holds are offered to the router', () => 
       for (const payload of client.daemon.payloads('bind_many')) {
         expect((payload.bindings as unknown[]).length).toBeLessThanOrEqual(200)
       }
+
+      // One line in the trail per batch, not one per record. The module-wide
+      // ring holds far fewer than four hundred and fifty entries, so a line
+      // each would have pushed out every other kind of event in it.
+      const trail = client.events.filter((entry) => entry.kind === 'handover')
+      expect(trail).toHaveLength(3)
     } finally {
       client.dispose()
     }

@@ -326,6 +326,7 @@ async function handOverBindings(
     if (!alive()) return
 
     const batch = pending.slice(at, at + HANDOVER_CHUNK)
+    const confirmed: DirectBindingRecord[] = []
     const reply = await wanbindBindMany(deps, batch.map((one) => one.spec))
 
     if (!alive()) return
@@ -395,24 +396,53 @@ async function handOverBindings(
         continue
       }
 
-      forgetOne(runtime, one.record, outcome)
+      confirmed.push(one.record)
     }
+
+    // One write for the batch, and one line in the trail. `forget` flushes the
+    // whole per-router document, so calling it per record made five hundred
+    // records five hundred writes of a document that can be a couple of hundred
+    // kilobytes - and five hundred lines into an event ring that holds far
+    // fewer than that, which would have pushed out every other kind of event
+    // the ring exists to keep.
+    forgetMany(runtime, confirmed, outcome)
   }
 }
 
-/** Drop one record the router has confirmed, and say so in the trail. */
-function forgetOne(
+/**
+ * Drop every record in one batch the router confirmed, in one write.
+ *
+ * The single-record `forget` next door is still what the instance half uses -
+ * instances are handed over one at a time, because `instance_set` is one at a
+ * time - and this is its batch form. Both remove the same three things: the
+ * record, and any routing-table claim filed under it.
+ */
+function forgetMany(
   runtime: BindingRuntime,
-  record: DirectBindingRecord,
+  records: DirectBindingRecord[],
   outcome: HandoverOutcome
 ): void {
-  forget(
+  if (!records.length) return
+
+  const ids = new Set(records.map((one) => one.id))
+
+  runtime.store.updateNow((data) => {
+    data.direct = data.direct.filter((entry) => !ids.has(entry.id))
+    data.extraTables = data.extraTables.filter((entry) => !ids.has(entry[2] ?? ''))
+  })
+
+  outcome.dropped += records.length
+
+  const first = records[0]
+  const one = records.length === 1
+
+  recordEvent(
     runtime,
-    'binding',
-    record.id,
-    `one-to-one binding ${record.name} (${targetLabel(record)} through ${record.wan}) is now kept by the router's bm-wanbind, and this module no longer holds a record of it`
+    'handover',
+    one && first
+      ? `one-to-one binding ${first.name} (${targetLabel(first)} through ${first.wan}) is now kept by the router's bm-wanbind, and this module no longer holds a record of it`
+      : `${records.length} one-to-one bindings this module created before the router kept its own are now kept by bm-wanbind, every one of them at the priority its rule already stood at, and this module holds no record of them`
   )
-  outcome.dropped += 1
 }
 
 /**

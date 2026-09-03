@@ -734,6 +734,8 @@ export interface WanbindDeps {
   store: HostStore
   /** Every job started, in order, with what its work actually did. */
   jobs: Array<{ kind: string; label: string; ok: boolean; error: string }>
+  /** Every line the module wrote to its own event trail this run. */
+  events: Array<{ kind: string; text: string }>
   config: { effectiveRules: () => { execTimeoutSec: number } }
   jobRunner: { start: (spec: JobSpec) => OpenWrtJob }
   service: { forceDump: () => void; latestModel: () => RouterModel | null; event: () => void }
@@ -769,6 +771,7 @@ export function wanbindDeps(options: WanbindOptions = {}): WanbindDeps {
   })
 
   const jobs: WanbindDeps['jobs'] = []
+  const events: Array<{ kind: string; text: string }> = []
   const store = new HostStore(harness.ctx, () => DEFAULT_RULES)
   const capability = options.capability ?? bindingCapability()
 
@@ -777,6 +780,7 @@ export function wanbindDeps(options: WanbindOptions = {}): WanbindDeps {
     daemon,
     store,
     jobs,
+    events,
     config: { effectiveRules: () => ({ execTimeoutSec: 60 }) },
     jobRunner: {
       start: (spec) => {
@@ -797,7 +801,9 @@ export function wanbindDeps(options: WanbindOptions = {}): WanbindDeps {
     service: {
       forceDump: () => {},
       latestModel: () => options.model ?? null,
-      event: () => {}
+      event: (kind?: string, text?: string) => {
+        events.push({ kind: String(kind ?? ''), text: String(text ?? '') })
+      }
     },
     capability: () => capability
   }
@@ -852,6 +858,8 @@ export interface WanbindClient {
    */
   store: HostStore
   manager: BindingManager
+  /** Every line written to the module-wide event trail this run. */
+  events: Array<{ kind: string; text: string }>
   /** Every job the manager started, in order, with what it did when it ran. */
   jobs: Array<{ kind: string; label: string; ok: boolean; error: string }>
   /** Fetch from the daemon and rebuild both snapshots, the way a tick does. */
@@ -892,6 +900,7 @@ export function wanbindClient(options: WanbindOptions = {}): WanbindClient {
     store,
     manager,
     jobs,
+    events: deps.events,
     tick: async () => {
       await manager.refresh()
       manager.snapshot()
