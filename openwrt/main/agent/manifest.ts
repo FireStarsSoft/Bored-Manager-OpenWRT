@@ -40,10 +40,10 @@ export interface PinnedPackage {
 }
 
 /** The package release these hashes came from. Empty when nothing is pinned. */
-export const PINNED_RELEASE = '2.4.0'
+export const PINNED_RELEASE = '2.4.1'
 
 /** Where the files below live. One directory, one release, no redirects. */
-export const PINNED_BASE = 'https://github.com/FireStarsSoft/Bored-Manager-OpenWRT/releases/download/pkg-v2.4.0/'
+export const PINNED_BASE = 'https://github.com/FireStarsSoft/Bored-Manager-OpenWRT/releases/download/pkg-v2.4.1/'
 
 /**
  * Written by `npm run pin:packages`. Order is install order, which matters:
@@ -52,33 +52,33 @@ export const PINNED_BASE = 'https://github.com/FireStarsSoft/Bored-Manager-OpenW
 export const PINNED_PACKAGES: readonly PinnedPackage[] = [
   {
     name: 'bm-agent',
-    file: 'bm-agent-2.4.0-r1.apk',
-    sha256: '87ed9f9c056b14324f9f686ad3e202e68fe463b2fbb4820d98a9e49ed188aa82',
-    size: 71547
+    file: 'bm-agent-2.4.1-r1.apk',
+    sha256: '36060f36df159ea129ec024dcbb0aa3328d30090e4501ff8a3732afbf38c2f06',
+    size: 73021
   },
   {
     name: 'bm-pppoe-pool',
-    file: 'bm-pppoe-pool-2.4.0-r1.apk',
-    sha256: 'f457d8747a816a9e4aa32e76f1867a923f58c5325f0de8e9a6693d72d197c4cb',
-    size: 50325
+    file: 'bm-pppoe-pool-2.4.1-r1.apk',
+    sha256: 'b82a52aff23780c00d1fda4f3484b23553d9f1bd800c6a6806ad4787a3dfb4af',
+    size: 50327
   },
   {
     name: 'bm-wanbind',
-    file: 'bm-wanbind-2.4.0-r1.apk',
-    sha256: '11dd87dcb81a14bf00c14e7e84e4169f0abfb887cd7f1456ba7a49d0121691be',
-    size: 176856
+    file: 'bm-wanbind-2.4.1-r1.apk',
+    sha256: '44b368fff4ef750eae96447a7e62843ba633a1bdfa27eea944d62c8162ececb4',
+    size: 176859
   },
   {
     name: 'luci-app-bm',
-    file: 'luci-app-bm-2.4.0-r1.apk',
-    sha256: '6c09af6efc16b5b618eef44cdd9f815ba473f6a5a4b09682219f303aa2c06077',
-    size: 39849
+    file: 'luci-app-bm-2.4.1-r1.apk',
+    sha256: '6fc789593e934b8d7a1e44bed3a1a16cdafe01a39025e9590e87d8202668ef24',
+    size: 39848
   },
   {
     name: 'luci-i18n-bm-vi',
-    file: 'luci-i18n-bm-vi-2.4.0.apk',
-    sha256: 'abcfc6e014ad2f3418cd137f320e1a7062bcc74b716f1a3a61e7cc6cc66a1fc3',
-    size: 20937
+    file: 'luci-i18n-bm-vi-2.4.1.apk',
+    sha256: '0ed5fd0d18183c52c19e3e6c08465b6e25d2ab9f5ac8534b70652258e31d64f5',
+    size: 20939
   }
 ]
 
