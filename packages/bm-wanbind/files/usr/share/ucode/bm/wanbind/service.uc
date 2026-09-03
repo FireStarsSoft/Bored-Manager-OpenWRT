@@ -203,11 +203,13 @@ function rssKb() {
  * numbers and half against the new ones.
  */
 export function load() {
-	state.main = cfg.main();
+	let snap = cfg.snapshot({ log: true });
+
+	state.main = cfg.main(snap);
 	state.instances = {};
 	state.order = [];
 
-	for (let one in cfg.instances()) {
+	for (let one in cfg.instances(snap)) {
 		if (!one.enabled) {
 			notice('instance ' + one.id + ' is disabled; its rules will be removed');
 			continue;
@@ -225,12 +227,12 @@ export function load() {
 	// once at start is how many there are and whether the band they are
 	// numbered in is safe, because a band that is not is a refusal every future
 	// `bind` will hit and this is the first place anybody would see it.
-	let band = cfg.directBand();
+	let band = cfg.directBand(snap);
 
 	if (band.reason)
 		err('direct_pref_base: ' + band.reason);
 
-	notice(sprintf('%d binding(s) in the file, numbered in %d-%d', length(cfg.directBindings()), band.base, band.top));
+	notice(sprintf('%d binding(s) in the file, numbered in %d-%d', length(cfg.directBindings(snap)), band.base, band.top));
 };
 
 export function attach(bus) {
@@ -432,6 +434,8 @@ function schedule() {
 }
 
 export function start() {
+	let snap = cfg.snapshot();
+
 	if (!netlink.usable())
 		err('netlink is not answering; no ip rule can be written on this router');
 
@@ -441,7 +445,7 @@ export function start() {
 	// the router's own and are kept in force, and only the pools are off.
 	if (!state.main.enabled) {
 		notice(sprintf('instances are switched off in /etc/config/bm_wanbind, so no client on any LAN will be handed a WAN. The %d one-to-one binding(s) in the file are not an instance and are still reconciled every %ds; `option enabled 1` on the main section brings the pools back',
-			length(cfg.directConfigured()), state.main.interval));
+			length(cfg.directConfigured(snap)), state.main.interval));
 	}
 
 	pass();
@@ -600,9 +604,9 @@ function openConfig() {
  * whether the band it would go in is safe at all, and that is a question about
  * the instances rather than about this section.
  */
-function settingsRead() {
-	let main = cfg.main();
-	let band = cfg.directBand();
+function settingsRead(snap) {
+	let main = cfg.main(snap);
+	let band = cfg.directBand(snap);
 
 	let out = {
 		enabled: main.enabled,
@@ -618,21 +622,19 @@ function settingsRead() {
 		band: band
 	};
 
-	let uci = openConfig();
+	// Off the snapshot rather than out of a cursor of its own. The defaults
+	// above are the shipped ones, so a router that lost /etc/config/bm_wanbind
+	// still answers this question - it simply has no instances for the answer
+	// to apply to, and `raw` is seven nulls.
+	let raw = main.raw;
 
-	// The defaults above are the shipped ones, so a router that lost
-	// /etc/config/bm_wanbind still answers this question. It simply has no
-	// instances for the answer to apply to.
-	if (!uci)
-		return out;
-
-	out.rule_pref_base = numberOr(uci.get(PACKAGE, 'main', 'rule_pref_base'), RULE_PREF_BASE);
-	out.catch_all_pref_base = numberOr(uci.get(PACKAGE, 'main', 'catch_all_pref_base'), CATCH_ALL_PREF_BASE);
-	out.catch_all_table = numberOr(uci.get(PACKAGE, 'main', 'catch_all_table'), CATCH_ALL_TABLE);
-	out.wan_table_base = numberOr(uci.get(PACKAGE, 'main', 'wan_table_base'), WAN_TABLE_BASE);
-	out.wan_warn_uptime = numberOr(uci.get(PACKAGE, 'main', 'wan_warn_uptime'), WAN_WARN_UPTIME);
-	out.wan_error_grace = numberOr(uci.get(PACKAGE, 'main', 'wan_error_grace'), WAN_ERROR_GRACE);
-	out.release_grace = numberOr(uci.get(PACKAGE, 'main', 'release_grace'), RELEASE_GRACE);
+	out.rule_pref_base = numberOr(raw.rule_pref_base, RULE_PREF_BASE);
+	out.catch_all_pref_base = numberOr(raw.catch_all_pref_base, CATCH_ALL_PREF_BASE);
+	out.catch_all_table = numberOr(raw.catch_all_table, CATCH_ALL_TABLE);
+	out.wan_table_base = numberOr(raw.wan_table_base, WAN_TABLE_BASE);
+	out.wan_warn_uptime = numberOr(raw.wan_warn_uptime, WAN_WARN_UPTIME);
+	out.wan_error_grace = numberOr(raw.wan_error_grace, WAN_ERROR_GRACE);
+	out.release_grace = numberOr(raw.release_grace, RELEASE_GRACE);
 
 	return out;
 }
@@ -663,6 +665,8 @@ function netlinkCounters() {
 }
 
 export function info() {
+	let snap = cfg.snapshot();
+
 	let out = [];
 	for (let st in each())
 		push(out, summary(st));
@@ -687,7 +691,7 @@ export function info() {
 		// answer also has to decide what to offer as the default for a *new*
 		// instance, and a second call to find that out is a second chance for
 		// the two to be read a tick apart and disagree.
-		settings: settingsRead(),
+		settings: settingsRead(snap),
 
 		instances: out,
 
@@ -696,7 +700,7 @@ export function info() {
 		// `instances` above, because neither has any state to report. A page
 		// that drew only `instances` would leave out exactly the rows somebody
 		// opened it to fix.
-		configured: cfg.configured(),
+		configured: cfg.configured(snap),
 
 		// The one-to-one half's own totals, and what the kernel did with the
 		// last pass's writes. Both are on `stats` as well, and both are here
@@ -1123,6 +1127,8 @@ export function reconcileNow(args) {
  * router behind whether or not anything is listening.
  */
 export function flush(args) {
+	let snap = cfg.snapshot();
+
 	let id = text(args.instance);
 	let present = netlink.rules();
 
@@ -1156,7 +1162,7 @@ export function flush(args) {
 	 * a priority range that does not add up, and deleting by a range that does
 	 * not add up is how you take somebody else's rules off.
 	 */
-	for (let one in cfg.instances()) {
+	for (let one in cfg.instances(snap)) {
 		if (seen[one.id])
 			continue;
 		if (length(id) && one.id != id)
@@ -1207,8 +1213,8 @@ export function flush(args) {
 // leaves the file the way it found it.
 
 /** The binding by that name as the file has it, refused ones included. */
-function configuredBinding(id) {
-	for (let one in cfg.directConfigured()) {
+function configuredBinding(id, snap) {
+	for (let one in cfg.directConfigured(snap)) {
 		if (one.id == id)
 			return one;
 	}
@@ -1254,10 +1260,10 @@ function wanTable(name) {
  * away from being live while a refused one may well have a rule on the router
  * already from before it was broken.
  */
-function freePref(band) {
+function freePref(band, snap) {
 	let taken = {};
 
-	for (let one in cfg.directConfigured()) {
+	for (let one in cfg.directConfigured(snap)) {
 		if (one.pref >= 1)
 			taken[sprintf('%d', one.pref)] = true;
 	}
@@ -1443,6 +1449,8 @@ function derivedBindings() {
  * priorities it may take, and whether it may take any at all.
  */
 export function bindings(id, source) {
+	let snap = cfg.snapshot();
+
 	let live = {};
 
 	for (let row in direct.bindings()) {
@@ -1452,7 +1460,7 @@ export function bindings(id, source) {
 
 	let out = [];
 
-	for (let one in cfg.directConfigured()) {
+	for (let one in cfg.directConfigured(snap)) {
 		if (length(id) && one.id != id)
 			continue;
 
@@ -1545,7 +1553,7 @@ export function bindings(id, source) {
 	// Every band a rule could legitimately sit in, so a reader does not have to
 	// know this daemon's numbering to tell a binding from an instance's client.
 	let bands = [];
-	for (let one in cfg.configured()) {
+	for (let one in cfg.configured(snap)) {
 		push(bands, {
 			id: one.id,
 			base: one.rulePrefBase,
@@ -1570,7 +1578,7 @@ export function bindings(id, source) {
 		filtered: (length(want) > 0 || length(wantId) > 0),
 		counts: { manual: manual, derived: derived, byState: byState },
 		instances: bands,
-		band: cfg.directBand(),
+		band: cfg.directBand(snap),
 
 		// Whether anything is keeping these rows true. A list of bindings read
 		// off a daemon that is not reconciling them is a list of intentions, and
@@ -1600,7 +1608,7 @@ export function bindings(id, source) {
  * Keyed by the number written out, because ucode object literals take labels
  * and strings and not integers. `rules.uc` keeps the same set the same way.
  */
-function routedTables(list) {
+function routedTables(list, snap) {
 	let taken = {};
 	let uci = openConfig();
 
@@ -1619,7 +1627,7 @@ function routedTables(list) {
 			claim(numberOr(uci.get('network', one.name, 'ip4table'), 0));
 	}
 
-	for (let one in cfg.directConfigured())
+	for (let one in cfg.directConfigured(snap))
 		claim(one.table);
 
 	return taken;
@@ -1678,12 +1686,12 @@ function wanRoleRefusal(wan) {
  * WANs cannot give two of them the same number - `prepare` adds each one it
  * allocates as it goes, and this is what it starts from.
  */
-function wanTablesTaken(list) {
-	let taken = routedTables(list);
+function wanTablesTaken(list, snap) {
+	let taken = routedTables(list, snap);
 
 	taken['253'] = true;
 
-	for (let one in cfg.configured()) {
+	for (let one in cfg.configured(snap)) {
 		if (one.catchAllTable > 0)
 			taken[sprintf('%d', one.catchAllTable)] = true;
 	}
@@ -1705,7 +1713,7 @@ function wanTablesTaken(list) {
  * is a DHCP re-acquire on that WAN and nothing else - the option is a statement
  * about where its routes go, and no other interface's configuration is touched.
  */
-function allocateWanTable(wan) {
+function allocateWanTable(wan, snap) {
 	// Its own cursor, rather than one passed in: this runs before `bind()` opens
 	// the one it writes the binding with, and threading it through would make the
 	// order of two unrelated things matter.
@@ -1751,9 +1759,9 @@ function allocateWanTable(wan) {
 		return 0;
 	}
 
-	let taken = wanTablesTaken(live);
+	let taken = wanTablesTaken(live, snap);
 
-	for (let one in cfg.directConfigured() ?? []) {
+	for (let one in cfg.directConfigured(snap) ?? []) {
 		if (one.table > 0)
 			taken[sprintf('%d', one.table)] = true;
 	}
@@ -1809,6 +1817,8 @@ function allocateWanTable(wan) {
  * the target - `ip` or `mac` - and the `wan` it leaves by.
  */
 export function bind(args) {
+	let snap = cfg.snapshot();
+
 	let id = trim(text(args.id));
 
 	if (!length(id))
@@ -1824,7 +1834,7 @@ export function bind(args) {
 	// A `config instance` by the same name would be turned into a binding by
 	// the write below, which is a whole LAN's pool of WANs deleted by a call
 	// that was adding one address.
-	for (let one in cfg.configured()) {
+	for (let one in cfg.configured(snap)) {
 		if (one.id == id) {
 			return { ok: false, reason: sprintf('%s is already an instance in /etc/config/bm_wanbind - a whole LAN sharing a pool of WANs. Give the binding another name', id) };
 		}
@@ -1851,8 +1861,8 @@ export function bind(args) {
 	if (wanRefusal)
 		return { ok: false, reason: wanRefusal };
 
-	let previous = configuredBinding(id);
-	let band = cfg.directBand();
+	let previous = configuredBinding(id, snap);
+	let band = cfg.directBand(snap);
 
 	let pref = count(args.pref);
 	let table = count(args.table);
@@ -1871,7 +1881,7 @@ export function bind(args) {
 		if (!band.usable)
 			return { ok: false, reason: band.reason };
 
-		pref = freePref(band);
+		pref = freePref(band, snap);
 
 		if (!pref) {
 			return { ok: false, reason: sprintf('every ip rule priority from %d to %d is already claimed by a binding. Widen the band with `option direct_pref_base` on the main section, or remove a binding that is no longer wanted', band.base, band.top) };
@@ -1890,7 +1900,7 @@ export function bind(args) {
 		// arithmetic this half can do, and `writePreparation` already knows how
 		// to write the option once a record carries the number.
 		if (!table)
-			table = allocateWanTable(wan);
+			table = allocateWanTable(wan, snap);
 
 		if (!table) {
 			return { ok: false, reason: sprintf('netifd reports no ip4table for %s, so there is no table for this binding to point at. Give that interface `option ip4table` in /etc/config/network - a WAN with no table of its own has no route this binding could send anything down', wan) };
@@ -1981,10 +1991,15 @@ export function bind(args) {
 		return { ok: false, reason: 'the binding would not commit to /etc/config/bm_wanbind; the file may be read-only or the overlay full' };
 	}
 
+	// The file has changed, so the read this call arrived with describes a
+	// router that no longer exists. Everything below asks what was actually
+	// written, which is not the question every line above was asking.
+	snap = cfg.snapshot();
+
 	// Read back rather than trusted. Everything above is a field going into a
 	// file; whether those fields are a binding this router can act on is one
 	// question with one answer, and it is `bm.wanbind.config`'s.
-	let written = configuredBinding(id);
+	let written = configuredBinding(id, snap);
 
 	if (!written || written.reason) {
 		restore(id, previous);
@@ -2022,17 +2037,19 @@ export function bind(args) {
  * this daemon has no claim to.
  */
 export function unbind(args) {
+	let snap = cfg.snapshot();
+
 	let id = trim(text(args.id));
 
 	if (!length(id))
 		return { ok: false, reason: 'name the binding to remove' };
 
-	let one = configuredBinding(id);
+	let one = configuredBinding(id, snap);
 
 	if (!one)
 		return { ok: false, reason: sprintf('no binding called %s in /etc/config/bm_wanbind', id) };
 
-	let band = cfg.directBand();
+	let band = cfg.directBand(snap);
 	let stray = (one.pref >= 1 && (one.pref < band.base || one.pref > band.top));
 
 	let uci = openConfig();
@@ -2045,6 +2062,11 @@ export function unbind(args) {
 
 	if (uci.commit(PACKAGE) === null)
 		return { ok: false, reason: sprintf('%s would not be removed from /etc/config/bm_wanbind', id) };
+
+	// The file has changed, so the read this call arrived with describes a
+	// router that no longer exists. Everything below asks what was actually
+	// written, which is not the question every line above was asking.
+	snap = cfg.snapshot();
 
 	let after = direct.run({ bus: state.bus, now: time() });
 	let removed = after.ok ? count(after.removed) : 0;
@@ -2203,8 +2225,8 @@ function seatsFor(spec, pool, cidrs) {
 }
 
 /** The instance by that name as the file has it, refused ones included. */
-function configuredInstance(id) {
-	for (let one in cfg.configured()) {
+function configuredInstance(id, snap) {
+	for (let one in cfg.configured(snap)) {
 		if (one.id == id)
 			return one;
 	}
@@ -2285,7 +2307,7 @@ function restoreSection(id, kind, previous) {
  * one address's hand-placed binding replaced by a whole LAN's pool - by a call
  * that was editing something else entirely.
  */
-function refuseInstanceId(id) {
+function refuseInstanceId(id, snap) {
 	if (!length(id))
 		return 'name the instance: the section name is its identity here, in the app, and in every log line about it';
 
@@ -2295,7 +2317,7 @@ function refuseInstanceId(id) {
 	if (id == 'main')
 		return 'main is this package\'s own settings section and is not an instance';
 
-	for (let one in cfg.directConfigured()) {
+	for (let one in cfg.directConfigured(snap)) {
 		if (one.id == id) {
 			return sprintf('%s is already a one-to-one binding in /etc/config/bm_wanbind - one address nailed to one WAN port by hand. Give the instance another name', id);
 		}
@@ -2723,7 +2745,7 @@ function instanceMoves(spec, previous) {
  * neither list and is never counted: it belongs to another tool or to whoever
  * administers the router, and this method has no opinion about it.
  */
-function verifyRules(id) {
+function verifyRules(id, snap) {
 	let present = netlink.rules();
 
 	if (present === null) {
@@ -2829,10 +2851,10 @@ function verifyRules(id) {
 	}
 
 	if (!length(id)) {
-		let band = cfg.directBand();
+		let band = cfg.directBand(snap);
 		let stamped = {};
 
-		for (let one in cfg.directConfigured()) {
+		for (let one in cfg.directConfigured(snap)) {
 			if (one.pref >= 1)
 				stamped[sprintf('%d', one.pref)] = true;
 		}
@@ -2861,8 +2883,10 @@ function verifyRules(id) {
  * name, and the surfaces are built to put Save behind this answer.
  */
 export function instanceCheck(args) {
+	let snap = cfg.snapshot();
+
 	let id = trim(text(args.id));
-	let refusal = refuseInstanceId(id);
+	let refusal = refuseInstanceId(id, snap);
 
 	if (refusal) {
 		return {
@@ -2877,8 +2901,8 @@ export function instanceCheck(args) {
 		};
 	}
 
-	let settings = settingsRead();
-	let configured = cfg.configured();
+	let settings = settingsRead(snap);
+	let configured = cfg.configured(snap);
 	let list = wans.dump(state.bus);
 
 	// One reading of netifd for the whole answer. `layout.read()` would dump it
@@ -2888,7 +2912,7 @@ export function instanceCheck(args) {
 		? { byName: {}, list: [], stated: false }
 		: layout.classify(list, layout.statements());
 
-	let previous = configuredInstance(id);
+	let previous = configuredInstance(id, snap);
 	let raw = previous ? rawSection(id) : null;
 
 	let merged = mergeInstance(id, args, {
@@ -2955,8 +2979,10 @@ export function instanceCheck(args) {
  *   8. a pass now, and then what the kernel is actually holding
  */
 export function instanceSet(args) {
+	let snap = cfg.snapshot();
+
 	let id = trim(text(args.id));
-	let refusal = refuseInstanceId(id);
+	let refusal = refuseInstanceId(id, snap);
 
 	if (refusal) {
 		return {
@@ -2972,14 +2998,14 @@ export function instanceSet(args) {
 		};
 	}
 
-	let settings = settingsRead();
-	let configured = cfg.configured();
+	let settings = settingsRead(snap);
+	let configured = cfg.configured(snap);
 	let list = wans.dump(state.bus);
 	let view = (list === null)
 		? { byName: {}, list: [], stated: false }
 		: layout.classify(list, layout.statements());
 
-	let previous = configuredInstance(id);
+	let previous = configuredInstance(id, snap);
 	let raw = previous ? rawSection(id) : null;
 
 	let merged = mergeInstance(id, args, {
@@ -3133,10 +3159,15 @@ export function instanceSet(args) {
 		};
 	}
 
+	// The file has changed, so the read this call arrived with describes a
+	// router that no longer exists. Everything below asks what was actually
+	// written, which is not the question every line above was asking.
+	snap = cfg.snapshot();
+
 	// Read back rather than trusted. Everything above is a field going into a
 	// file; whether those fields are an instance this router can act on is one
 	// question with one answer, and it is `bm.wanbind.config`'s.
-	let written = configuredInstance(id);
+	let written = configuredInstance(id, snap);
 
 	if (!written || written.reason) {
 		restoreSection(id, 'instance', raw);
@@ -3166,7 +3197,7 @@ export function instanceSet(args) {
 		state.instances[id] = engine.create(written);
 
 	state.order = [];
-	for (let one in cfg.configured()) {
+	for (let one in cfg.configured(snap)) {
 		if (state.instances[one.id])
 			push(state.order, one.id);
 	}
@@ -3183,7 +3214,7 @@ export function instanceSet(args) {
 		// unseeded run is the base itself, which is very often already another
 		// WAN's.
 		let done = prepare.prepareInstance(written, pool, view,
-			{ bus: state.bus, defer: false, taken: wanTablesTaken(list) });
+			{ bus: state.bus, defer: false, taken: wanTablesTaken(list, snap) });
 
 		// Logged rather than returned as a failure. The section is written and
 		// correct; what could not be done is a firewall forwarding or a routing
@@ -3279,12 +3310,14 @@ export function instanceSet(args) {
  * `reason` is the sentence saying what is still on the router.
  */
 export function instanceDelete(args) {
+	let snap = cfg.snapshot();
+
 	let id = trim(text(args.id));
 
 	if (!length(id))
 		return { ok: false, id: '', removed: 0, forwardings: 0, reason: 'name the instance to remove' };
 
-	let one = configuredInstance(id);
+	let one = configuredInstance(id, snap);
 
 	if (!one) {
 		return {
@@ -3347,10 +3380,15 @@ export function instanceDelete(args) {
 		};
 	}
 
+	// The file has changed, so the read this call arrived with describes a
+	// router that no longer exists. Everything below asks what was actually
+	// written, which is not the question every line above was asking.
+	snap = cfg.snapshot();
+
 	delete state.instances[id];
 
 	state.order = [];
-	for (let row in cfg.configured()) {
+	for (let row in cfg.configured(snap)) {
 		if (state.instances[row.id])
 			push(state.order, row.id);
 	}
@@ -3403,7 +3441,9 @@ export function instanceDelete(args) {
  * sentence about a number nobody remembers changing.
  */
 export function settingsSet(args) {
-	let previous = settingsRead();
+	let snap = cfg.snapshot();
+
+	let previous = settingsRead(snap);
 
 	let want = {
 		enabled: pickFlag(args, 'enabled', previous.enabled),
@@ -3470,7 +3510,7 @@ export function settingsSet(args) {
 	// refused if any of them cannot be done - which is what packages/README.md
 	// says Stop does, said here in the one place that can do it.
 	if (previous.enabled && !want.enabled) {
-		for (let one in cfg.configured()) {
+		for (let one in cfg.configured(snap)) {
 			if (!one.usable)
 				continue;
 
@@ -3505,11 +3545,16 @@ export function settingsSet(args) {
 	if (uci.commit(PACKAGE) === null)
 		return refuse('the settings would not commit to /etc/config/bm_wanbind; the file may be read-only or the overlay full');
 
+	// The file has changed, so the read this call arrived with describes a
+	// router that no longer exists. Everything below asks what was actually
+	// written, which is not the question every line above was asking.
+	snap = cfg.snapshot();
+
 	// Read back through the daemon's own readers rather than trusted, exactly
 	// as a section is. The band is the one that can fail here: it is worked out
 	// from where the instances have put their priority ranges, so a
 	// direct_pref_base that is fine on its own may still reach one of them.
-	let after = settingsRead();
+	let after = settingsRead(snap);
 
 	if (!after.band.usable) {
 		restoreSection('main', 'settings', raw);
@@ -3517,7 +3562,7 @@ export function settingsSet(args) {
 	}
 
 	// The two that are not only a value in a file.
-	state.main = cfg.main();
+	state.main = cfg.main(snap);
 	schedule();
 
 	// Switched back on: a pass now rather than in up to `interval` seconds,
@@ -3667,6 +3712,8 @@ export function wanList() {
  * of what a person can act on and none of what only the file can settle.
  */
 export function bindCheck(args) {
+	let snap = cfg.snapshot();
+
 	let out = [];
 	let id = trim(text(args.id));
 
@@ -3680,7 +3727,7 @@ export function bindCheck(args) {
 		push(out, finding('error', 'id', 'main is this package\'s own settings section and is not a binding'));
 	}
 	else {
-		for (let one in cfg.configured()) {
+		for (let one in cfg.configured(snap)) {
 			if (one.id == id) {
 				push(out, finding('error', 'id', sprintf('%s is already an instance in /etc/config/bm_wanbind - a whole LAN sharing a pool of WANs. Give the binding another name', id)));
 				break;
@@ -3754,7 +3801,7 @@ export function bindCheck(args) {
 		}
 	}
 
-	for (let one in cfg.instances()) {
+	for (let one in cfg.instances(snap)) {
 		if (table && table == one.catchAllTable) {
 			push(out, finding('error', 'table', sprintf('table %d is instance %s\'s catch_all_table, which holds nothing but `unreachable default`. The rule would be written, the row would read bound, and every packet from this address would be dropped',
 				table, one.id)));
@@ -3763,7 +3810,7 @@ export function bindCheck(args) {
 	}
 
 	// The band, which is the whole of how a hand-placed binding beats a pool.
-	let band = cfg.directBand();
+	let band = cfg.directBand(snap);
 	let pref = count(args.pref);
 
 	if (!band.usable) {
@@ -3775,7 +3822,7 @@ export function bindCheck(args) {
 				pref, band.base, band.top)));
 		}
 
-		for (let one in cfg.instances()) {
+		for (let one in cfg.instances(snap)) {
 			if (pref >= one.rulePrefBase) {
 				push(out, finding('error', 'pref', sprintf('pref %d is not below instance %s\'s rule_pref_base %d. The lowest matching ip rule decides, so up there this binding no longer outranks the WAN that instance would assign - and worse, that instance adopts this rule as one of its own assignments, finds no lease behind it and removes it. Move it into %d-%d',
 					pref, one.id, one.rulePrefBase, band.base, band.top)));
@@ -3783,7 +3830,7 @@ export function bindCheck(args) {
 			}
 		}
 
-		for (let one in cfg.directConfigured()) {
+		for (let one in cfg.directConfigured(snap)) {
 			if (one.id != id && one.enabled && one.pref == pref) {
 				push(out, finding('error', 'pref', sprintf('pref %d is already binding %s\'s, and two ip rules at one priority is not an order anything can rely on',
 					pref, one.id)));
@@ -3794,7 +3841,7 @@ export function bindCheck(args) {
 	else {
 		let taken = {};
 
-		for (let one in cfg.directConfigured()) {
+		for (let one in cfg.directConfigured(snap)) {
 			if (one.id != id && one.pref >= 1)
 				taken[sprintf('%d', one.pref)] = true;
 		}
@@ -3868,6 +3915,8 @@ export function bindCheck(args) {
  * removing it is a decision for whoever put it there.
  */
 export function rulesReport(args) {
+	let snap = cfg.snapshot();
+
 	let limit = count(args.limit);
 
 	if (limit < 1)
@@ -3887,8 +3936,8 @@ export function rulesReport(args) {
 	// held binding is exactly the case where those two differ.
 	return monitor.report({
 		limit: limit,
-		band: cfg.directBand(),
-		instances: cfg.configured(),
+		band: cfg.directBand(snap),
+		instances: cfg.configured(snap),
 		bindings: direct.bindings(),
 		assignments: assignments('').assignments,
 

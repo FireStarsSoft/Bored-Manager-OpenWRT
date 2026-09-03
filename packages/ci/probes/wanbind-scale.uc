@@ -16,6 +16,8 @@ import * as rtnl from 'rtnl';
 import * as scale from 'scale';
 import * as uloop from 'uloop';
 import * as uciLib from 'uci';
+import * as service from 'bm.wanbind.service';
+import * as cfg from 'bm.wanbind.config';
 
 import { check, report } from 'probe';
 
@@ -172,5 +174,86 @@ check('reloads counted', scale.busCounts().reload, 0);
 let blind = scale.busFor(router, { dumpNull: true });
 check('a netifd that will not answer says so', blind.call('network.interface', 'dump', {}), null);
 check('and being asked still counts', scale.busCounts().dump, 2);
+
+// ===========================================================================
+// One read of the file per question asked of it.
+//
+// Every reader in `bm.wanbind.config` used to open its own cursor, and they
+// call each other: the bindings need the band, the band needs the instances,
+// and the instances are a second walk of the same file. At four instances that
+// is invisible. At five hundred bindings it is the answer arriving late to a
+// page that asks every five seconds.
+
+uci.set('bm_wanbind', 'main', 'wanbind');
+uci.set('bm_wanbind', 'main', 'interval', '30');
+uci.set('bm_wanbind', 'main', 'direct_pref_base', '19000');
+
+for (let i = 0; i < 4; i++) {
+	let lan = scale.lanOf(i);
+	let id = 'bmi_' + lan.name;
+
+	uci.set('network', lan.name, 'interface');
+	uci.set('network', lan.name, 'proto', 'static');
+	uci.set('network', lan.name, 'device', lan.device);
+	uci.set('network', lan.name, 'ipaddr', lan.address);
+
+	uci.set('dhcp', lan.name, 'dhcp');
+	uci.set('dhcp', lan.name, 'interface', lan.name);
+	uci.set('dhcp', lan.name, 'limit', '200');
+
+	uci.set('bm_wanbind', id, 'instance');
+	uci.set('bm_wanbind', id, 'lan', lan.name);
+	uci.set('bm_wanbind', id, 'carrier', 'eth1');
+	uci.set('bm_wanbind', id, 'rule_pref_base', sprintf('%d', 20000 + i * 2000));
+	uci.set('bm_wanbind', id, 'catch_all_pref', sprintf('%d', 21000 + i * 2000));
+	uci.set('bm_wanbind', id, 'catch_all_table', sprintf('%d', 253 - i));
+}
+
+rtnl.setRules(scale.kernelRules());
+rtnl.setRoutes([ { family: 2, type: 1, oif: 'pppoe-p001', gateway: '100.70.0.1', table: 254 } ]);
+
+service.attach(scale.busFor(router, {}));
+service.attachSystem((command, timeout) => { return 0; });
+service.load();
+
+// What the readers cost when nothing is shared between them, which is what
+// every verb used to do: three questions about one file, three walks of it.
+uciLib.resetCounters();
+cfg.main();
+cfg.directBand();
+cfg.directConfigured();
+check('three unshared readers open three cursors', uciLib.opened(), 3);
+
+// And what one snapshot costs, which is the same three answers.
+uciLib.resetCounters();
+let shared = cfg.snapshot();
+cfg.main(shared);
+cfg.directBand(shared);
+cfg.directConfigured(shared);
+check('one snapshot answers all three', uciLib.opened(), 1);
+check('and it read the file', length(cfg.directConfigured(shared)), 500);
+
+// `info` is the call every surface makes first. It used to cost five: the main
+// section, the band, the instances, the seven create-time defaults out of a
+// cursor of their own, and the bindings.
+uciLib.resetCounters();
+let facts = service.info();
+check('info() reads the file once', uciLib.opened(), 1);
+check('and still answers about every instance in it', length(facts.configured), 4);
+check('with the settings block filled in', facts.settings.rule_pref_base, 20000);
+check('and the band it was asked about', facts.settings.band.base, 19000);
+
+// `bindings` cost seven, because the row builder asked the config four separate
+// questions and two of them asked it two more.
+uciLib.resetCounters();
+let rows = service.bindings('', '');
+check('bindings() reads the file once', uciLib.opened(), 1);
+check('and answers about all five hundred', length(rows.bindings), 500);
+
+// A create check reads twice on purpose: once for the file, once for
+// /etc/config/network, which is a different file and not in the snapshot.
+uciLib.resetCounters();
+let verdict = service.bindCheck({ id: 'newone', ip: '10.9.0.200', wan: 'p001' });
+check('a create check reads twice', uciLib.opened(), 2);
 
 report();

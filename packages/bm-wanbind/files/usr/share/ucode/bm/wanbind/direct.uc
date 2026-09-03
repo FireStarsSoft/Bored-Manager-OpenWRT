@@ -830,10 +830,11 @@ export function run(ctx) {
 	// far as anything comparing them is concerned.
 	let view = layout.classify(ifaces, layout.statements());
 	let verdicts = objectOr(view.byName);
-	let bindings = cfg.directConfigured();
-	let band = cfg.directBand();
+	let snap = (type(ctx) == 'object' && type(ctx.snap) == 'object') ? ctx.snap : cfg.snapshot();
+	let bindings = cfg.directConfigured(snap);
+	let band = cfg.directBand(snap);
 
-	let hold = rules.holdTable(cfg.instances(), bindings, ifaces);
+	let hold = rules.holdTable(cfg.instances(snap), bindings, ifaces);
 
 	// Asked before the table is armed, so that most routers - which have no
 	// binding holding anything - never write a route or read one back.
@@ -1069,7 +1070,9 @@ export function lease(event, ctx) {
 	// binding would put that line in syslog on every lease add, renew and
 	// release on the router - logging in proportion to the traffic rather than
 	// to the mistake, on a box carrying thousands of sessions.
-	for (let one in cfg.directConfigured()) {
+	let snap = (type(ctx) == 'object' && type(ctx.snap) == 'object') ? ctx.snap : cfg.snapshot();
+
+	for (let one in cfg.directConfigured(snap)) {
 		if (!one.usable)
 			continue;
 
@@ -1214,10 +1217,11 @@ export function flush() {
 	if (present === null)
 		return { ok: false, reason: 'the router\'s ip rules could not be read, so nothing was removed' };
 
-	let band = cfg.directBand();
+	let snap = cfg.snapshot();
+	let band = cfg.directBand(snap);
 	let stamped = {};
 
-	for (let one in cfg.directConfigured()) {
+	for (let one in cfg.directConfigured(snap)) {
 		if (one.pref >= 1)
 			stamped[sprintf('%d', one.pref)] = true;
 	}

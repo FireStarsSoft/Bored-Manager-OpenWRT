@@ -87,16 +87,48 @@ function text(value) {
  * section at all - it is a question about where the instances have put their
  * own priority ranges - so `directBand()` at the foot of this file owns it.
  */
-export function main() {
-	let out = { enabled: true, interval: 30 };
+function readMain(uci) {
+	// `raw` is the seven create-time defaults exactly as the section spells
+	// them, or null where it does not. They are read here rather than where
+	// they are used because the alternative is a second cursor over the same
+	// file to answer the same question - which is what `settings_get` did, on
+	// the call every surface makes first.
+	//
+	// Not interpreted here either: what a missing one falls back to is a
+	// decision about creating an instance, and this file's business is the
+	// file. `service.settingsRead` owns the defaults and applies them.
+	let out = {
+		enabled: true,
+		interval: 30,
+		reason: null,
+		raw: {
+			rule_pref_base: null,
+			catch_all_pref_base: null,
+			catch_all_table: null,
+			wan_table_base: null,
+			wan_warn_uptime: null,
+			wan_error_grace: null,
+			release_grace: null
+		}
+	};
+
+	if (uci == null)
+		return out;
 
 	try {
-		let uci = cursor();
 		out.enabled = flag(uci.get(PACKAGE, 'main', 'enabled'), true);
+
+		for (let key in keys(out.raw))
+			out.raw[key] = uci.get(PACKAGE, 'main', key);
 
 		let interval = number(uci.get(PACKAGE, 'main', 'interval'), 30);
 		if (interval < MIN_INTERVAL || interval > MAX_INTERVAL) {
-			err(sprintf('interval %d is outside %d-%d; using 30', interval, MIN_INTERVAL, MAX_INTERVAL));
+			// Carried out rather than logged from here. This is read once per
+			// snapshot and a snapshot is taken by every ubus call, so a router
+			// with one bad number would write one syslog line per question
+			// somebody asked it. `snapshot({ log: true })` - which only the
+			// reconcile pass sets - is where it becomes a line.
+			out.reason = sprintf('interval %d is outside %d-%d; using 30', interval, MIN_INTERVAL, MAX_INTERVAL);
 			interval = 30;
 		}
 		out.interval = interval;
@@ -109,7 +141,7 @@ export function main() {
 	}
 
 	return out;
-};
+}
 
 /**
  * The addresses one instance is willing to bind, as a range of numbers.
@@ -222,11 +254,14 @@ function refuse(one) {
  * nothing is red, and the row that should be there is not. The sentence here is
  * the same sentence syslog gets.
  */
-export function configured() {
+function readInstances(uci) {
 	let out = [];
 
+	if (uci == null)
+		return out;
+
 	try {
-		cursor().foreach(PACKAGE, 'instance', (section) => {
+		uci.foreach(PACKAGE, 'instance', (section) => {
 			let one = {
 				id: text(section['.name']),
 				// What somebody called it, which is not its section name. The
@@ -336,38 +371,6 @@ export function configured() {
 	return out;
 };
 
-/** Every usable instance, in file order. What the engine runs on. */
-export function instances() {
-	let out = [];
-
-	for (let one in configured()) {
-		if (one.reason) {
-			err('instance ' + one.id + ': ' + one.reason);
-			continue;
-		}
-
-		push(out, one);
-	}
-
-	return out;
-};
-
-/**
- * One instance by name, or null.
- *
- * Used by every ubus call that names one. Reading the file again rather than
- * caching is deliberate: a section edited from LuCI or by hand is in effect on
- * the next call, without anything having to be told to reload.
- */
-export function instance(id) {
-	for (let one in instances()) {
-		if (one.id == id)
-			return one;
-	}
-
-	return null;
-};
-
 // ---------------------------------------------------------------------------
 // One-to-one bindings: `config direct '<id>'`.
 //
@@ -463,25 +466,27 @@ function readTarget(ipText, macText) {
  * function that mentions it, so a callee further down the file is a global load
  * that raises the first time the line runs.
  */
-export function directBand() {
+function bandFrom(uci, list) {
 	let base = DIRECT_PREF_BASE;
+	let fallbackReason = null;
 
 	try {
-		base = number(cursor().get(PACKAGE, 'main', 'direct_pref_base'), DIRECT_PREF_BASE);
+		if (uci != null)
+			base = number(uci.get(PACKAGE, 'main', 'direct_pref_base'), DIRECT_PREF_BASE);
 	}
 	catch (e) {
 		debug('cannot read ' + PACKAGE + ': ' + e);
 	}
 
 	if (base < 1 || base + DIRECT_PREF_SPAN - 1 > MAX_PREF) {
-		err(sprintf('direct_pref_base %d cannot hold %d ip rule priorities; using %d',
-			base, DIRECT_PREF_SPAN, DIRECT_PREF_BASE));
+		fallbackReason = sprintf('direct_pref_base %d cannot hold %d ip rule priorities; using %d',
+			base, DIRECT_PREF_SPAN, DIRECT_PREF_BASE);
 		base = DIRECT_PREF_BASE;
 	}
 
 	let reason = null;
 
-	for (let one in instances()) {
+	for (let one in list) {
 		if (base + DIRECT_PREF_SPAN > one.rulePrefBase) {
 			reason = sprintf('direct_pref_base %d opens a band of %d that reaches %d, which is not below instance %s\'s rule_pref_base %d. A binding numbered up there is adopted by that instance as one of its own client assignments and deleted on the next pass. Lower direct_pref_base, or raise that instance\'s rule_pref_base',
 				base, DIRECT_PREF_SPAN, base + DIRECT_PREF_SPAN - 1, one.id, one.rulePrefBase);
@@ -494,9 +499,10 @@ export function directBand() {
 		span: DIRECT_PREF_SPAN,
 		top: base + DIRECT_PREF_SPAN - 1,
 		reason: reason,
-		usable: (reason == null)
+		usable: (reason == null),
+		fallbackReason: fallbackReason
 	};
-};
+}
 
 /**
  * Why this binding cannot be used, or null.
@@ -617,14 +623,14 @@ function refuseDirect(one, live) {
  * pass hunting in the wrong band and leave the real rule behind, unowned and
  * still steering traffic.
  */
-export function directConfigured() {
-	let band = directBand();
-	let live = { base: band.base, top: band.top, instances: instances() };
-
+function readDirect(uci, live) {
 	let out = [];
 
+	if (uci == null)
+		return out;
+
 	try {
-		cursor().foreach(PACKAGE, 'direct', (section) => {
+		uci.foreach(PACKAGE, 'direct', (section) => {
 			let one = {
 				id: text(section['.name']),
 				name: text(section.name),
@@ -707,34 +713,178 @@ export function directConfigured() {
 	return out;
 };
 
-/** Every usable binding, in file order. What the reconcile writes rules for. */
-export function directBindings() {
-	let out = [];
+// ---------------------------------------------------------------------------
+// One read of the file, and everything anybody asks about it.
+//
+// Every reader above used to open its own cursor, and the readers call each
+// other: `directConfigured()` needs the band, the band needs the instances, and
+// the instances are a second walk of the same file. Answering `bindings` cost
+// seven opens of /etc/config/bm_wanbind and answering `info` cost five. At four
+// instances that is invisible. At five hundred bindings it is the pass.
+//
+// So the file is read once, into this, and the readers below hand back pieces
+// of it. Nothing is cached between calls and that is deliberate: jffs2 stores
+// one second of mtime resolution, and `bind` commits a section and then reads
+// it back inside the same second to decide whether what it wrote is usable. A
+// cache would answer that read with the file as it was before the write.
 
-	for (let one in directConfigured()) {
+/**
+ * The whole configuration, from one cursor.
+ *
+ * `log` is what the reconcile pass sets and nothing else does. Refusals are
+ * sentences somebody has to act on, and they were written to syslog by the
+ * reader that found them - which is once per ubus call, per refused section, on
+ * a router that answers a call every five seconds. Now they are collected here
+ * and written once a pass.
+ */
+export function snapshot(opts) {
+	let options = (type(opts) == 'object') ? opts : {};
+	let uci = null;
+
+	try {
+		uci = cursor();
+	}
+	catch (e) {
+		debug('cannot open uci: ' + e);
+	}
+
+	let main = readMain(uci);
+	let instances = readInstances(uci);
+	let refusals = [];
+
+	if (main.reason)
+		push(refusals, main.reason);
+
+	let usable = [];
+
+	for (let one in instances) {
 		if (one.reason) {
-			err('binding ' + one.id + ': ' + one.reason);
+			push(refusals, 'instance ' + one.id + ': ' + one.reason);
 			continue;
 		}
 
-		push(out, one);
+		push(usable, one);
 	}
 
-	return out;
+	let band = bandFrom(uci, usable);
+
+	if (band.fallbackReason)
+		push(refusals, band.fallbackReason);
+
+	let direct = readDirect(uci, { base: band.base, top: band.top, instances: usable });
+	let bindings = [];
+
+	for (let one in direct) {
+		if (one.reason) {
+			push(refusals, 'binding ' + one.id + ': ' + one.reason);
+			continue;
+		}
+
+		push(bindings, one);
+	}
+
+	// By name, because every ubus call that edits one thing looks it up by name
+	// and a linear scan of five hundred bindings per call is the same waste in
+	// a different place.
+	let instanceById = {};
+	let directById = {};
+
+	for (let one in instances)
+		instanceById[one.id] = one;
+
+	for (let one in direct)
+		directById[one.id] = one;
+
+	if (options.log) {
+		for (let one in refusals)
+			err(one);
+	}
+
+	return {
+		read: (uci != null),
+		main: main,
+		instances: instances,
+		usable: usable,
+		band: band,
+		direct: direct,
+		bindings: bindings,
+		instanceById: instanceById,
+		directById: directById,
+		refusals: refusals
+	};
 };
 
 /**
- * One binding by name, or null.
+ * Whichever snapshot the caller already has, or a fresh one.
  *
- * Read from the file rather than from a cache, exactly as `instance()` is: a
- * section added from LuCI, from the app over ubus or by hand is in effect on
- * the next call, with nothing having to be told to reload.
+ * The readers below all take an optional snapshot for the same reason: a verb
+ * that answers one question takes one and threads it through everything it
+ * calls, and a caller that has no reason to care still gets the file read
+ * correctly. The wrappers are what keeps the second kind working.
  */
-export function directBinding(id) {
-	for (let one in directBindings()) {
-		if (one.id == id)
-			return one;
-	}
+function given(snap) {
+	return (type(snap) == 'object' && type(snap.main) == 'object') ? snap : snapshot();
+}
 
-	return null;
+/** The global section: whether the daemon runs, and how often it reconciles. */
+export function main(snap) {
+	return given(snap).main;
+};
+
+/**
+ * Every instance in the file, refused ones included, in file order.
+ *
+ * `id` is the UCI section name, which is what every other surface names an
+ * instance by - so a section written as `config instance 'home'` is `home`
+ * everywhere, and an anonymous section gets the name UCI gave it.
+ *
+ * `reason` is null when the instance is usable and the refusal sentence when it
+ * is not. Every surface that shows somebody their configuration reads this one
+ * rather than `instances()`, because an instance that has simply disappeared
+ * from every list is the hardest kind of mistake to find: nothing is broken,
+ * nothing is red, and the row that should be there is not. The sentence here is
+ * the same sentence syslog gets.
+ */
+export function configured(snap) {
+	return given(snap).instances;
+};
+
+/** Every usable instance, in file order. What the engine runs on. */
+export function instances(snap) {
+	return given(snap).usable;
+};
+
+/**
+ * One instance by name, or null.
+ *
+ * Refused sections are not findable here, which is what makes this the reader
+ * every ubus call that acts on an instance uses: acting on one the file has
+ * already refused is the failure, not the lookup.
+ */
+export function instance(id, snap) {
+	let one = given(snap).instanceById[id];
+
+	return (one != null && one.reason == null) ? one : null;
+};
+
+/** Where a one-to-one binding's priorities may sit, and whether they may. */
+export function directBand(snap) {
+	return given(snap).band;
+};
+
+/** Every binding in the file, refused ones included, in file order. */
+export function directConfigured(snap) {
+	return given(snap).direct;
+};
+
+/** Every usable binding, in file order. What the reconcile writes rules for. */
+export function directBindings(snap) {
+	return given(snap).bindings;
+};
+
+/** One binding by name, or null - refused ones are not findable. */
+export function directBinding(id, snap) {
+	let one = given(snap).directById[id];
+
+	return (one != null && one.reason == null) ? one : null;
 };

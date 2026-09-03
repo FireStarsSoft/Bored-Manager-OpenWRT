@@ -207,6 +207,82 @@ export function remove(pref, cidr, table) {
 };
 
 /**
+ * The same payload, keyed on where a packet is going rather than where it came
+ * from.
+ *
+ * Its own builder rather than a flag on the one above, because a rule carrying
+ * both a source and a destination is a third thing that nothing here wants and
+ * that a single mistyped argument would silently produce.
+ */
+function destPayload(pref, dst, table) {
+	return {
+		family: C.AF_INET,
+		priority: pref,
+		dst: dst,
+		table: table,
+		action: C.FR_ACT_TO_TBL
+	};
+}
+
+/**
+ * Add a rule that matches on destination. True when the router has it after.
+ *
+ * What this exists for is one sentence: an address bound to a WAN must still be
+ * able to reach the networks this router itself serves. A binding's rule sends
+ * *everything* from that address to the WAN's table, and that table knows only
+ * how to leave the building - so a bound machine could reach the internet and
+ * not the machine on the next desk, or the router's other LAN, and the traffic
+ * went out of the WAN port addressed to a private network that would drop it.
+ *
+ * The daemon already understood this everywhere else: `installHold` writes the
+ * connected routes beside the blackhole precisely so a held address can still
+ * reach its neighbours, and an instance's catch-all table would take the router
+ * off its own LAN without them. A bound address was the one case left out.
+ */
+export function addDest(pref, dst, table) {
+	let answer;
+
+	clearError();
+
+	try {
+		answer = rtnl.request(C.RTM_NEWRULE, C.NLM_F_CREATE | C.NLM_F_EXCL, destPayload(pref, dst, table));
+	}
+	catch (e) {
+		debug(sprintf('cannot add rule pref %d to %s table %d: %s', pref, dst, table, e));
+		return false;
+	}
+
+	if (failed(answer)) {
+		debug(sprintf('cannot add rule pref %d to %s table %d: %s', pref, dst, table, reason()));
+		return false;
+	}
+
+	return true;
+};
+
+/** And take one away again. */
+export function removeDest(pref, dst, table) {
+	let answer;
+
+	clearError();
+
+	try {
+		answer = rtnl.request(C.RTM_DELRULE, 0, destPayload(pref, dst, table));
+	}
+	catch (e) {
+		debug(sprintf('cannot remove rule pref %d to %s table %d: %s', pref, dst, table, e));
+		return false;
+	}
+
+	if (failed(answer)) {
+		debug(sprintf('cannot remove rule pref %d to %s table %d: %s', pref, dst, table, reason()));
+		return false;
+	}
+
+	return true;
+};
+
+/**
  * Whether netlink is usable at all.
  *
  * Asked once at start-up so that a router where the socket cannot be opened
