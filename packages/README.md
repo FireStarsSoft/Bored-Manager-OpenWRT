@@ -125,6 +125,38 @@ end at the same daemon call.
 | Check for updates, update, roll back | yes | `bmctl check-update` / `update` / `rollback` | yes |
 | See what every feature needs, install the missing piece | Overview → Requirements | `bmctl requirements` / `install-group` | yes, the readiness page |
 | Raise the kernel scale limits | Maintenance → Scaling | `bmctl tune conntrack_max=...` | yes, Router limits |
+| See what this router has against what its configuration needs | Overview → Capacity | `bmctl capacity` | yes, Dashboard → Capacity |
+
+### The capacity report
+
+`bm.agent capacity` reads this router - the CPU, the memory, the flash, the
+ports, the kernel, the firewall, both daemons' own numbers, and what is
+configured on disk - and answers with what that configuration needs, roughly
+where it stops, which of four sizes it is in, and what is wrong now. The
+arithmetic is here rather than in any of the three surfaces, so a console and a
+page cannot give somebody two different numbers.
+
+Every number is an estimate and the reply says so. A ceiling is a `min` over the
+things that can cap a router, and the answer names which one it was. A fact the
+router would not answer stays `null` and drops out of the `min` rather than
+becoming a zero.
+
+Every finding that can be fixed names an existing verb and arguments that verb
+already declares, and only where its own precondition is true. Switching flow
+offload on where the kernel has no flowtable leaves a router whose firewall
+fails to load at the next boot, so that fix appears only where the kernel is
+known to have the module - and where it is not, the row says `apk add
+kmod-nft-offload` instead and offers nothing to press.
+
+`bmctl capacity` prints it, `--json` gives the reply whole, and it exits 1 when
+the verdict is unstable or unknown so a script can watch it. The LuCI Overview
+carries the same report as a card, with the same buttons, and Maintenance's
+**Sized for this router** fills the scaling form from the same recommendation
+rather than from a table of its own.
+
+Every constant it estimates from carries where it came from, and the ones no rig
+has measured say so in the reply. As of 2.4.0 that is all of the measured ones,
+and the report calls them working numbers.
 
 Two things are only in the app, and neither is a router capability: installing
 the packages in the first place, and installing them from a file on your own
@@ -353,7 +385,7 @@ three different reasons.
 | | Moves when | Enforced by |
 |---|---|---|
 | `release` | anything ships | `PKG_VERSION` in each Makefile and `RELEASE` in `bm/version.uc` must match |
-| `apiVersion` | a ubus call changes shape | the module falls back to SSH on a version it does not know |
+| `apiVersion` | a ubus call changes shape | the module refuses the call with a sentence naming the update, rather than driving a contract it does not know |
 | `configSchema` | what is written to `/etc` changes | a build refuses to start on data written at a higher one |
 
 `npm run packages:check` fails the build when any of them disagree with the

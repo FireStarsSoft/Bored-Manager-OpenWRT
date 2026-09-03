@@ -11,10 +11,12 @@ on. All three are in [`version.json`](version.json).
 
 ## 2.4.0
 
-WAN Binding is the router's, outright. `apiVersion` moves to **2** and
-`configSchema` to **3**, and `provides` gains `direct` - so a module from 3.4.0
-drives this daemon for every part of binding and writes nothing to the router
-itself, the way PPPoE pools have worked since 2.0.0.
+WAN Binding is the router's, outright. The feature descriptor's `apiVersion`
+moves to **2** and `configSchema` to **3** - `version.json`'s own `apiVersion`
+stays 3, because the agent's contract did not change - and `provides` gains
+`direct`, so a module from 3.4.0 drives this daemon for every part of binding
+and writes nothing to the router itself, the way PPPoE pools have worked since
+2.0.0.
 
 ### Why, in one paragraph
 
@@ -96,6 +98,56 @@ daemon's own state for that instance without a restart.
 The routes are written over netlink now rather than by forking `ip`. The BusyBox
 `ip` a stock OpenWrt ships refuses a numeric routing table, so the package that
 writes every rule over a socket was demanding `ip-full` for two lines.
+
+### `bm.agent capacity`: the router works out what it can carry
+
+A new verb, and three files behind it. `bm.facts` reads the router - CPU,
+memory, flash, ports, kernel, the firewall, the lease ceiling - with one parser
+per fact and one fallback each; a fact it cannot read is `null` and never a
+zero. `bm.capacity` does the arithmetic. `bm.capfind` writes the sentences and
+names a fix only where that fix's own precondition is true.
+
+The reply carries what the router has, what its configuration needs, an
+estimated ceiling for sessions and for bindings with the dimension that capped
+each, which of four tiers it is in and what the next one changes, a stability
+verdict, and every requirement and problem as a row. `bmctl capacity [--json]`
+prints it at a console and exits 1 when the verdict is unstable or unknown, so a
+script can watch it.
+
+Additive: `apiVersion` stays 3. An agent without the verb answers
+`METHOD_NOT_FOUND`, which every surface turns into "update the router packages".
+
+Every constant the estimate rests on carries where it came from - measured,
+derived, a hard limit in code, a margin somebody chose, or a rule of thumb - and
+the ones no rig has measured say so in the reply rather than passing for
+measurement. As of 2.4.0 that is all of the measured ones.
+
+### `bm.tune` recommends, and reverts what it could not apply
+
+`recommended({clients, sessions}, memTotalKb)` is one formula, and the module
+mirrors it against a fixture the ucode probe generates - so the two cannot drift
+without the build going red. The conntrack figure is capped at what an eighth of
+this router's memory would hold if the table filled, which is the half the old
+static presets in LuCI got wrong.
+
+`setFlowOffload` reverts the option and reloads again when the reload fails,
+rather than leaving a committed config the running firewall does not have.
+`refusal()` now also refuses a `conntrack_max` below the entries the table is
+holding right now.
+
+### `bm.pppoe info {members: false}`
+
+The member lists are eighty bytes a session, so twenty pools of five hundred is
+most of the megabyte a ubus reply has. A caller that wants the counts asks for
+none. Absent means yes, which is what every caller written before the key did.
+
+### Update the three packages together
+
+`bm-wanbind` and `bm-pppoe-pool` import from `bm.facts` and `bm.tune`, so both
+Makefiles now carry `EXTRA_DEPENDS:=bm-agent (>=$(PKG_VERSION))`. apk refuses a
+new daemon beside an old agent rather than pulling one - the agent is in no
+repository - so install all three in one `apk add`, which is what the module and
+`bmctl update` already do.
 
 ### LuCI
 

@@ -172,6 +172,72 @@ sessions carries ninety-six of them, and the monitor called every one a
 stranger's. On the router this was found on, that was 96 alarming rows burying
 the handful worth reading.
 
+### Capacity: what this router can carry
+
+A fifth leaf on the Dashboard, second in the rail. It says what the hardware is,
+what the configuration on it needs, roughly where it stops and what runs out
+first, the four sizes at which the requirements change, and what is wrong now.
+
+The arithmetic is the router's - `bm.agent capacity`, new in packages 2.4.0 -
+and this module renders one reply. A second model on this side would be a second
+answer, and the two would differ on the day somebody most needed one of them.
+
+Every number is an estimate and the page says so. A ceiling is a `min` over the
+things that can cap a router and the answer names which one it was: "about nine
+hundred sessions, limited by memory" is something somebody can act on, and a bare
+number is not. A fact the router would not answer stays `null` and drops out of
+the `min` rather than becoming a zero, because a zero is a ceiling and "I could
+not read your memory" is not a reason to tell somebody their router holds
+nothing.
+
+Where a problem has a fix this module already knows how to write, the row says
+exactly what will be written and who writes it, and a button applies it. The
+list of kinds is closed - `tune_set`, `wanbind_reconcile`, `wanbind_settings_set`,
+`wanbind_instance_set`, `pool_reconcile` - and each carries its own allowlist of
+arguments. A settings fix arriving with `enabled: false` beside the switch it is
+allowed to throw is dropped; so is a conntrack figure outside the tunable's own
+bounds; so is an instance fix naming an instance the same report does not list.
+A report is a reply that arrived over a wire, and it cannot ask this module for
+a write it was not already willing to make.
+
+A fix is refused against a report more than five minutes old. A fix is decided
+from what the report said, and five minutes later the router may have been
+changed by somebody else.
+
+An agent older than 2.4.0 answers "Method not found", which the tab turns into
+a sentence naming the update. Everything else keeps working meanwhile.
+
+### The monitor reads the whole rule table
+
+It asked for one page of five hundred rows and published that as the router's
+rule table. At five hundred sessions and five hundred bindings the router
+carries about two thousand rules, so the page showed a third of them and the
+tile above it said that third was the total. It walks the pages to the end now,
+up to ten of them, and the tile states the daemon's own count of what the kernel
+holds rather than this side's count of what it rendered. A collapsed row stands
+for three rules and is counted as three.
+
+The sentence explaining a rule no longer travels on every row. At fifteen
+hundred rows the prose was most of a megabyte, which is what a ubus reply has in
+total; the detail panel asks for the one it is showing.
+
+### One payload per stream per tick
+
+Each tick pushed two: one immediately and one when the fetch landed. At five
+hundred bindings that is two full payloads down a stream where the second
+differs from the first only in being newer, and the app renders both. It is one
+now. The case the immediate emit existed for - a fetch that hangs - is caught by
+its own start time instead, and the page is told the router has gone quiet at
+the tick it went quiet rather than at the tick the transport gives up.
+
+### Known cost
+
+Four tables render up to five hundred rows. The row window that would fix that
+is a change to the app's own `TableBlock`, not to this module, and it will
+arrive with an app release rather than this one. The `direct` stream no longer
+carries its rows at all, so the cost is now only in the renderer while the tab
+is open.
+
 ### Requirements
 
 `ip-full` is no longer required for binding: the daemon writes rules and routes
