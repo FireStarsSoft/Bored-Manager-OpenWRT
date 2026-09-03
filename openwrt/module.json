@@ -72,6 +72,10 @@
       "kind": "latest"
     },
     {
+      "event": "capacity",
+      "kind": "latest"
+    },
+    {
       "event": "jobs",
       "kind": "latest"
     }
@@ -124,6 +128,9 @@
     "scanRows",
     "scanNow",
     "scanExplain",
+    "capacityReport",
+    "capacityRefresh",
+    "capacityFix",
     "rulesEffective",
     "rulesCheck",
     "rulesApply",

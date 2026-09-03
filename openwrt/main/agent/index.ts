@@ -35,6 +35,14 @@ export {
   type AgentFeature
 } from './client'
 export {
+  CAPACITY_AGENT_RELEASE,
+  agentCapacity,
+  type RawCapacity,
+  type RawCapacityFinding,
+  type RawCapacityFix,
+  type RawCapacityTier
+} from './capacity'
+export {
   poolAction,
   poolCarriers,
   poolCheck,

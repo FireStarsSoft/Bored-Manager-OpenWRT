@@ -392,6 +392,31 @@ export class LimitsManager {
   }
 
   /**
+   * Write a set of tunables, by whichever half owns the write right now.
+   *
+   * The one place a limit reaches the router. The form goes through `apply`,
+   * which spends a token first; the pool page's one-touch button and the
+   * capacity fixes come here directly, because there is no form to have gone
+   * stale. All three end up on the same two writers and log the same line.
+   */
+  async applyWanted(wanted: TuneWanted, what: string): Promise<OkResult> {
+    if (!this.deps.ctx.connected) {
+      return { ok: false, error: 'the router is not connected' }
+    }
+
+    const source = this.source()
+    const result =
+      source === 'agent' ? await this.applyThroughAgent(wanted) : await this.applyOverSsh(wanted)
+
+    if (!result.ok) return result
+
+    this.deps.ctx.log(`openwrt: ${what} via ${source}`)
+    this.deps.afterApply()
+
+    return result
+  }
+
+  /**
    * Switch fw4's software flow offload on, and nothing else.
    *
    * The pool create check refuses a pool of more than sixty-four sessions while
@@ -409,15 +434,9 @@ export class LimitsManager {
       return { ok: false, error: 'the router is not connected' }
     }
 
-    const source = this.source()
-    const result = source === 'agent'
-      ? await this.applyThroughAgent({ flowOffload: true })
-      : await this.applyOverSsh({ flowOffload: true })
+    const result = await this.applyWanted({ flowOffload: true }, 'fw4 flow offload switched on')
 
     if (!result.ok) return result
-
-    this.deps.ctx.log(`openwrt: fw4 flow offload switched on via ${source}`)
-    this.deps.afterApply()
 
     return {
       ok: true,

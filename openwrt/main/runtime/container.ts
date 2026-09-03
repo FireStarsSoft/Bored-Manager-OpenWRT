@@ -12,11 +12,18 @@
  * automations refer to each other lazily because neither can exist first.
  */
 import type { ModuleContext } from '@shared/modules'
-import { AgentManager, guardedJobs } from '../agent'
+import {
+  AgentManager,
+  guardedJobs,
+  poolReconcile,
+  wanbindReconcile,
+  wanbindSettingsSet
+} from '../agent'
 import { BindingManager } from '../wanbind'
 import { ConfigStore, RulesEditor } from '../config'
 import { EventLog } from '../events'
 import { Jobs } from '../jobs'
+import { CapacityManager } from '../capacity'
 import { LimitsManager } from '../limits'
 import { PppoeManager } from '../pppoe'
 import { Queries } from '../queries'
@@ -43,6 +50,7 @@ export interface OpenWrtRuntime {
   pppoe: PppoeManager
   binding: BindingManager
   scan: ScanEngine
+  capacity: CapacityManager
   queries: Queries
   rules: RulesEditor
   setup: SetupManager
@@ -220,9 +228,13 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
     // go and remove the thing that is working.
     () => binding.settings().rule_pref_base,
     () => binding.settings().direct_pref_base,
-    // The monitor's own poller follows the same verdict, and is built just
-    // below - so it is reached lazily, like the two automations above.
-    () => scan.applyPollers()
+    // The monitor's and the capacity tab's own pollers follow the same verdict,
+    // and are built just below - so they are reached lazily, like the two
+    // automations above.
+    () => {
+      scan.applyPollers()
+      capacity.applyPollers()
+    }
   )
   // The monitor asks the daemon for the router's whole rule table rather than
   // the window the collector filters to, which is the only way a rule somebody
@@ -310,6 +322,50 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
     }
   })
 
+  // What this router has against what its configuration needs. The arithmetic
+  // is the router's - `bm.agent capacity` - and this side renders it and runs
+  // the fixes it names through the write paths that already exist. Built last,
+  // because every one of those writers is something above it.
+  const capacity = new CapacityManager({
+    ctx,
+    agentDeps: () => ({ ctx, capability: () => latch.capabilities.agent }),
+    agent: () => latch.capabilities.agent,
+    capabilities: () => latch.capabilities,
+    writers: {
+      tune: (wanted) => limits.applyWanted(wanted, 'capacity fix: router limits'),
+      wanbindReconcile: async () => {
+        const reply = await wanbindReconcile({ ctx, capability: () => latch.capabilities.agent })
+        if (!reply.ok) return { ok: false, error: reply.error ?? 'the daemon refused the pass' }
+        service.forceDumpNextTick()
+        await binding.refresh()
+        return { ok: true }
+      },
+      wanbindSettingsSet: async (changes) => {
+        const reply = await wanbindSettingsSet(
+          { ctx, capability: () => latch.capabilities.agent },
+          changes
+        )
+        if (!reply.ok) return { ok: false, error: reply.error ?? 'the daemon refused the change' }
+        service.forceDumpNextTick()
+        await binding.refresh()
+        return { ok: true }
+      },
+      wanbindInstanceSet: async (id) => {
+        const result = await binding.raiseDhcpLimits(id)
+        if (!result.ok) return result
+        await binding.refresh()
+        return result
+      },
+      poolReconcile: async () => {
+        const reply = await poolReconcile({ ctx, capability: () => latch.capabilities.agent })
+        if (!reply.ok) return { ok: false, error: reply.error ?? 'the pool daemon refused the pass' }
+        await pppoe.sweep()
+        return { ok: true }
+      }
+    },
+    event: (text) => events.record('router', 'capacity', text)
+  })
+
   return {
     ctx,
     config,
@@ -321,6 +377,7 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
     pppoe,
     binding,
     scan,
+    capacity,
     queries,
     rules,
     setup,
@@ -347,6 +404,7 @@ export function snapshots(runtime: OpenWrtRuntime): Record<string, unknown> {
     binding: runtime.binding.snapshot(),
     direct: runtime.binding.directSnapshot(),
     monitor: runtime.scan.snapshot(),
+    capacity: runtime.capacity.snapshot(),
     jobs: runtime.jobs.snapshot()
   }
 }
@@ -365,6 +423,7 @@ export function resetRuntime(runtime: OpenWrtRuntime): void {
   // The rows described one router's rule table, and nothing about them
   // survives the machine behind this context changing.
   runtime.scan.reset()
+  runtime.capacity.reset()
   runtime.rules.clear()
   // A limits token froze values read off one router; the next one is not it.
   runtime.limits.clear()
@@ -390,6 +449,7 @@ export function disposeRuntime(runtime: OpenWrtRuntime): void {
   // Its own poller, so its own stop: the host's backstop only fires when the
   // module is deactivated, not when this context changes machine.
   runtime.scan.dispose()
+  runtime.capacity.dispose()
   runtime.rules.clear()
   runtime.limits.clear()
   runtime.store.dispose()

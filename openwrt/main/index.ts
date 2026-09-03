@@ -32,6 +32,7 @@ const activate: ModuleActivate = (ctx: ModuleContext) => {
       // (re)armed here too. This hook is also what runs after a settings save,
       // which is the only thing that ever re-times it.
       runtime.scan.applyPollers()
+      runtime.capacity.applyPollers()
     },
 
     reset() {
@@ -49,7 +50,12 @@ const activate: ModuleActivate = (ctx: ModuleContext) => {
     async refreshSlow() {
       if (!ctx.connected) return
       const available = await refreshCapabilities(runtime.latch)
-      if (!available.problem) await runtime.service.runSlow()
+      if (available.problem) return
+      await runtime.service.runSlow()
+      // The header's Refresh, on a Dashboard whose Capacity leaf is open. The
+      // report is a minute-scale poll of its own, so a person pressing refresh
+      // and watching the tile not move would be right to think it was broken.
+      if (ctx.streamActive('capacity')) await runtime.capacity.refresh()
     },
 
     dispose() {

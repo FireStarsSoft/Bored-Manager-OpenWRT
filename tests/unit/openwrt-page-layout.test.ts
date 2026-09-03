@@ -66,7 +66,7 @@ function groupLeafIds(spec: Node, id: string): string[] {
 
 describe('every page is grouped by a rail', () => {
   const EXPECTED: Record<string, string[]> = {
-    'pages/dashboard.json': ['overview', 'history', 'devices', 'interfaces'],
+    'pages/dashboard.json': ['overview', 'capacity', 'history', 'devices', 'interfaces'],
     'pages/settings.json': ['readiness', 'packages', 'jobs', 'display', 'scaling', 'rules'],
     'pages/connection.json': ['pppoe', 'binding', 'jobs', 'events']
   }

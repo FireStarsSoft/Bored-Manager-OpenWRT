@@ -115,6 +115,7 @@ export function registerHandlers(runtime: OpenWrtRuntime): void {
     agent,
     ctx,
     binding,
+    capacity,
     config,
     events,
     jobs,
@@ -318,6 +319,12 @@ export function registerHandlers(runtime: OpenWrtRuntime): void {
   // One button, and it deliberately runs even while the periodic scan is
   // gated off: somebody is looking at the page by definition.
   handle('scanNow', () => scan.scanNow())
+  handle('capacityReport', () => capacity.snapshot())
+  handle('capacityRefresh', async () => {
+    await capacity.refresh()
+    return { ok: true, data: 'The router has been asked again.' }
+  })
+  handle('capacityFix', (key) => capacity.fix(key))
   handle('scanExplain', (pref, cidr, dst, table) =>
     scan.explain(Number(pref) || 0, String(cidr ?? ''), String(dst ?? ''), Number(table) || 0)
   )

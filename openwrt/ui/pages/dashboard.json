@@ -538,6 +538,690 @@
                       ]
                     },
                     {
+                      "id": "capacity",
+                      "label": "Capacity",
+                      "icon": "Cpu",
+                      "blocks": [
+                        {
+                          "type": "conditional",
+                          "when": {
+                            "source": {
+                              "kind": "stream",
+                              "event": "capacity",
+                              "path": "state"
+                            },
+                            "op": "eq",
+                            "value": "unavailable"
+                          },
+                          "blocks": [
+                            {
+                              "type": "section",
+                              "title": "This router cannot report its capacity yet",
+                              "blocks": [
+                                {
+                                  "type": "keyValue",
+                                  "source": {
+                                    "kind": "stream",
+                                    "event": "capacity",
+                                    "path": ""
+                                  },
+                                  "rows": [
+                                    {
+                                      "key": "reason",
+                                      "label": "Why"
+                                    },
+                                    {
+                                      "key": "agentRelease",
+                                      "label": "Agent on this router"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "note",
+                                  "title": "What this needs",
+                                  "tone": "warning",
+                                  "lines": [
+                                    "The capacity report arrived with router packages 2.4.0. Everything else on this module keeps working without it, and Router limits under Module settings still reads and writes this router's conntrack and neighbour tables."
+                                  ]
+                                },
+                                {
+                                  "type": "actions",
+                                  "actions": [
+                                    {
+                                      "label": "Check again",
+                                      "method": "capacityRefresh"
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ],
+                          "else": [
+                            {
+                              "type": "conditional",
+                              "when": {
+                                "source": {
+                                  "kind": "stream",
+                                  "event": "capacity",
+                                  "path": "state"
+                                },
+                                "op": "eq",
+                                "value": "unknown"
+                              },
+                              "blocks": [
+                                {
+                                  "type": "section",
+                                  "title": "Asking the router",
+                                  "blocks": [
+                                    {
+                                      "type": "note",
+                                      "lines": [
+                                        "Nothing has been read yet. This tab asks the router once a minute while it is open."
+                                      ]
+                                    },
+                                    {
+                                      "type": "actions",
+                                      "actions": [
+                                        {
+                                          "label": "Ask now",
+                                          "method": "capacityRefresh"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ],
+                              "else": [
+                                {
+                                  "type": "conditional",
+                                  "when": {
+                                    "source": {
+                                      "kind": "stream",
+                                      "event": "capacity",
+                                      "path": "stale"
+                                    },
+                                    "op": "eq",
+                                    "value": true
+                                  },
+                                  "blocks": [
+                                    {
+                                      "type": "note",
+                                      "title": "This report has aged",
+                                      "tone": "warning",
+                                      "lines": [
+                                        "This report is more than five minutes old. The numbers below describe the router as it was; press Refresh before acting on them. A fix is refused against a report this old."
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "conditional",
+                                  "when": {
+                                    "source": {
+                                      "kind": "stream",
+                                      "event": "ui",
+                                      "path": "hintsOn"
+                                    },
+                                    "op": "eq",
+                                    "value": true
+                                  },
+                                  "blocks": [
+                                    {
+                                      "type": "note",
+                                      "title": "Reading this tab",
+                                      "lines": [
+                                        "Every number here is an estimate worked out on the router itself, from what it has and what its configuration asks of it - not a measurement and not a promise. The ceiling is where it is expected to stop being stable, and the row beside it names what runs out first. The four tiers say how the requirements change as the router grows. A Fix button appears only where this module already has a way to write that change, and the row says exactly what it writes and who writes it."
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "section",
+                                  "title": "Stability",
+                                  "columns": 4,
+                                  "slowTarget": "openwrt",
+                                  "slowAt": {
+                                    "kind": "stream",
+                                    "event": "capacity",
+                                    "path": "at"
+                                  },
+                                  "blocks": [
+                                    {
+                                      "type": "stat",
+                                      "label": "Sessions dialled",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "capacity",
+                                        "path": "load.sessionsUp"
+                                      },
+                                      "format": "number"
+                                    },
+                                    {
+                                      "type": "stat",
+                                      "label": "Session ceiling (estimate)",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "capacity",
+                                        "path": "ceiling.sessions"
+                                      },
+                                      "format": "number",
+                                      "attention": {
+                                        "source": {
+                                          "kind": "stream",
+                                          "event": "capacity",
+                                          "path": "stability.attention"
+                                        },
+                                        "op": "eq",
+                                        "value": true
+                                      }
+                                    },
+                                    {
+                                      "type": "stat",
+                                      "label": "Addresses bound",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "capacity",
+                                        "path": "load.bound"
+                                      },
+                                      "format": "number"
+                                    },
+                                    {
+                                      "type": "stat",
+                                      "label": "Binding ceiling (estimate)",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "capacity",
+                                        "path": "ceiling.bindings"
+                                      },
+                                      "format": "number",
+                                      "attention": {
+                                        "source": {
+                                          "kind": "stream",
+                                          "event": "capacity",
+                                          "path": "stability.attention"
+                                        },
+                                        "op": "eq",
+                                        "value": true
+                                      }
+                                    },
+                                    {
+                                      "type": "meter",
+                                      "label": "Sessions against the ceiling",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "capacity",
+                                        "path": "ceiling.sessionsPct"
+                                      },
+                                      "format": "pct",
+                                      "max": 100
+                                    },
+                                    {
+                                      "type": "meter",
+                                      "label": "Bindings against the ceiling",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "capacity",
+                                        "path": "ceiling.bindingsPct"
+                                      },
+                                      "format": "pct",
+                                      "max": 100
+                                    },
+                                    {
+                                      "type": "stat",
+                                      "label": "Memory this configuration needs",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "capacity",
+                                        "path": "needed.mem"
+                                      },
+                                      "format": "bytes"
+                                    },
+                                    {
+                                      "type": "stat",
+                                      "label": "Memory available now",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "capacity",
+                                        "path": "hardware.memAvailable"
+                                      },
+                                      "format": "bytes"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "section",
+                                  "title": "The verdict",
+                                  "columns": 2,
+                                  "blocks": [
+                                    {
+                                      "type": "keyValue",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "capacity",
+                                        "path": "summary"
+                                      },
+                                      "rows": [
+                                        {
+                                          "key": "stability",
+                                          "label": "Stability"
+                                        },
+                                        {
+                                          "key": "ceiling",
+                                          "label": "Ceiling"
+                                        },
+                                        {
+                                          "key": "limitedBy",
+                                          "label": "What runs out first"
+                                        },
+                                        {
+                                          "key": "tierNow",
+                                          "label": "Tier now"
+                                        },
+                                        {
+                                          "key": "tierNext",
+                                          "label": "Next tier"
+                                        },
+                                        {
+                                          "key": "calibratedOn",
+                                          "label": "Where these numbers come from"
+                                        },
+                                        {
+                                          "key": "at",
+                                          "label": "Read at",
+                                          "format": "datetime"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "actions",
+                                      "actions": [
+                                        {
+                                          "label": "Refresh",
+                                          "method": "capacityRefresh"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "conditional",
+                                  "when": {
+                                    "source": {
+                                      "kind": "stream",
+                                      "event": "capacity",
+                                      "path": "fixCount"
+                                    },
+                                    "op": "gt",
+                                    "value": 0
+                                  },
+                                  "blocks": [
+                                    {
+                                      "type": "section",
+                                      "title": "Fixes this module can apply",
+                                      "blocks": [
+                                        {
+                                          "type": "table",
+                                          "source": {
+                                            "kind": "stream",
+                                            "event": "capacity",
+                                            "path": "fixes"
+                                          },
+                                          "rowKey": "key",
+                                          "columns": [
+                                            {
+                                              "key": "label",
+                                              "label": "What is wrong"
+                                            },
+                                            {
+                                              "key": "action",
+                                              "label": "What this writes"
+                                            },
+                                            {
+                                              "key": "writer",
+                                              "label": "Who writes it"
+                                            }
+                                          ],
+                                          "rowActions": [
+                                            {
+                                              "label": "Fix",
+                                              "method": "capacityFix",
+                                              "argsFromRow": [
+                                                "key"
+                                              ],
+                                              "confirm": "Apply this fix on the router now? The row says exactly what is written and who writes it, and the report is asked again afterwards. A fix that reloads the firewall briefly interrupts new connections."
+                                            }
+                                          ],
+                                          "emptyText": "Nothing here needs fixing."
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "section",
+                                  "title": "Problems now, and likely next",
+                                  "blocks": [
+                                    {
+                                      "type": "table",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "capacity",
+                                        "path": "issues"
+                                      },
+                                      "rowKey": "key",
+                                      "columns": [
+                                        {
+                                          "key": "levelBadges",
+                                          "label": "Level",
+                                          "format": "badges"
+                                        },
+                                        {
+                                          "key": "label",
+                                          "label": "What"
+                                        },
+                                        {
+                                          "key": "detail",
+                                          "label": "Why it matters"
+                                        }
+                                      ],
+                                      "filterKeys": [
+                                        "label"
+                                      ],
+                                      "emptyText": "Nothing is wrong with this router that this report can see."
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "section",
+                                  "title": "What this configuration needs",
+                                  "columns": 2,
+                                  "blocks": [
+                                    {
+                                      "type": "keyValue",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "capacity",
+                                        "path": "needed"
+                                      },
+                                      "rows": [
+                                        {
+                                          "key": "mem",
+                                          "label": "Memory",
+                                          "format": "bytes"
+                                        },
+                                        {
+                                          "key": "cpus",
+                                          "label": "Cores (a rule of thumb, not a ceiling)",
+                                          "format": "number"
+                                        },
+                                        {
+                                          "key": "flash",
+                                          "label": "Flash",
+                                          "format": "bytes"
+                                        },
+                                        {
+                                          "key": "flowOffload",
+                                          "label": "fw4 flow offload"
+                                        },
+                                        {
+                                          "key": "conntrackMax",
+                                          "label": "Connection tracking table",
+                                          "format": "number"
+                                        },
+                                        {
+                                          "key": "gcThresh3",
+                                          "label": "Neighbour table (gc_thresh3)",
+                                          "format": "number"
+                                        },
+                                        {
+                                          "key": "leaseMax",
+                                          "label": "DHCP leases",
+                                          "format": "number"
+                                        },
+                                        {
+                                          "key": "pools",
+                                          "label": "PPPoE pools",
+                                          "format": "number"
+                                        },
+                                        {
+                                          "key": "prefs",
+                                          "label": "One-to-one priorities",
+                                          "format": "number"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "table",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "capacity",
+                                        "path": "requirements"
+                                      },
+                                      "rowKey": "key",
+                                      "columns": [
+                                        {
+                                          "key": "levelBadges",
+                                          "label": "Level",
+                                          "format": "badges"
+                                        },
+                                        {
+                                          "key": "label",
+                                          "label": "Requirement"
+                                        }
+                                      ],
+                                      "emptyText": "Nothing was checked."
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "section",
+                                  "title": "Hardware present",
+                                  "columns": 2,
+                                  "blocks": [
+                                    {
+                                      "type": "keyValue",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "capacity",
+                                        "path": "hardware"
+                                      },
+                                      "rows": [
+                                        {
+                                          "key": "board",
+                                          "label": "Board"
+                                        },
+                                        {
+                                          "key": "cpuModel",
+                                          "label": "CPU"
+                                        },
+                                        {
+                                          "key": "cpus",
+                                          "label": "Cores",
+                                          "format": "number"
+                                        },
+                                        {
+                                          "key": "arch",
+                                          "label": "Architecture"
+                                        },
+                                        {
+                                          "key": "target",
+                                          "label": "Target"
+                                        },
+                                        {
+                                          "key": "kernel",
+                                          "label": "Kernel"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "keyValue",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "capacity",
+                                        "path": "hardware"
+                                      },
+                                      "rows": [
+                                        {
+                                          "key": "memTotal",
+                                          "label": "Memory fitted",
+                                          "format": "bytes"
+                                        },
+                                        {
+                                          "key": "memAvailable",
+                                          "label": "Memory available (MemAvailable)",
+                                          "format": "bytes"
+                                        },
+                                        {
+                                          "key": "flashTotal",
+                                          "label": "Writable flash",
+                                          "format": "bytes"
+                                        },
+                                        {
+                                          "key": "flashFree",
+                                          "label": "Flash free",
+                                          "format": "bytes"
+                                        },
+                                        {
+                                          "key": "nicCount",
+                                          "label": "Physical ports",
+                                          "format": "number"
+                                        },
+                                        {
+                                          "key": "load1",
+                                          "label": "Load (1 minute)",
+                                          "format": "number"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "section",
+                                  "title": "Software present",
+                                  "columns": 2,
+                                  "blocks": [
+                                    {
+                                      "type": "keyValue",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "capacity",
+                                        "path": "software"
+                                      },
+                                      "rows": [
+                                        {
+                                          "key": "release",
+                                          "label": "OpenWrt"
+                                        },
+                                        {
+                                          "key": "agent",
+                                          "label": "bm-agent"
+                                        },
+                                        {
+                                          "key": "wanbind",
+                                          "label": "bm-wanbind"
+                                        },
+                                        {
+                                          "key": "pppoe",
+                                          "label": "bm-pppoe-pool"
+                                        },
+                                        {
+                                          "key": "fw4",
+                                          "label": "Firewall4"
+                                        },
+                                        {
+                                          "key": "fw4Loaded",
+                                          "label": "Its ruleset"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "keyValue",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "capacity",
+                                        "path": "software"
+                                      },
+                                      "rows": [
+                                        {
+                                          "key": "flowOffload",
+                                          "label": "Software flow offload"
+                                        },
+                                        {
+                                          "key": "hwOffload",
+                                          "label": "Hardware flow offload"
+                                        },
+                                        {
+                                          "key": "conntrackMax",
+                                          "label": "Connection tracking table",
+                                          "format": "number"
+                                        },
+                                        {
+                                          "key": "conntrackCount",
+                                          "label": "Connections tracked now",
+                                          "format": "number"
+                                        },
+                                        {
+                                          "key": "conntrackPct",
+                                          "label": "Of the table",
+                                          "format": "pct"
+                                        },
+                                        {
+                                          "key": "gcThresh3",
+                                          "label": "Neighbour table (gc_thresh3)",
+                                          "format": "number"
+                                        },
+                                        {
+                                          "key": "ipRules",
+                                          "label": "Policy rules on the router",
+                                          "format": "number"
+                                        },
+                                        {
+                                          "key": "leaseMax",
+                                          "label": "DHCP lease ceiling",
+                                          "format": "number"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "section",
+                                  "title": "How the requirements change with scale",
+                                  "blocks": [
+                                    {
+                                      "type": "table",
+                                      "source": {
+                                        "kind": "stream",
+                                        "event": "capacity",
+                                        "path": "tier.rows"
+                                      },
+                                      "rowKey": "id",
+                                      "columns": [
+                                        {
+                                          "key": "range",
+                                          "label": "Size"
+                                        },
+                                        {
+                                          "key": "stateBadges",
+                                          "label": "Where you are",
+                                          "format": "badges"
+                                        },
+                                        {
+                                          "key": "needs",
+                                          "label": "What it needs"
+                                        }
+                                      ],
+                                      "emptyText": "The tiers are not known yet."
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
                       "id": "history",
                       "label": "History",
                       "icon": "Activity",

@@ -471,6 +471,16 @@ export const FEATURES: Record<string, FeatureSpec | null> = {
   // itself and hands back the daemon's own refusal sentence when there is no
   // daemon to ask, which is what the panel should show rather than a gate's.
   scanExplain: null,
+  // Reads, and one action whose gate is empty on purpose. `capacityFix` cannot
+  // name its requirement here because it has five: which package a fix needs
+  // depends on which fix it is, and a table entry saying "bm-wanbind" would
+  // refuse the conntrack fix on a router with no binding daemon. The manager
+  // borrows the gate of the write path each row actually takes - see
+  // `CapacityManager.gateFor` - which is the same thing `directUpdate` does
+  // with `directEnable`'s sentence.
+  capacityReport: null,
+  capacityRefresh: { kind: 'action', requires: [] },
+  capacityFix: { kind: 'action', requires: [] },
 
   // The daemon's own numbers - the priority bands, the catch-all table and the
   // timers an instance is stamped with when it is created. They were module

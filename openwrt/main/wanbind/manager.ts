@@ -33,6 +33,7 @@ import {
 import {
   applyInstance,
   deleteInstance,
+  raiseDhcpLimits as raiseInstanceDhcpLimits,
   startInstance,
   stopInstance,
   updateInstance
@@ -314,6 +315,11 @@ export class BindingManager {
 
   update(id: unknown, values: unknown): Promise<OkResult> {
     return updateInstance(this.runtime, id, values)
+  }
+
+  /** The capacity report's fix for a DHCP ceiling below the seat count. */
+  raiseDhcpLimits(id: unknown): Promise<OkResult> {
+    return raiseInstanceDhcpLimits(this.runtime, id)
   }
 
   start(id: unknown): Promise<OkResult> {

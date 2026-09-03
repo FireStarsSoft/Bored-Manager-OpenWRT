@@ -307,6 +307,52 @@ export async function updateInstance(
 }
 
 /**
+ * Raise dnsmasq's lease ceiling on this instance's LAN, and change nothing else.
+ *
+ * `instance_set` takes the whole instance, so the LAN and the carrier travel
+ * unchanged from the section as the daemon reports it - sending the raise
+ * alone would rewrite them to nothing. The daemon does the arithmetic: it
+ * raises the ceiling to the seats this instance can hand out, never lowers one,
+ * and restarts dnsmasq.
+ *
+ * The one caller is the capacity report's fix for `lease-max`. It is here
+ * rather than there because this is the half that holds the instance.
+ */
+export async function raiseDhcpLimits(
+  runtime: BindingRuntime,
+  idRaw: unknown
+): Promise<OkResult> {
+  const id = typeof idRaw === 'string' ? idRaw.trim() : ''
+  const blocked = unavailable(runtime)
+  if (blocked) return { ok: false, error: blocked }
+
+  const instance = (runtime.cache.info?.configured ?? []).find((entry) => entry.id === id)
+  if (!instance) return { ok: false, error: 'no such binding instance' }
+  if (!instance.enabled) {
+    return {
+      ok: false,
+      error: `binding instance "${instance.name}" is switched off, and the daemon only raises the lease ceiling for one that is running`
+    }
+  }
+
+  const reply = await wanbindInstanceSet(agentDeps(runtime), id, {
+    lan: instance.lan,
+    carrier: instance.carrier,
+    raise_dhcp_limits: true
+  })
+
+  if (!reply.ok || !reply.data) {
+    return { ok: false, error: reply.error ?? 'the daemon refused the change' }
+  }
+  if (reply.data.ok === false) {
+    return { ok: false, error: reply.data.reason ?? 'the daemon refused the change' }
+  }
+
+  recordEvent(runtime, 'edited', `dnsmasq lease ceiling raised for ${instance.lan}`, id)
+  return { ok: true }
+}
+
+/**
  * Switch an instance on or off.
  *
  * `instance_set` again rather than a verb of its own, because `enabled` is a
