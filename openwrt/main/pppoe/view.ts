@@ -172,10 +172,7 @@ export function refreshCache(runtime: PppoeRuntime, force = false): Promise<void
     }
 
     const deps = agentDeps(runtime)
-    const [info, rows] = await Promise.all([
-      poolInfo(deps),
-      poolSessions(deps, '', 'all')
-    ])
+    const info = await poolInfo(deps)
 
     if (generation !== runtime.generation) return
 
@@ -185,13 +182,45 @@ export function refreshCache(runtime: PppoeRuntime, force = false): Promise<void
       return
     }
 
+    // A page of rows per pool, rather than one page for the router.
+    //
+    // The router's cap is per call: two pools of five hundred are a thousand
+    // rows, and one call that stopped at five hundred used to leave the second
+    // pool out entirely - with nothing in the reply saying which pool had been
+    // cut off. Asked per pool, each one answers about itself and the totals
+    // below are of the whole router rather than of whatever fitted.
+    const rows: PoolRow[] = []
+    const truncated: string[] = []
+    let limit = runtime.cache.rowsLimit
+    let blind: { since: number; failures: number } | null = null
+    let failed = ''
+
+    for (const pool of info.data.pools) {
+      const page = await poolSessions(deps, pool.id, 'all', 0)
+
+      if (generation !== runtime.generation) return
+
+      if (!page.ok || !page.data) {
+        failed = page.error ?? failed
+        continue
+      }
+
+      for (const row of page.data.sessions) rows.push(row)
+
+      limit = page.data.limit
+      if (page.data.truncated) truncated.push(pool.id)
+      if (page.data.blind) blind = page.data.blind
+    }
+
     runtime.cache = {
       info: info.data,
-      rows: rows.ok && rows.data ? rows.data.sessions : runtime.cache.rows,
-      rowsLimit: rows.ok && rows.data ? rows.data.limit : runtime.cache.rowsLimit,
+      rows: failed && rows.length === 0 ? runtime.cache.rows : rows,
+      rowsLimit: limit,
+      truncated,
+      blind,
       fetchedAt: Date.now(),
       stale: false,
-      error: rows.ok ? '' : rows.error ?? ''
+      error: failed
     }
   }
 
@@ -304,9 +333,49 @@ export function snapshot(runtime: PppoeRuntime, now = Date.now()): PppoeSnapshot
     unwritten,
     attention: error + unwritten,
     legacyCount: runtime.cache.info?.legacy.length ?? 0,
-    stale: runtime.cache.stale
+    stale: runtime.cache.stale,
+    notice: notice(runtime)
   }
   return runtime.latestPayload
+}
+
+/**
+ * What is wrong with the rows, when something is and nothing else would say so.
+ *
+ * Both cases here look exactly like a healthy router from the table alone: a
+ * pool whose rows were cut off shows fewer members than it has, and a router
+ * whose netifd has gone quiet shows every row exactly as it was at the last
+ * good pass - a session that dropped since still reading up, with the address
+ * it had.
+ */
+function notice(runtime: PppoeRuntime): string {
+  const parts: string[] = []
+  const cut = runtime.cache.truncated
+
+  if (cut.length === 1) {
+    parts.push(
+      `The router listed only the first ${runtime.cache.rowsLimit} members of pool ${cut[0]}; ` +
+        'the rest are counted in its row and not listed below.'
+    )
+  } else if (cut.length > 1) {
+    parts.push(
+      `The router listed only the first ${runtime.cache.rowsLimit} members of ${cut.length} pools ` +
+        `(${cut.join(', ')}); the rest are counted in their rows and not listed below.`
+    )
+  }
+
+  const blind = runtime.cache.blind
+
+  if (blind) {
+    const seconds = Math.max(0, Math.round(Date.now() / 1000 - blind.since))
+    parts.push(
+      `The router is not answering about its own interfaces (for ${seconds}s, ` +
+        `${blind.failures} attempt(s)). The states below are the last it saw, so a session ` +
+        'that has dropped since would still read up here.'
+    )
+  }
+
+  return parts.join(' ')
 }
 
 export function emitSummary(runtime: PppoeRuntime): void {

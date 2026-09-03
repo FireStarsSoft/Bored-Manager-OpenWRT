@@ -175,7 +175,15 @@ export function refreshCache(runtime: BindingRuntime, force = false): Promise<vo
     // cache is not replaced until every call is in, so writing this answer into
     // it first would leave a surface reading between the two awaits a set of
     // fresh counts under the previous tick's timestamp.
-    const waiting = anybodyUnseated(info.data) ? await wanbindWaiting(deps) : null
+    // `includeReserved`, because the table shows them: a device an instance is
+    // deliberately leaving alone, because a one-to-one binding already decides
+    // its address, is the hardest row on that page to account for without a
+    // line saying so. The router leaves them out by default - on a machine
+    // with five hundred bindings under four instances they were most of the
+    // answer, and none of them is waiting for anything.
+    const waiting = anybodyUnseated(info.data)
+      ? await wanbindWaiting(deps, '', { includeReserved: true, limit: 500 })
+      : null
 
     if (generation !== runtime.generation) return
 

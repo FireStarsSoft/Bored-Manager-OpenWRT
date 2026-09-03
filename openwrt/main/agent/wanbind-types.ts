@@ -541,12 +541,25 @@ export interface WanbindRulesReply {
    * has no rules" is the single most misleading thing this monitor could say.
    */
   read: boolean
+  /**
+   * Rows after netifd's three-per-interface are collapsed, which is what a
+   * caller pages through - and separately how many rules the kernel is
+   * actually holding. Two different questions: a page that showed one as the
+   * other would tell somebody their router has a third of the rules it has.
+   */
   count: number
+  raw?: number
+  offset?: number
   capped: boolean
+  /** Set when reasons were asked for and the page was too large to carry them. */
+  reasonsOmitted?: boolean
   limit: number
   rules: WanbindRuleRow[]
   bands: {
     direct: { base: number; top: number }
+    local?: { base: number; top: number }
+    /** Rules in this daemon's own bands that this daemon did not write. */
+    foreign?: number
     instances: Array<{
       id: string
       base: number
@@ -559,12 +572,45 @@ export interface WanbindRulesReply {
   tables: WanbindTableRow[]
 }
 
+/** One rule and its sentence, which the list above no longer carries per row. */
+export interface WanbindRuleExplainReply {
+  ok: boolean
+  read: boolean
+  found: boolean
+  rule: WanbindRuleRow | null
+}
+
+/** Who is waiting for a WAN, what they are waiting on, and how many there are. */
+export interface WanbindWaitingReply {
+  waiting: WanbindWaiting[]
+  /** The whole answer, of which `waiting` may be one page. */
+  total?: number
+  counts?: { queued: number; held: number; reserved: number }
+  limit?: number
+  offset?: number
+  capped?: boolean
+}
+
 /** What the kernel is holding against what the last pass decided it should. */
 export interface WanbindVerifyReply {
   ok: boolean
   read: boolean
   checked: number
   present: number
-  missing: Array<{ pref: number; cidr: string; table: number; id: string; source: string }>
-  extra: Array<{ pref: number; cidr: string; table: number }>
+  /**
+   * `dst` is set on a rule that matches where a packet is going rather than
+   * where it came from - which is what a LAN-local escape is, and the one shape
+   * a source-keyed reader could not tell apart from every other one of them.
+   */
+  missing: Array<{
+    pref: number
+    cidr: string
+    dst?: string
+    table: number
+    id: string
+    source: string
+  }>
+  extra: Array<{ pref: number; cidr: string; dst?: string; table: number }>
+  /** Why the check could not run, when it could not. */
+  reason?: string
 }

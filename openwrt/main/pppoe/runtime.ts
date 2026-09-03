@@ -27,6 +27,22 @@ export interface PppoeCache {
   info: PoolInfo | null
   rows: PoolRow[]
   rowsLimit: number
+  /**
+   * Pools whose rows did not all fit in one page.
+   *
+   * By name rather than as a flag, because "some rows are missing" is not a
+   * sentence anybody can act on and "pool vnp has more members than this page
+   * shows" is.
+   */
+  truncated: string[]
+  /**
+   * Set while netifd is not answering the router's interface dump.
+   *
+   * Every row below is folded from that dump, so silence leaves them reading
+   * exactly as they did at the last good pass - a session that dropped since
+   * still reading up, with its old address.
+   */
+  blind: { since: number; failures: number } | null
   /** App-clock ms of the last successful fetch; 0 before the first. */
   fetchedAt: number
   /** The last fetch failed, so everything above is the previous answer. */
@@ -54,7 +70,16 @@ export interface PppoeRuntime {
 }
 
 export function emptyCache(): PppoeCache {
-  return { info: null, rows: [], rowsLimit: 0, fetchedAt: 0, stale: false, error: '' }
+  return {
+    info: null,
+    rows: [],
+    rowsLimit: 0,
+    truncated: [],
+    blind: null,
+    fetchedAt: 0,
+    stale: false,
+    error: ''
+  }
 }
 
 export function emptySnapshot(): PppoeSnapshot {
@@ -70,7 +95,8 @@ export function emptySnapshot(): PppoeSnapshot {
     unwritten: 0,
     attention: 0,
     legacyCount: 0,
-    stale: false
+    stale: false,
+    notice: ''
   }
 }
 

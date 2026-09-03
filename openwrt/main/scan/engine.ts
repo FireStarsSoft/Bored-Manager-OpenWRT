@@ -70,6 +70,9 @@ export function emptyScanSnapshot(): ScanSnapshot {
   }
 }
 
+/** How many rows one page of the monitor asks for. */
+const SCAN_PAGE = 500
+
 export class ScanEngine {
   private readonly options: ScanEngineOptions
   private readonly poller: ModulePoller
@@ -212,7 +215,13 @@ export class ScanEngine {
     const problem = bindingDaemonProblem(this.options.agent())
     if (problem) return this.fail(generation, problem)
 
-    const reply = await wanbindRules(this.deps())
+    // Without the sentences, and paged.
+    //
+    // At five hundred sessions the router carries fifteen hundred rules and
+    // every row used to arrive with a paragraph explaining itself: the prose
+    // was most of the reply, and this table shows a sentence only for the row
+    // somebody opens. netifd's three rules per interface arrive as one row.
+    const reply = await wanbindRules(this.deps(), { limit: SCAN_PAGE, reasons: false })
     if (!this.current(generation)) return SCAN_STOPPED
     if (!reply.ok || !reply.data) return this.fail(generation, reply.error ?? REFUSED)
     // Before the list, always. An empty `rules` beside `read: false` is the

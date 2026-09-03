@@ -53,7 +53,8 @@ import {
   type WanbindVerifyReply,
   type WanbindWansReply,
   type WanbindAssignment,
-  type WanbindWaiting
+  type WanbindRuleExplainReply,
+  type WanbindWaitingReply
 } from './wanbind-types'
 
 /** A pass over four thousand clients is seconds, not milliseconds. */
@@ -137,11 +138,31 @@ export function wanbindAssignments(
 }
 
 /** And who is not, with their place in the queue. */
+export interface WanbindWaitingOptions {
+  limit?: number
+  offset?: number
+  /**
+   * Devices an instance is deliberately leaving alone because a one-to-one
+   * binding already decides their address.
+   *
+   * Off by default on the router, and asked for here because the table shows
+   * them: they are not waiting for anything, and on a router with five hundred
+   * bindings under four instances they were most of the answer.
+   */
+  includeReserved?: boolean
+}
+
 export function wanbindWaiting(
   deps: AgentDeps,
-  id = ''
-): Promise<AgentCallResult<{ waiting: WanbindWaiting[] }>> {
-  return call<{ waiting: WanbindWaiting[] }>(deps, 'waiting', { instance: id })
+  id = '',
+  options: WanbindWaitingOptions = {}
+): Promise<AgentCallResult<WanbindWaitingReply>> {
+  return call<WanbindWaitingReply>(deps, 'waiting', {
+    instance: id,
+    limit: Math.trunc(options.limit ?? 500),
+    offset: Math.trunc(options.offset ?? 0),
+    include_reserved: options.includeReserved === true
+  })
 }
 
 /**
@@ -189,11 +210,47 @@ export function wanbindWans(deps: AgentDeps): Promise<AgentCallResult<WanbindWan
  * every packet on the router and appear on no surface at all. This asks for the
  * whole table, capped, with an owner and a sentence per row.
  */
+export interface WanbindRulesOptions {
+  limit?: number
+  offset?: number
+  /**
+   * A sentence per row.
+   *
+   * Off by default, and that is the change this release made: at fifteen
+   * hundred rules the sentences are most of the reply, and the page fetches
+   * the one somebody clicked on rather than all of them.
+   */
+  reasons?: boolean
+  /** netifd's three rules per interface as one row. On unless a caller says not. */
+  collapse?: boolean
+}
+
 export function wanbindRules(
   deps: AgentDeps,
-  limit = 0
+  options: WanbindRulesOptions = {}
 ): Promise<AgentCallResult<WanbindRulesReply>> {
-  return call<WanbindRulesReply>(deps, 'rules', { limit: Math.trunc(limit) })
+  return call<WanbindRulesReply>(deps, 'rules', {
+    limit: Math.trunc(options.limit ?? 0),
+    offset: Math.trunc(options.offset ?? 0),
+    reasons: options.reasons === true,
+    collapse: options.collapse !== false
+  })
+}
+
+/** One rule, and the sentence the list no longer carries for every row. */
+export function wanbindRuleExplain(
+  deps: AgentDeps,
+  pref: number,
+  cidr = '',
+  dst = '',
+  table = 0
+): Promise<AgentCallResult<WanbindRuleExplainReply>> {
+  return call<WanbindRuleExplainReply>(deps, 'rule_explain', {
+    pref: Math.trunc(pref),
+    cidr,
+    dst,
+    table: Math.trunc(table)
+  })
 }
 
 /** What the kernel is holding, against what the last pass decided it should. */

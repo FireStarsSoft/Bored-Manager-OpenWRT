@@ -80,6 +80,15 @@ export interface PppoeSnapshot {
   legacyCount: number
   /** True when the router stopped answering and these are the last numbers. */
   stale: boolean
+  /**
+   * What is wrong with the rows below, in a sentence, or ''.
+   *
+   * Two things can be, and both look like nothing being wrong: a pool whose
+   * members did not all fit in one page, and a router whose netifd has stopped
+   * answering - where every row goes on reading exactly as it did at the last
+   * good pass.
+   */
+  notice: string
 }
 
 /**

@@ -80,6 +80,7 @@ export {
   wanbindInstanceDelete,
   wanbindInstanceSet,
   wanbindRules,
+  wanbindRuleExplain,
   // The 2.4.0 contract, and the only one: the module asks the daemon and
   // writes nothing itself.
   wanbindBind,
@@ -117,6 +118,8 @@ export {
   // row and table types by indexing it rather than importing them separately,
   // so an owner the daemon learns cannot be missed by a union copied here.
   type WanbindRulesReply,
+  type WanbindRuleExplainReply,
+  type WanbindWaitingReply,
   type WanbindSettings,
   type WanbindVerdict,
   type WanbindWaiting,

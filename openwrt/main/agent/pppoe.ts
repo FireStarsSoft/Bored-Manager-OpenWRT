@@ -201,12 +201,32 @@ export function poolStats(deps: AgentDeps): Promise<AgentCallResult> {
 }
 
 /** Member rows, from the record, so a table never loses a row. */
+export interface PoolSessionsReply {
+  sessions: PoolRow[]
+  limit: number
+  /** Where this page started, and how many rows there are in all. */
+  offset?: number
+  total?: number
+  /** Whether rows were left out of this page. */
+  truncated?: boolean
+  /** Set while netifd is not answering the router's interface dump. */
+  blind?: { since: number; failures: number } | null
+}
+
+/**
+ * Member rows, from the record, so a table never loses a row.
+ *
+ * `offset` because the cap is per call and not per router: two pools of five
+ * hundred are a thousand rows, and a reply that stopped at five hundred used to
+ * leave the second pool out entirely without saying which.
+ */
 export function poolSessions(
   deps: AgentDeps,
   id = '',
-  scope: 'attention' | 'up' | 'down' | 'all' = 'all'
-): Promise<AgentCallResult<{ sessions: PoolRow[]; limit: number }>> {
-  return call<{ sessions: PoolRow[]; limit: number }>(deps, 'sessions', { id, scope })
+  scope: 'attention' | 'up' | 'down' | 'all' = 'all',
+  offset = 0
+): Promise<AgentCallResult<PoolSessionsReply>> {
+  return call<PoolSessionsReply>(deps, 'sessions', { id, scope, offset: Math.trunc(offset) })
 }
 
 /** The devices a pool could dial over, as the router lists them. */
