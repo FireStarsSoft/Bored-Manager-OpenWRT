@@ -2883,7 +2883,16 @@ export function interfaces() {
 	let out = layout.read(state.bus);
 
 	if (out === null) {
-		return { ok: false, reason: 'netifd did not answer, so nothing can be said about this router\'s interfaces. Try again, and if it keeps happening check that netifd is running - `ubus call network.interface dump`' };
+		// Every key the good answer carries, so a reader can draw an empty table
+		// and the refusal beside it rather than having to check `ok` before it
+		// touches anything. A caller that indexed `interfaces` on a refusal got
+		// null and stopped.
+		return {
+			ok: false,
+			reason: 'netifd did not answer, so nothing can be said about this router\'s interfaces. Try again, and if it keeps happening check that netifd is running - `ubus call network.interface dump`',
+			interfaces: [],
+			stated: false
+		};
 	}
 
 	return { ok: true, interfaces: out.list, stated: out.stated };
@@ -3540,20 +3549,29 @@ function verifyRules(id, snap) {
 		};
 	}
 
+	// Keyed on the destination as well as the source, because one of the things
+	// this daemon writes has no source at all: a LAN-local escape is `to <that
+	// LAN> lookup main`, and against a source-keyed table every one of them
+	// looked like the same rule - so the whole band verified as one entry that
+	// was never there.
 	let held = {};
+
+	for (let one in netlink.destRules() ?? [])
+		held[sprintf('%d||%s|%d', one.pref, one.dst, one.table)] = true;
+
 	for (let one in present)
-		held[sprintf('%d|%s|%d', one.pref, one.cidr, one.table)] = true;
+		held[sprintf('%d|%s||%d', one.pref, one.cidr, one.table)] = true;
 
 	let wanted = {};
 	let order = [];
 
-	let want = function(pref, cidr, table, who, source) {
-		let key = sprintf('%d|%s|%d', pref, cidr, table);
+	let want = function(pref, cidr, dst, table, who, source) {
+		let key = sprintf('%d|%s|%s|%d', pref, cidr, dst, table);
 
 		if (key in wanted)
 			return;
 
-		wanted[key] = { pref: pref, cidr: cidr, table: table, id: who, source: source };
+		wanted[key] = { pref: pref, cidr: cidr, dst: dst, table: table, id: who, source: source };
 		push(order, key);
 	};
 
@@ -3570,14 +3588,14 @@ function verifyRules(id, snap) {
 			if (!length(text(device.ip)))
 				continue;
 
-			want(device.pref, device.ip + '/32', device.table, mac, st.instance.id);
+			want(device.pref, device.ip + '/32', '', device.table, mac, st.instance.id);
 		}
 
 		// The blocks the fail-closed catch-all is written as, which is the one
 		// rule group whose absence is not one client going astray but a whole
 		// LAN leaking out of the router's default connection.
 		for (let cidr in st.scope)
-			want(st.instance.catchAllPref, cidr, st.instance.catchAllTable, 'catch-all', st.instance.id);
+			want(st.instance.catchAllPref, cidr, '', st.instance.catchAllTable, 'catch-all', st.instance.id);
 	}
 
 	// The hand-placed bindings belong to no instance, so a call that named one
@@ -3590,7 +3608,30 @@ function verifyRules(id, snap) {
 			if (row.pref < 1 || row.table < 1 || !length(text(row.ip)))
 				continue;
 
-			want(row.pref, row.ip + '/32', row.table, row.id, 'manual');
+			want(row.pref, row.ip + '/32', '', row.table, row.id, 'manual');
+		}
+
+		// And the LAN-local escapes, which belong to no instance either. They
+		// were written and never checked: a band removed by hand, or refused by
+		// the kernel, left every bound address unable to reach its own network
+		// with nothing anywhere saying so.
+		let local = cfg.localBand(snap);
+
+		if (local.usable && local.enabled) {
+			let list = state.bus ? wans.dump(state.bus) : null;
+
+			if (list !== null) {
+				let cidrs = ruleset.localEscapeCidrs(layout.classify(list, layout.statements()));
+				let n = 0;
+
+				for (let cidr in cidrs) {
+					if (local.base + n > local.top)
+						break;
+
+					want(local.base + n, '', cidr, 254, cidr, 'local');
+					n++;
+				}
+			}
 		}
 	}
 
@@ -3608,13 +3649,13 @@ function verifyRules(id, snap) {
 	let counted = {};
 
 	let stray = function(one, source) {
-		let key = sprintf('%d|%s|%d', one.pref, one.cidr, one.table);
+		let key = sprintf('%d|%s||%d', one.pref, one.cidr, one.table);
 
 		if (key in wanted || counted[key] === true)
 			return;
 
 		counted[key] = true;
-		push(extra, { pref: one.pref, cidr: one.cidr, table: one.table, id: '', source: source });
+		push(extra, { pref: one.pref, cidr: one.cidr, dst: '', table: one.table, id: '', source: source });
 	};
 
 	for (let st in each()) {

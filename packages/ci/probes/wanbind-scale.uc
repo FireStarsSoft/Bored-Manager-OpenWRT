@@ -839,4 +839,27 @@ let after = service.reloadConfig();
 check('the edited instance is rebuilt', after.rebuilt, 1);
 check('and the other three are not', after.kept, 3);
 
+// ===========================================================================
+// The escapes are verified like everything else this daemon writes.
+
+service.pass();
+
+let checked = service.verify({ instance: '' });
+
+check('the check ran', checked.read, true);
+check('and found every rule it wanted', length(checked.missing), 0);
+
+// One taken off by hand is one missing, named by the network it was for.
+netlink.removeDest(18002, '10.9.2.0/24', 254);
+
+let short = service.verify({ instance: '' });
+
+check('a missing escape is reported', length(short.missing), 1);
+check('as a rule with a destination and no source', short.missing[0].dst, '10.9.2.0/24');
+check('written by this daemon rather than by an instance', short.missing[0].source, 'local');
+check('and the check says so overall', short.ok, false);
+
+service.pass();
+check('the next pass puts it back', length(service.verify({ instance: '' }).missing), 0);
+
 report();
