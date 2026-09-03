@@ -90,7 +90,14 @@ function persisted() {
 };
 
 /** fw4's flow_offloading flag: true, false, or null when uci did not answer. */
-function flowOffload() {
+/**
+ * Whether fw4's software flow offload is on.
+ *
+ * Exported because it is a fact about the router that two other packages need
+ * and neither should read for itself: a second reader of the same option is a
+ * second answer waiting to disagree with this one.
+ */
+export function flowOffload() {
 	try {
 		let value = null;
 		cursor().foreach('firewall', 'defaults', (section) => {

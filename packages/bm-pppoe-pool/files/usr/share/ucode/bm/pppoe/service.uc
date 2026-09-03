@@ -21,6 +21,7 @@ import { cursor } from 'uci';
 import { timer } from 'uloop';
 
 import { debug, err, notice } from 'bm.log';
+import { flowOffload } from 'bm.tune';
 
 import * as cfg from 'bm.pppoe.config';
 import * as counters from 'bm.pppoe.counters';
@@ -817,6 +818,43 @@ function liveUpOf(id) {
 	return out;
 };
 
+/**
+ * What this router can carry, as far as this daemon can tell.
+ *
+ * `flowOffload` is read through `bm.tune` rather than out of the firewall
+ * config here, because a second reader of one option is a second answer waiting
+ * to disagree with the first - and the agent's is the one `bmctl tune` and the
+ * app both act on.
+ */
+function routerFacts() {
+	let text = readfile('/proc/meminfo');
+	let available = null;
+	let total = null;
+
+	if (type(text) == 'string') {
+		let one = match(text, /MemAvailable:[ 	]+([0-9]+)/);
+		let two = match(text, /MemTotal:[ 	]+([0-9]+)/);
+
+		if (one)
+			available = int(one[1]);
+
+		if (two)
+			total = int(two[1]);
+	}
+
+	let members = 0;
+
+	for (let st in each())
+		members += length(st.pool.members);
+
+	return {
+		flowOffload: flowOffload(),
+		memAvailableKb: available,
+		memTotalKb: total,
+		members: members
+	};
+}
+
 /** The one validation gate, with the router's current shape gathered in. */
 function checkRecord(record, creating, previous) {
 	let others = [];
@@ -832,7 +870,8 @@ function checkRecord(record, creating, previous) {
 		sections: networkSectionNames(),
 		liveUp: liveUpOf(record.id),
 		others: others,
-		macvlanReady: macvlanLoaded()
+		macvlanReady: macvlanLoaded(),
+		router: routerFacts()
 	});
 };
 
@@ -856,7 +895,10 @@ export function poolCheck(args) {
 
 	let gate = checkRecord(record, previous ? false : true, previous);
 
-	return { ok: gate.ok, findings: gate.findings };
+	// What the router answered, beside what the answer means. A surface that
+	// has to offer "turn flow offload on" needs to know it is off, and a
+	// findings list is prose rather than a fact it can branch on.
+	return { ok: gate.ok, findings: gate.findings, router: routerFacts() };
 };
 
 function createPool(id, spec) {
@@ -1279,6 +1321,12 @@ export function info() {
 		name: 'bm-pppoe-pool',
 		release: RELEASE,
 		apiVersion: API_VERSION,
+
+		// What this router can carry, as far as this daemon can tell. On `info`
+		// as well as on `pool_check` because a page draws the warning before
+		// anybody presses Check.
+		router: routerFacts(),
+		blind: state.blind,
 		settings: settingsGet(),
 		started: STARTED,
 		uptime: time() - STARTED,

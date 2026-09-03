@@ -33,6 +33,13 @@ define Package/bm-pppoe-pool
   # No rtnl: this package writes no routes and no rules. It writes UCI and
   # watches netifd, which is uci and ubus.
   DEPENDS:=+bm-agent +ucode +ucode-mod-fs +ucode-mod-ubus +ucode-mod-uci +ucode-mod-uloop
+  # The ucode modules this package imports from bm-agent - bm.log, bm.state,
+  # bm.tune, bm.facts - are that package's files, so a daemon newer than the
+  # agent beside it is a daemon whose imports do not resolve. The constraint
+  # cannot go in DEPENDS: that is a whitespace-separated list and `(>=x)`
+  # becomes a phantom package. EXTRA_DEPENDS is the variable for it, and apk
+  # refuses the install rather than leaving a half-updated router.
+  EXTRA_DEPENDS:=bm-agent (>=$(PKG_VERSION))
   PKGARCH:=all
 endef
 

@@ -33,6 +33,15 @@ uci.set('network', 'lan', 'proto', 'static');
 uci.set('network', 'lan', 'device', 'br-lan');
 uci.set('network', 'lan', 'ipaddr', '10.9.0.1');
 
+// fw4's software flow offload, on. Above sixty-four sessions the create check
+// refuses a pool without it - every session installs three routing rules and
+// the kernel walks the whole list for every packet - so a fixture of five
+// hundred that did not say either way would be testing the refusal.
+uci.set('firewall', 'defs', 'defaults');
+uci.set('firewall', 'defs', 'flow_offloading', '1');
+
+seed('/proc/meminfo', 'MemTotal:        2048000 kB' + chr(10) + 'MemAvailable:    1500000 kB' + chr(10));
+
 // The pool as the daemon itself would write it: five hundred members, created
 // through the same call the app and the CLI use, so the fixture cannot describe
 // a router the daemon would never produce.
@@ -220,5 +229,68 @@ service.attach(netifd.bus(dump));
 service.pass();
 
 check('and when netifd comes back it says so', service.sessionRows({}).blind, null);
+
+// ------------------------------------------------- what the router can carry
+
+function hasFinding(result, level, needle) {
+	for (let one in (type(result.findings) == 'array') ? result.findings : []) {
+		if (one.level == level && index(one.label, needle) >= 0)
+			return true;
+	}
+
+	return false;
+};
+
+// Offload off, and a pool large enough for it to matter. This is the refusal
+// that turns "my ISP is slow" into "turn this on".
+uci.set('firewall', 'defs', 'flow_offloading', '0');
+
+let refused = service.poolCheck({
+	id: 'big', mode: 'multi', prefix: 'big', carrier: 'eth1',
+	username: 'u@isp', password: 'pw', table_base: 12000, zone: 'bmwanpool',
+	members: wanted
+});
+
+check('a large pool without flow offload is refused', refused.ok, false);
+check('and says which setting it is', hasFinding(refused, 'error', 'need fw4 flow offload'), true);
+check('the check says what the router answered', refused.router.flowOffload, false);
+
+// Sixty-four is the threshold, so sixty-four is not over it.
+let small = [];
+for (let i = 0; i < 64; i++)
+	push(small, { vlan: 900 + i });
+
+let allowed = service.poolCheck({
+	id: 'small', mode: 'multi', prefix: 'sml', carrier: 'eth1',
+	username: 'u@isp', password: 'pw', table_base: 13000, zone: 'bmwanpool',
+	members: small
+});
+
+check('a pool at the threshold is not refused for it', hasFinding(allowed, 'error', 'need fw4 flow offload'), false);
+
+uci.set('firewall', 'defs', 'flow_offloading', '1');
+
+let fine = service.poolCheck({
+	id: 'big', mode: 'multi', prefix: 'big', carrier: 'eth1',
+	username: 'u@isp', password: 'pw', table_base: 12000, zone: 'bmwanpool',
+	members: wanted
+});
+
+check('with it on, the same pool passes', hasFinding(fine, 'error', 'need fw4 flow offload'), false);
+check('and it is said so rather than left unsaid', hasFinding(fine, 'pass', 'flow offload is on'), true);
+
+// Memory. Five hundred more sessions on a router with sixty megabytes free is
+// not a warning, it is a refusal.
+seed('/proc/meminfo', 'MemTotal:         131072 kB' + chr(10) + 'MemAvailable:      60000 kB' + chr(10));
+
+let tight = service.poolCheck({
+	id: 'big', mode: 'multi', prefix: 'big', carrier: 'eth1',
+	username: 'u@isp', password: 'pw', table_base: 12000, zone: 'bmwanpool',
+	members: wanted
+});
+
+check('a router without the memory is told', hasFinding(tight, 'error', 'does not have the memory'), true);
+
+seed('/proc/meminfo', 'MemTotal:        2048000 kB' + chr(10) + 'MemAvailable:    1500000 kB' + chr(10));
 
 report();

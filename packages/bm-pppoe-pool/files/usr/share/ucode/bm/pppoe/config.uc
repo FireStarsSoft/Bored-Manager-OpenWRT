@@ -29,6 +29,33 @@ const PACKAGE = 'bm_pppoe';
 // `sessions` reply (ROW_LIMIT in service.uc) and one ubus message.
 export const MEMBER_MAX = 500;
 
+/**
+ * Above how many sessions fw4's software flow offload stops being optional.
+ *
+ * Every session installs three routing rules of its own, and without a
+ * flowtable the kernel walks the whole policy list for every packet. At a
+ * handful of sessions that is free; at five hundred it is what caps the router,
+ * and it caps it in a way that looks like the ISP being slow rather than like a
+ * setting nobody turned on.
+ *
+ * Sixty-four is a threshold rather than a measurement, and is marked as one
+ * everywhere it is used. Offload also only bypasses *established* flows: the
+ * first packet of every connection still walks the list, so a router doing
+ * mostly short connections is slower than this number suggests.
+ */
+export const FLOW_OFFLOAD_THRESHOLD = 64;
+
+/**
+ * How many members a pool of macvlans may have before the fan-out is the
+ * problem rather than the dialling.
+ */
+export const MACVLAN_FAN_OUT_MAX = 64;
+
+// What one session costs in memory, as a warning and as a refusal. Provisional
+// until the rig measures it; the release notes say so.
+const MEMBER_KB_WARN = 300;
+const MEMBER_KB_ERROR = 150;
+
 // A prefix of 1-4 characters plus at most four VLAN digits keeps the section
 // name inside 8 characters, and `pppoe-` in front of it inside Linux's
 // IFNAMSIZ of 15 visible characters.
@@ -801,7 +828,9 @@ export function check(one, opts) {
 	let liveUp = opts && opts.liveUp ? opts.liveUp : {};
 	let others = opts && type(opts.others) == 'array' ? opts.others : [];
 	let macvlanReady = opts && exists(opts, 'macvlanReady') ? opts.macvlanReady : null;
+	let router = opts && type(opts.router) == 'object' ? opts.router : {};
 	let direct = one.carrierMode == 'direct';
+	let wanted = length(one.members);
 
 	// ---- identity
 	if (!validPoolId(one.id))
@@ -823,6 +852,44 @@ export function check(one, opts) {
 
 	if (length(one.label) && !safeValue(one.label))
 		finding(findings, 'error', 'The label contains control characters or is longer than 128 characters');
+
+	// ---- what this router can carry
+	//
+	// Asked here rather than left for somebody to discover: a pool of five
+	// hundred sessions on a router with flow offload off is a router that will
+	// look like a slow ISP, and the setting that fixes it is one call away.
+	if (wanted > FLOW_OFFLOAD_THRESHOLD) {
+		if (router.flowOffload === false) {
+			finding(findings, 'error', 'This many sessions need fw4 flow offload, and it is off',
+				sprintf('Every session installs three routing rules, and without a flowtable the kernel walks the whole list for every packet - at %d sessions that walk is what caps the router. Turn flow offload on with the Enable flow offload button, or `bmctl tune flow_offload=1` at a console, then check again. This daemon never changes the firewall on its own.', wanted));
+		}
+		else if (router.flowOffload === true) {
+			finding(findings, 'pass', 'fw4 flow offload is on');
+		}
+		else {
+			finding(findings, 'warning', 'Could not read whether fw4 flow offload is on',
+				'It is the difference between a router that carries this many sessions and one that looks like a slow ISP. `bmctl tune` prints it.');
+		}
+	}
+
+	if (type(router.memAvailableKb) == 'int' && router.memAvailableKb > 0 && wanted > 0) {
+		let already = (type(router.members) == 'int') ? router.members : 0;
+		let total = wanted + already - (previous ? length(previous.members) : 0);
+
+		if (total * MEMBER_KB_ERROR > router.memAvailableKb) {
+			finding(findings, 'error', sprintf('This router does not have the memory for %d sessions', total),
+				sprintf('About %d MB is free and each session needs of the order of %d KB once it is dialled, its routes are in place and its connections are tracked.', router.memAvailableKb / 1024, MEMBER_KB_ERROR));
+		}
+		else if (total * MEMBER_KB_WARN > router.memAvailableKb) {
+			finding(findings, 'warning', sprintf('This router may not have the memory for %d sessions', total),
+				sprintf('About %d MB is free. Sessions vary, but %d KB each is the number to plan with.', router.memAvailableKb / 1024, MEMBER_KB_WARN));
+		}
+	}
+
+	if (direct && one.macMode == 'auto' && wanted > MACVLAN_FAN_OUT_MAX) {
+		finding(findings, 'error', sprintf('Direct mode with one macvlan per slot does not scale past %d members', MACVLAN_FAN_OUT_MAX),
+			'Every frame arriving on the carrier is matched against every macvlan on it. Use VLAN carrier mode - 802.1Q is one lookup per frame - or mac_mode inherit, which shares one device.');
+	}
 
 	// ---- prefix
 	if (!validPrefix(one.prefix)) {
