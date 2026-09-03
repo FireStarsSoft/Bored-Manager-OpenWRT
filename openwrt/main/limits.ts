@@ -391,6 +391,40 @@ export class LimitsManager {
     return result
   }
 
+  /**
+   * Switch fw4's software flow offload on, and nothing else.
+   *
+   * The pool create check refuses a pool of more than sixty-four sessions while
+   * this is off - every session installs three routing rules and without a
+   * flowtable the kernel walks the whole list for every packet, which is what
+   * caps the router and looks exactly like a slow ISP. This is the button that
+   * sentence points at, so that the answer to "turn it on" is a click rather
+   * than a shell.
+   *
+   * It goes through the same writer the form does, so the router is changed one
+   * way and the reasoning about agent-or-SSH lives in one place.
+   */
+  async enableFlowOffload(): Promise<OkResult> {
+    if (!this.deps.ctx.connected) {
+      return { ok: false, error: 'the router is not connected' }
+    }
+
+    const source = this.source()
+    const result = source === 'agent'
+      ? await this.applyThroughAgent({ flowOffload: true })
+      : await this.applyOverSsh({ flowOffload: true })
+
+    if (!result.ok) return result
+
+    this.deps.ctx.log(`openwrt: fw4 flow offload switched on via ${source}`)
+    this.deps.afterApply()
+
+    return {
+      ok: true,
+      data: 'Flow offload is on and fw4 was reloaded. Check the pool again.'
+    }
+  }
+
   clear(): void {
     this.session.clear()
   }

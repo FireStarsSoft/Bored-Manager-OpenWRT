@@ -490,6 +490,10 @@ export const FEATURES: Record<string, FeatureSpec | null> = {
   limitsEffective: null,
   limitsCheck: { kind: 'check', requires: [] },
   limitsApply: { kind: 'action', requires: [] },
+  // Nothing at the gate: this writes one firewall option through whichever of
+  // the agent or SSH the router offers, exactly as Router limits does, and both
+  // paths refuse for themselves when the router cannot be reached.
+  tuneFlowOffload: { kind: 'action', requires: [] },
   // Job bookkeeping, module-side only.
   jobCancel: { kind: 'action', requires: [] },
   jobsClear: { kind: 'action', requires: [] },

@@ -1507,6 +1507,16 @@
                                   "icon": "Cable",
                                   "blocks": [
                                     {
+                                      "type": "actions",
+                                      "actions": [
+                                        {
+                                          "label": "Enable flow offload",
+                                          "method": "tuneFlowOffload",
+                                          "confirm": "Turn on fw4 software flow offload? The firewall config is committed and fw4 is reloaded, so established connections are re-evaluated once. Above 64 sessions the router otherwise walks every routing rule for every packet, which is what caps it."
+                                        }
+                                      ]
+                                    },
+                                    {
                                       "type": "checkForm",
                                       "title": "One account, many VLANs",
                                       "checkMethod": "poolCreateCheck",

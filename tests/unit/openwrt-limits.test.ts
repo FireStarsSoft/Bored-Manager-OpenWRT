@@ -67,10 +67,15 @@ function fixture(options: {
   clients?: number
   sessions?: number
   answer?: (command: string) => ModuleExecResult
+  connected?: boolean
 } = {}): Fixture {
   const sent: Array<{ command: string; stdin: string }> = []
   const refreshes = vi.fn()
   const harness = moduleHarness('openwrt', () => ok())
+
+  if (options.connected === false) {
+    Object.defineProperty(harness.ctx, 'connected', { get: () => false, configurable: true })
+  }
   harness.exec.mockImplementation(async (command: string, opts?: { stdin?: string }) => {
     sent.push({ command, stdin: opts?.stdin ?? '' })
     return options.answer ? options.answer(command) : ok()
@@ -147,6 +152,46 @@ describe('the recommendation is sized from the router, with a floor', () => {
     const huge = recommendLimits(1_000_000, 1_000_000)
     expect(huge.conntrackMax).toBeLessThanOrEqual(4_194_304)
     expect(huge.gcThresh3).toBeLessThanOrEqual(1_048_576)
+  })
+})
+
+describe('the one-touch flow offload switch', () => {
+  it('writes the one option through the agent when there is one', async () => {
+    const run = fixture({ agent: agentOn('2.1.0') })
+    const answer = await run.limits.enableFlowOffload()
+
+    expect(answer.ok).toBe(true)
+
+    const sent = run.sent.find((one) => one.command.includes('tune_set'))
+    expect(sent?.command).toContain('"flow_offload":true')
+
+    // One option and nothing else: this is not the limits form, and a call
+    // that also wrote the kernel tables would be changing what nobody asked
+    // about.
+    expect(sent?.command).not.toContain('conntrack_max')
+
+    // And the router is read again, so the page stops offering a button for
+    // something that is already on.
+    expect(run.refreshed()).toBe(1)
+  })
+
+  it('and over SSH when there is not', async () => {
+    const run = fixture()
+    const answer = await run.limits.enableFlowOffload()
+
+    expect(answer.ok).toBe(true)
+
+    const script = run.sent.find((one) => one.command === 'sh -s')?.stdin ?? ''
+    expect(script).toContain("flow_offloading='1'")
+    expect(script).toContain('/etc/init.d/firewall reload')
+  })
+
+  it('and refuses when the router is not connected', async () => {
+    const run = fixture({ connected: false })
+    const answer = await run.limits.enableFlowOffload()
+
+    expect(answer.ok).toBe(false)
+    expect(answer.error).toContain('not connected')
   })
 })
 

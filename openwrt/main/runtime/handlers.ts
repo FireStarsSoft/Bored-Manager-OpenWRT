@@ -331,6 +331,10 @@ export function registerHandlers(runtime: OpenWrtRuntime): void {
   handle('limitsEffective', () => limits.effective())
   handle('limitsCheck', (values: unknown) => limits.check(values))
   handle('limitsApply', (payload: unknown) => limits.apply(payload))
+  // The one-touch answer to the pool create check's own refusal: above
+  // sixty-four sessions it says flow offload has to be on, and this is what
+  // that sentence points at.
+  handle('tuneFlowOffload', () => limits.enableFlowOffload())
 
   handle('jobCancel', (id: unknown) => jobs.cancel(id))
   handle('jobsClear', () => jobs.clearFinished())
