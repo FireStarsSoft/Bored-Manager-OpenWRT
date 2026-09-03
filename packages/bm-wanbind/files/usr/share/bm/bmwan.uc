@@ -1507,7 +1507,10 @@ if (command == 'stats') {
 }
 
 if (command == 'reconcile') {
-	let result = call('reconcile', { instance: instance });
+	// `wait` because somebody typed this and is looking at the prompt. Without
+	// it the daemon folds the request into the pass already due and answers
+	// "in a moment", which is right for the hotplug hooks and useless here.
+	let result = call('reconcile', { instance: instance, wait: true });
 
 	if (asJson) {
 		printf('%J\n', result);

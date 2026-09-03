@@ -1838,7 +1838,11 @@ return view.extend({
 			E('button', {
 				'class': 'btn cbi-button-neutral',
 				'click': ui.createHandlerFn(self, function() {
-					return api.run(api.calls.wanbindReconcile, instanceArgs(),
+					// `wait` because a person pressed this and is watching the
+					// page. Without it the daemon folds the request into the
+					// pass already due and answers "in a moment", which is what
+					// the hotplug hooks want and not what a button does.
+					return api.run(api.calls.wanbindReconcile, { ...instanceArgs(), wait: true },
 						_('The router has run a full pass.')).then(after);
 				})
 			}, _('Run a pass now'))

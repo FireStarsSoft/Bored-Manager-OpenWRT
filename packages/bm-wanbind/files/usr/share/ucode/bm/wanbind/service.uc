@@ -195,11 +195,35 @@ let state = {
 	// `loggedAt` is not reported. It exists so that a router whose netifd has
 	// been gone for an hour writes one line a minute rather than one line every
 	// thirty seconds.
-	netifd: { ok: true, failures: 0, lastFailureAt: 0, reason: '', loggedAt: 0 }
+	netifd: { ok: true, failures: 0, lastFailureAt: 0, reason: '', loggedAt: 0 },
+
+	// The pass that has been asked for and has not run yet.
+	//
+	// Five hundred bindings arriving one ubus call at a time is five hundred
+	// full passes - five hundred rule dumps and five hundred sweeps of the same
+	// band - to reach a state one pass would have reached. So a request can ask
+	// for a pass *soon* instead, and the ones that arrive while one is already
+	// due are folded into it.
+	soon: null,
+	dueAt: 0,
+	folded: 0,
+	coalesced: 0,
+	owed: {},
+	lastPass: { kind: '', at: 0, folded: 0 }
 };
 
 // How often a netifd that is not answering is worth another line in syslog.
 const NETIFD_LOG_EVERY = 60;
+
+// How long a request that asked for a pass "soon" waits for company.
+//
+// A trailing edge that is never extended, which is the whole of the design: an
+// extending window under a storm of hotplug events - a pool of five hundred
+// sessions coming up after a reboot sends one per interface - would push the
+// pass back for as long as the storm lasted, and the bindings would go
+// unreconciled for exactly as long as the router was busiest. Fixed, the storm
+// costs one pass every two seconds and every request is answered inside three.
+const PASS_COALESCE_MS = 2000;
 
 /** Resident set size in kilobytes, or -1 when /proc did not say. */
 function rssKb() {
@@ -480,6 +504,65 @@ export function pass() {
 	return out;
 };
 
+/**
+ * The one place a pass is run from, so that every pass is accounted for.
+ *
+ * `kind` is what asked for it - the timer, a coalesced request, a hotplug
+ * event - and it is on `stats` because a router whose passes are all
+ * `coalesced` is a router something is talking to constantly, which is a very
+ * different picture from one ticking over on its timer.
+ */
+function runPass(kind) {
+	let folded = state.folded;
+
+	state.folded = 0;
+	state.owed = {};
+
+	let out = pass();
+
+	state.lastPass = { kind: kind, at: time(), folded: folded };
+	return out;
+}
+
+/**
+ * Ask for a pass shortly, and fold this request into any already asked for.
+ *
+ * Answers when the pass is due, so a caller can tell somebody "in a moment"
+ * rather than "done" - which is the honest answer and the one the surfaces
+ * show.
+ */
+function passSoon(reason) {
+	// Not through `text()`: that helper is declared further down this file, and
+	// ucode resolves a name when it compiles the function that mentions it.
+	let why = (type(reason) == 'string' && length(reason)) ? reason : 'request';
+
+	state.folded = state.folded + 1;
+	state.owed[why] = (exists(state.owed, why) ? state.owed[why] : 0) + 1;
+
+	if (state.soon) {
+		state.coalesced = state.coalesced + 1;
+		return state.dueAt;
+	}
+
+	state.dueAt = time() + (PASS_COALESCE_MS / 1000);
+
+	// Wrapped for the same reason the reconcile timer is: an exception escaping
+	// a uloop callback takes the loop down and leaves a router with rules
+	// nobody is maintaining.
+	state.soon = timer(PASS_COALESCE_MS, () => {
+		state.soon = null;
+
+		try {
+			runPass('coalesced');
+		}
+		catch (e) {
+			err('reconcile pass failed: ' + e);
+		}
+	});
+
+	return state.dueAt;
+}
+
 /** Whether netifd is answering, as every surface reads it. */
 function netifdState() {
 	return {
@@ -506,7 +589,7 @@ function schedule() {
 	if (!state.timer) {
 		state.timer = timer(state.main.interval * 1000, () => {
 			try {
-				pass();
+				runPass('timer');
 			}
 			catch (e) {
 				err('reconcile pass failed: ' + e);
@@ -873,7 +956,27 @@ export function stats() {
 		// interface list, and one that stopped moving because nothing can be
 		// read is not the same as one that stopped moving because nothing
 		// changed.
-		netifd: netifdState()
+		netifd: netifdState(),
+
+		// What asked for the last pass, and how many requests it answered.
+		//
+		// `owed` is what has asked since and is still waiting, so a router that
+		// is being talked to faster than it can reconcile says which caller is
+		// doing the talking rather than only that it is busy.
+		pass: {
+			kind: state.lastPass.kind,
+			at: state.lastPass.at,
+			folded: state.lastPass.folded,
+
+			// What has asked since and is still waiting, which is a different
+			// number from what the last pass answered: a router being talked to
+			// faster than it reconciles has a `waiting` that never reaches zero.
+			waiting: state.folded,
+			coalesced: state.coalesced,
+			pending: (state.soon != null),
+			due: state.soon ? state.dueAt : 0,
+			owed: state.owed
+		}
 	};
 };
 
@@ -1190,6 +1293,26 @@ export function reconcileNow(args) {
 	let now = time();
 	let out = [];
 
+	// A request that names no instance and does not insist on an answer is a
+	// nudge rather than a question, and nudges arrive in storms: the interface
+	// hotplug hook sends one per session coming up, so a pool of five hundred
+	// dialling after a reboot asks five hundred times for the same pass.
+	//
+	// `wait: true` is what a person pressing a button sends, and it still runs
+	// the pass here and answers with what it did.
+	if (!length(id) && args.wait !== true) {
+		let due = passSoon('reconcile');
+
+		return {
+			ok: true,
+			pending: true,
+			due: due,
+			folded: state.folded,
+			passes: [],
+			core: null
+		};
+	}
+
 	// The same map the timer builds, and it has to be built here too.
 	//
 	// It was not, and the effect was invisible in exactly the way this release
@@ -1201,11 +1324,28 @@ export function reconcileNow(args) {
 	// message was printed.
 	let reserved = reservedAddresses();
 
+	// One reading of netifd and one classification of it, shared by every
+	// instance and by the binding half, exactly as the timer's pass does it.
+	// Asking per half was five dumps of the same router for one request.
+	let ifaces = wans.dump(state.bus);
+
+	if (ifaces === null)
+		return { ok: false, reason: 'netifd did not answer, so nothing was changed' };
+
+	let ctx = {
+		bus: state.bus,
+		now: now,
+		ifaces: ifaces,
+		view: layout.classify(ifaces, layout.statements()),
+		snap: cfg.snapshot(),
+		reserved: reserved
+	};
+
 	for (let st in each()) {
 		if (length(id) && st.instance.id != id)
 			continue;
 
-		push(out, reconcile.run(st, { bus: state.bus, now: now, reserved: reserved }));
+		push(out, reconcile.run(st, ctx));
 	}
 
 	if (length(id) && !length(out))
@@ -1214,7 +1354,7 @@ export function reconcileNow(args) {
 	// `core` rather than `direct`, for the reason `stats` gives: one engine
 	// writes every rule on this router now, and the key names the engine rather
 	// than one of the two kinds of binding it writes for.
-	return { ok: true, passes: out, core: length(id) ? null : direct.run({ bus: state.bus, now: now }) };
+	return { ok: true, passes: out, core: length(id) ? null : direct.run(ctx) };
 };
 
 /**
@@ -1335,14 +1475,25 @@ function configuredBinding(id, snap) {
  * is refused rather than guessed at.
  */
 function wanTable(name) {
+	// One interface, asked about by name. The whole dump answers it too, and at
+	// five hundred sessions that is a few hundred kilobytes of reply to read one
+	// number out of - on the call somebody makes when they press Save.
+	let one = wans.status(state.bus, name);
+
+	if (one.ok && one.iface != null)
+		return count(one.iface.table);
+
+	// Either netifd did not answer or it does not know that name, and ubus does
+	// not tell this binding which. The dump does, and this is the line that
+	// decides what number goes into a section, so it asks.
 	let list = wans.dump(state.bus);
 
 	if (list === null)
 		return 0;
 
-	for (let one in list) {
-		if (one.name == name)
-			return count(one.table);
+	for (let row in list) {
+		if (row.name == name)
+			return count(row.table);
 	}
 
 	return 0;
@@ -2108,13 +2259,28 @@ export function bind(args) {
 	// Now, rather than in up to `interval` seconds. Somebody who pressed this
 	// is watching the address they just bound, and a rule that appears half a
 	// minute later looks exactly like one that was never written.
-	direct.run({ bus: state.bus, now: time() });
+	//
+	// Unless a pass is already due, in which case this write joins it: running
+	// one here and another two seconds later is two sweeps of every binding on
+	// the router for one edit, and the caller is told when its rule will appear
+	// rather than being told it already has.
+	let due = 0;
+
+	if (state.soon)
+		due = passSoon('bind');
+	else
+		direct.run({ bus: state.bus, now: time() });
 
 	notice(sprintf('binding %s: %s leaves by %s, pref %d, table %d, %s when it is down',
 		id, written.label, written.wan, written.pref, written.table, written.whenDown));
 
 	let answer = bindings(id);
-	return { ok: true, binding: length(answer.bindings) ? answer.bindings[0] : null };
+	let row = length(answer.bindings) ? answer.bindings[0] : null;
+
+	if (due)
+		return { ok: true, pending: true, due: due, binding: row };
+
+	return { ok: true, binding: row };
 };
 
 /**
@@ -4225,7 +4391,11 @@ export const methods = {
 	}, (args) => instanceSet(args)),
 	instance_delete: method({ id: '' }, (args) => instanceDelete(args)),
 
-	reconcile: method({ instance: '' }, (args) => reconcileNow(args)),
+	// `wait` is what a person pressing a button sends: run the pass now and
+	// answer with what it did. Without it the request is folded into the pass
+	// that is already due, which is what the hotplug hooks want - they arrive
+	// one per interface and would otherwise each buy a full pass.
+	reconcile: method({ instance: '', wait: false }, (args) => reconcileNow(args)),
 	flush: method({ instance: '' }, (args) => flush(args)),
 
 	// The two that only read. `rules` is the monitor - every rule on the router

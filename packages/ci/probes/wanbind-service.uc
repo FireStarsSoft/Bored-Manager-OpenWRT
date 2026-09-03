@@ -560,7 +560,10 @@ says('and the sentence says how to find it', strayGone.reason, /ip -4 rule show/
 
 // --------------------------------------------------------------- reconciling
 
-let now = service.reconcileNow({});
+// `wait` is what a person pressing a button sends. Without it the request is
+// folded into the pass that is already due - which is what the hotplug hooks
+// want and what the scale probe next door measures.
+let now = service.reconcileNow({ wait: true });
 
 check('a pass with nothing named runs', now.ok, true);
 check('over the one instance', length(now.passes), 1);

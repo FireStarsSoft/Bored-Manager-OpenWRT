@@ -130,7 +130,7 @@ const calls = {
 	wanbindReassign: declare(WANBIND, 'reassign', { instance: '', mac: '' }),
 	wanbindUnassign: declare(WANBIND, 'unassign', { instance: '', mac: '' }),
 	wanbindRelease: declare(WANBIND, 'release', { instance: '', mac: '' }),
-	wanbindReconcile: declare(WANBIND, 'reconcile', { instance: '' }),
+	wanbindReconcile: declare(WANBIND, 'reconcile', { instance: '', wait: false }),
 	wanbindFlush: declare(WANBIND, 'flush', { instance: '' }),
 
 	// Every binding the router holds, by hand or grown from a lease, and the

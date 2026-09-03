@@ -73,6 +73,36 @@ function address(entry) {
 }
 
 /**
+ * One netifd interface entry, as everything in this package reads it.
+ *
+ * Split out of the dump so that a question about one interface can be answered
+ * by asking about one interface. Null when the entry has no name, which is not
+ * an interface anything here can act on.
+ */
+function normalise(entry, name) {
+	if (type(entry) != 'object' || type(name) != 'string' || !length(name))
+		return null;
+
+	let table = number(entry.ip4table);
+
+	if (!table && type(entry.data) == 'object')
+		table = number(entry.data.ip4table);
+
+	return {
+		name: name,
+		proto: text(entry.proto),
+		device: text(entry.device),
+		l3Device: text(entry.l3_device),
+		up: entry.up === true,
+		pending: entry.pending === true,
+		ipv4: address(entry),
+		uptime: number(entry.uptime),
+		errorCode: errorCode(entry),
+		table: table > 0 ? table : null
+	};
+}
+
+/**
  * Every interface netifd knows about, normalised.
  *
  * Null when ubus could not be asked, which is different from an empty list and
@@ -104,30 +134,55 @@ export function dump(bus) {
 		if (type(entry) != 'object')
 			continue;
 
-		let name = trim(text(entry.interface));
-		if (!length(name) || seen[name])
+		let one = normalise(entry, trim(text(entry.interface)));
+
+		if (one == null || seen[one.name])
 			continue;
-		seen[name] = true;
 
-		let table = number(entry.ip4table);
-		if (!table && type(entry.data) == 'object')
-			table = number(entry.data.ip4table);
-
-		push(out, {
-			name: name,
-			proto: text(entry.proto),
-			device: text(entry.device),
-			l3Device: text(entry.l3_device),
-			up: entry.up === true,
-			pending: entry.pending === true,
-			ipv4: address(entry),
-			uptime: number(entry.uptime),
-			errorCode: errorCode(entry),
-			table: table > 0 ? table : null
-		});
+		seen[one.name] = true;
+		push(out, one);
 	}
 
 	return out;
+};
+
+/**
+ * One interface, asked about by name.
+ *
+ * The whole dump answers this question too, and at five hundred sessions it is
+ * a reply of a few hundred kilobytes to find out one number. `network.interface
+ * .<name> status` is the same fact for the cost of one interface.
+ *
+ * `{ ok: false }` covers both "netifd did not answer" and "netifd does not know
+ * that name", and the caller must not read the second as a verdict: ubus does
+ * not hand this binding a code it can tell them apart by, and a caller that
+ * treated a busy socket as "there is no such interface" would refuse a binding
+ * onto a WAN that is sitting right there. The one caller that cannot live with
+ * the ambiguity falls back to the full dump.
+ *
+ * The name is checked before it is put in the path. A section name is a UCI
+ * name, and anything else would be a call to an object nobody meant.
+ */
+export function status(bus, name) {
+	if (!bus || type(name) != 'string' || !match(name, /^[A-Za-z0-9_]+$/))
+		return { ok: false, iface: null };
+
+	let reply;
+
+	try {
+		reply = bus.call('network.interface.' + name, 'status', {});
+	}
+	catch (e) {
+		debug('network.interface.' + name + ' status failed: ' + e);
+		return { ok: false, iface: null };
+	}
+
+	if (type(reply) != 'object')
+		return { ok: false, iface: null };
+
+	// The reply does not name the interface - the object it came from did - so
+	// the name is put back here rather than read out of it.
+	return { ok: true, iface: normalise(reply, name) };
 };
 
 /** `eth1` matches `eth1` and every VLAN of it, and nothing else. */

@@ -346,4 +346,69 @@ let gone = direct.lease({ action: 'add', mac: followed, ip: '10.9.3.98' }, { now
 check('a forgotten binding is not followed', length(gone.handled ?? []), 0);
 check('and it still cost no read', uciLib.opened(), 0);
 
+// ===========================================================================
+// Five hundred requests for a pass are one pass.
+//
+// The interface hotplug hook asks for a reconcile every time a session comes
+// up, so a pool of five hundred dialling after a reboot asks five hundred
+// times. Answered one at a time that is five hundred rule dumps and five
+// hundred sweeps of the same band to reach the state one pass reaches.
+
+uloop.resetTimers();
+scale.resetBusCounts();
+
+let deferred = null;
+
+for (let i = 0; i < 500; i++)
+	deferred = service.reconcileNow({});
+
+check('none of them ran a pass', scale.busCounts().dump, 0);
+check('one is due instead', uloop.pending(), 1);
+check('and the caller was told so', deferred.pending, true);
+check('rather than being told it was done', length(deferred.passes), 0);
+check('five hundred requests are waiting on it', service.stats().pass.waiting, 500);
+check('four hundred and ninety-nine of them found one already asked for', service.stats().pass.coalesced, 499);
+says('and the reason they gave is kept', sprintf('%J', service.stats().pass.owed), /reconcile/);
+
+// A write that arrives while a pass is due joins it. Running one here and
+// another two seconds later is two sweeps of every binding on the router for
+// one edit.
+// The WAN already carries its own routing table, so this write asks netifd for
+// nothing: what a bind costs when it has to *find* a table is A5's question.
+uci.set('network', 'p002', 'interface');
+uci.set('network', 'p002', 'proto', 'pppoe');
+uci.set('network', 'p002', 'ip4table', '10002');
+
+let beforeBind = scale.busCounts().dump;
+let joined = service.bind({ id: 'bmdir_new', ip: '10.9.0.201', wan: 'p002', lan: 'lan' });
+
+check('the write went in', joined.ok, true);
+check('and says its rule is coming rather than claiming it is there', joined.pending, true);
+
+// One dump, and it is the check that refuses a binding onto one of the router's
+// own LANs - not a pass. A pass costs that dump *and* a sweep of every binding
+// on the router, which is what joining the one already due avoids.
+check('no pass ran for it', scale.busCounts().dump - beforeBind, 1);
+check('the one already due is still the one due', uloop.pending(), 1);
+
+// The trailing edge is fixed. A window that was pushed back by each new request
+// would leave the bindings unreconciled for exactly as long as the router was
+// busiest.
+check('nothing runs before it is due', uloop.advance(1999), 0);
+check('and then exactly one pass does', uloop.advance(1), 1);
+check('which read netifd once', scale.busCounts().dump - beforeBind, 2);
+check('the pass says what asked for it', service.stats().pass.kind, 'coalesced');
+check('and how many it answered', service.stats().pass.folded, 501);
+check('nothing is owed afterwards', service.stats().pass.pending, false);
+check('nor waiting', uloop.pending(), 0);
+
+// `wait` is what a person pressing a button sends, and it still runs the pass
+// and answers with what it did.
+scale.resetBusCounts();
+let asked = service.reconcileNow({ wait: true });
+
+check('an insisting caller gets a pass', length(asked.passes), 4);
+check('not a promise of one', asked.pending ?? false, false);
+check('which cost one dump', scale.busCounts().dump, 1);
+
 report();
