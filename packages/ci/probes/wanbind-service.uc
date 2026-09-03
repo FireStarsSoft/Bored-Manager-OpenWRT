@@ -259,8 +259,8 @@ check('and the table came from netifd', uci.get(PACKAGE, 'desk', 'table'), '1000
 
 // The pass `bind` runs before it answers, so that somebody watching the address
 // they just bound sees it work now rather than in half a minute.
-check('the pass wrote the binding\'s firewall path', uci.get('firewall', 'bmd_desk', 'src'), 'lan');
-check('to the WAN\'s zone', uci.get('firewall', 'bmd_desk', 'dest'), 'wan');
+check('the pass wrote the firewall path', uci.get('firewall', 'bmz_0', 'src'), 'lan');
+check('to the WAN\'s zone', uci.get('firewall', 'bmz_0', 'dest'), 'wan');
 check('and fw4 was actually reloaded rather than the path being left unread',
 	lastRan(), '/etc/init.d/firewall reload');
 // The other reload, which must not have happened: WAN0 already had its own
@@ -627,7 +627,7 @@ let justHome = service.flush({ instance: 'home' });
 check('flushing one instance succeeds', justHome.ok, true);
 check('and takes no binding rule off', justHome.bindings, 0);
 check('nor any forwarding', justHome.forwardings, 0);
-check('so the binding\'s path is exactly where it was', uci.get('firewall', 'bmd_desk', 'dest'), 'wan');
+check('so the binding\'s path is exactly where it was', uci.get('firewall', 'bmz_0', 'dest'), 'wan');
 check('and so is the orphan, which is nobody\'s business until the uninstall',
 	uci.get('firewall', 'bmd_ghost', 'dest'), 'wan');
 

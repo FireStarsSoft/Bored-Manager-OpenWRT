@@ -19,6 +19,7 @@ import * as uciLib from 'uci';
 import * as service from 'bm.wanbind.service';
 import * as cfg from 'bm.wanbind.config';
 import * as direct from 'bm.wanbind.direct';
+import * as prepare from 'bm.wanbind.prepare';
 
 import { check, report, says } from 'probe';
 
@@ -210,11 +211,38 @@ for (let i = 0; i < 4; i++) {
 	uci.set('bm_wanbind', id, 'catch_all_table', sprintf('%d', 253 - i));
 }
 
+// The sessions as the pool daemon leaves them in /etc/config/network: a section
+// each, carrying its own routing table. The preparation half reads that file
+// rather than netifd, because what netifd is using now and what it will use
+// after the next reload are different questions.
+scale.networkSections(uci, 500);
+
+// Two LAN zones and one WAN zone, so the bindings span two pairs. A forwarding
+// is a pair of zones, so five hundred bindings across two of them is two
+// sections - which is the whole of what this release changed about them.
+uci.set('firewall', 'zone_lan', 'zone');
+uci.set('firewall', 'zone_lan', 'name', 'lan');
+uci.set('firewall', 'zone_lan', 'network', [ 'lan', 'LAN_WIRED' ]);
+
+uci.set('firewall', 'zone_guest', 'zone');
+uci.set('firewall', 'zone_guest', 'name', 'guest');
+uci.set('firewall', 'zone_guest', 'network', [ 'guest', 'iot' ]);
+
+let wanNetworks = [];
+for (let i = 1; i <= 500; i++)
+	push(wanNetworks, scale.wanName(i));
+
+uci.set('firewall', 'zone_wan', 'zone');
+uci.set('firewall', 'zone_wan', 'name', 'wan');
+uci.set('firewall', 'zone_wan', 'network', wanNetworks);
+uci.set('firewall', 'zone_wan', 'masq', '1');
+
 rtnl.setRules(scale.kernelRules());
 rtnl.setRoutes([ { family: 2, type: 1, oif: 'pppoe-p001', gateway: '100.70.0.1', table: 254 } ]);
 
 service.attach(scale.busFor(router, {}));
-service.attachSystem((command, timeout) => { return 0; });
+let ran = [];
+service.attachSystem((command, timeout) => { push(ran, command); return 0; });
 service.load();
 
 // What the readers cost when nothing is shared between them, which is what
@@ -268,7 +296,7 @@ check('a create check reads twice', uciLib.opened(), 2);
 scale.resetBusCounts();
 uciLib.resetCounters();
 
-let ran = service.pass();
+let firstPass = service.pass();
 
 check('one dump for the whole pass', scale.busCounts().dump, 1);
 
@@ -278,7 +306,7 @@ check('one dump for the whole pass', scale.busCounts().dump, 1);
 // snapshot holds. What the snapshot holds is this, and it is read once.
 check('the instances are walked once', uciLib.foreachCount('bm_wanbind', 'instance'), 1);
 check('and the bindings once', uciLib.foreachCount('bm_wanbind', 'direct'), 1);
-check('every instance ran', length(ran), 4);
+check('every instance ran', length(firstPass), 4);
 check('netifd is answering', service.info().netifd.ok, true);
 
 // A netifd that will not answer is the one failure this daemon cannot work
@@ -374,11 +402,8 @@ says('and the reason they gave is kept', sprintf('%J', service.stats().pass.owed
 // another two seconds later is two sweeps of every binding on the router for
 // one edit.
 // The WAN already carries its own routing table, so this write asks netifd for
-// nothing: what a bind costs when it has to *find* a table is A5's question.
-uci.set('network', 'p002', 'interface');
-uci.set('network', 'p002', 'proto', 'pppoe');
-uci.set('network', 'p002', 'ip4table', '10002');
-
+// nothing: what a bind costs when it has to find one is the next block's
+// question.
 let beforeBind = scale.busCounts().dump;
 let joined = service.bind({ id: 'bmdir_new', ip: '10.9.0.201', wan: 'p002', lan: 'lan' });
 
@@ -410,5 +435,95 @@ let asked = service.reconcileNow({ wait: true });
 check('an insisting caller gets a pass', length(asked.passes), 4);
 check('not a promise of one', asked.pending ?? false, false);
 check('which cost one dump', scale.busCounts().dump, 1);
+
+// ===========================================================================
+// One firewall commit for five hundred bindings.
+//
+// A forwarding is a pair of zones: "traffic from here may go to there". Five
+// hundred bindings whose LANs are in two zones and whose WANs are all in one
+// need two of them. Written per binding they were five hundred identical
+// sections, five hundred commits of /etc/config/firewall - five hundred writes
+// to flash on a router - and a ruleset carrying five hundred copies of one rule.
+
+let paths = prepare.forwardings();
+
+check('five hundred bindings across two pairs of zones', length(paths.rows), 2);
+check('one for the wired LANs', exists(paths.pairs, 'lan|wan'), true);
+check('and one for the guest LANs', exists(paths.pairs, 'guest|wan'), true);
+
+// What it costs from cold: the sections are removed and a pass puts them back.
+uci.delete('firewall', paths.pairs['lan|wan'].section);
+uci.delete('firewall', paths.pairs['guest|wan'].section);
+
+direct.reset();
+uciLib.resetCounters();
+ran = [];
+
+service.pass();
+
+check('the pass wrote them again', length(prepare.forwardings().rows), 2);
+check('committing the firewall once', uciLib.commits('firewall'), 1);
+check('and reloading it once', length(ran), 1);
+says('with fw4', ran[0] ?? '', /firewall reload/);
+
+// The write budget. A router coming up cold with five hundred bindings on WANs
+// that have no routing table has five hundred `option ip4table` lines to write;
+// doing them all in one callback is one commit either way and one failure away
+// from five hundred unprepared bindings. Sixty-four a pass settles a cold start
+// in a handful of passes and leaves nothing a later pass cannot pick up.
+let spare = { byName: {} };
+let waiting = [];
+
+spare.byName['lanA'] = { role: 'lan', zone: 'lan', cidr: '10.9.0.0/24', device: 'br-lan', lanEvidence: [] };
+
+for (let i = 0; i < 100; i++) {
+	let wan = sprintf('spare%03d', i);
+
+	uci.set('network', wan, 'interface');
+	uci.set('network', wan, 'proto', 'dhcp');
+
+	spare.byName[wan] = { role: 'wan', zone: 'wan', cidr: '', device: wan, lanEvidence: [] };
+
+	push(waiting, {
+		id: sprintf('bmspare_%03d', i),
+		usable: true,
+		enabled: true,
+		wan: wan,
+		lan: 'lanA',
+		table: 0,
+		label: sprintf('10.8.0.%d', i)
+	});
+}
+
+uciLib.resetCounters();
+let batch = prepare.prepareMany(waiting, spare, { taken: {} });
+
+check('the batch stops at its budget', batch.writes, 64);
+check('and says how many are left for the next pass', batch.deferred, 36);
+check('one commit for all of them', uciLib.commits('network'), 1);
+check('and one cursor', uciLib.opened(), 2);
+check('netifd is owed a reload', batch.network, true);
+check('the pair was already there, so the firewall is not', batch.firewall, false);
+check('sixty-four WANs were given a table', uci.get('network', 'spare063', 'ip4table') != null, true);
+check('and the sixty-fifth was not', uci.get('network', 'spare064', 'ip4table'), null);
+
+// The rest on the next pass, and no number handed out twice.
+let taken = {};
+for (let i = 0; i < 100; i++) {
+	let already = uci.get('network', sprintf('spare%03d', i), 'ip4table');
+	if (already != null)
+		taken[already] = true;
+}
+
+let second = prepare.prepareMany(waiting, spare, { taken: taken });
+
+check('the second pass finishes them', second.writes, 36);
+check('with nothing left over', second.deferred, 0);
+// `taken` is handed to both batches and each one adds the numbers it gave out,
+// so a hundred entries is a hundred WANs with a hundred different tables. Two
+// prepared in one batch without a shared set would have been handed the same
+// free number, which is the one state that sends one binding's traffic out of
+// another's port.
+check('and every table is a different number', length(keys(taken)), 100);
 
 report();

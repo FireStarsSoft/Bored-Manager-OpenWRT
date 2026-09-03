@@ -182,6 +182,7 @@ export function manualSections(uci, count, prefBase, wans) {
 		uci.set('bm_wanbind', id, 'name', sprintf('desk %d', i));
 		uci.set('bm_wanbind', id, 'enabled', '1');
 		uci.set('bm_wanbind', id, 'wan', wanName(slot));
+		uci.set('bm_wanbind', id, 'lan', lanOf(i).name);
 		uci.set('bm_wanbind', id, 'when_down', 'hold');
 		uci.set('bm_wanbind', id, 'pref', sprintf('%d', base + i));
 		uci.set('bm_wanbind', id, 'table', sprintf('%d', wanTable(slot)));
@@ -195,6 +196,27 @@ export function manualSections(uci, count, prefBase, wans) {
 	}
 
 	return out;
+};
+
+/**
+ * The `config interface` sections the pool daemon writes for its members.
+ *
+ * A dialled session is a network section carrying its own routing table, and
+ * the preparation half reads /etc/config/network rather than netifd for that
+ * number - what netifd is using now and what it will use after the next reload
+ * are different questions, and the one being answered here is what to write.
+ */
+export function networkSections(uci, count) {
+	for (let i = 1; i <= count; i++) {
+		let name = wanName(i);
+
+		uci.set('network', name, 'interface');
+		uci.set('network', name, 'proto', 'pppoe');
+		uci.set('network', name, 'device', sprintf('eth1.%d', 100 + i));
+		uci.set('network', name, 'ip4table', sprintf('%d', wanTable(i)));
+	}
+
+	return count;
 };
 
 /** `count` rows of /tmp/dhcp.leases, in dnsmasq's own format. */

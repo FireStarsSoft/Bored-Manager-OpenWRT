@@ -399,22 +399,33 @@ function transitionEvents(one, before, entry, holdTable, now) {
 	} ];
 }
 
-/** Where the firewall forwarding for this binding stands. */
-function forwardingState(one, lanZone, wanZone, present) {
+/**
+ * Where the firewall forwarding for this binding stands.
+ *
+ * A forwarding is a pair of zones and not a binding: it says "traffic from
+ * here may go to there", which is true for every binding whose LAN and WAN sit
+ * in that pair. So what is asked here is whether the pair is covered, not
+ * whether a section named after this binding exists.
+ *
+ * `written` is the pair being in the file with fw4 not reloaded since. The
+ * section is there and the traffic is not being forwarded yet, which is a state
+ * a row has to be able to say out loud - it is what a router looks like between
+ * a failed reload and the pass that retries it.
+ */
+function forwardingState(one, lanZone, wanZone, present, owed) {
 	if (!length(one.lan))
 		return 'no-lan';
 
 	if (!length(lanZone) || !length(wanZone))
 		return 'no-zone';
 
-	let existing = present[one.id];
-	if (!existing)
+	let pairs = objectOr(objectOr(present).pairs);
+	let key = lanZone + '|' + wanZone;
+
+	if (!exists(pairs, key))
 		return 'missing';
 
-	if (existing.src != lanZone || existing.dest != wanZone)
-		return 'wrong';
-
-	return 'ok';
+	return (owed === true) ? 'written' : 'ok';
 }
 
 function ruleKey(pref, cidr, table) {
@@ -602,7 +613,7 @@ export function plan(input) {
 		for (let event in transitionEvents(one, was, entry, holdTable, now))
 			push(events, event);
 
-		let forwarding = one.usable ? forwardingState(one, lanZone, wanZone, present) : '';
+		let forwarding = one.usable ? forwardingState(one, lanZone, wanZone, present, input.firewallOwed) : '';
 
 		push(rows, {
 			id: one.id,
@@ -631,7 +642,7 @@ export function plan(input) {
 			forwarding: forwarding,
 			// The two writes `prepare()` makes, asked as questions a surface can
 			// show and a pass can act on.
-			needsForwarding: (one.usable && one.enabled && (forwarding == 'missing' || forwarding == 'wrong')),
+			needsForwarding: (one.usable && one.enabled && forwarding == 'missing'),
 			needsTable: (one.usable && one.enabled && iface != null && wan.table < 1 && one.table >= 1),
 			evidence: verdict ? layout.clauses(verdict.lanEvidence) : ''
 		});
@@ -766,7 +777,16 @@ let state = {
 	// that is the same answer it had before: its client has no entry in
 	// `memory` either, so the hook had nothing to move.
 	sections: {},
-	byMac: {}
+	byMac: {},
+
+	// A reload this daemon owes the router.
+	//
+	// `applyReloads` used to be called and its answer discarded, so a reload
+	// fw4 refused was a sentence nobody saw: the sections were committed, the
+	// rows read `ok`, and nothing was being forwarded. Held here, the rows say
+	// `written` instead and the next pass tries the reload again.
+	firewallOwed: false,
+	networkOwed: false
 };
 
 /**
@@ -815,6 +835,8 @@ export function reset() {
 	state.lastUnverified = [];
 	state.sections = {};
 	state.byMac = {};
+	state.firewallOwed = false;
+	state.networkOwed = false;
 };
 
 /**
@@ -923,6 +945,11 @@ export function run(ctx) {
 		rules: present,
 		hold: hold,
 		forwardings: prepare.forwardings(),
+
+		// Whether a forwarding this daemon wrote is in the file and not yet in
+		// force. A row that read `ok` while fw4 had refused the reload would be
+		// the page saying the traffic is being forwarded when it is not.
+		firewallOwed: state.firewallOwed,
 		memory: state.memory,
 		policy: {
 			base: band.base,
@@ -1031,9 +1058,7 @@ export function run(ctx) {
 	for (let one in bindings)
 		byId[one.id] = one;
 
-	let prepared = 0;
-	let owedNetwork = false;
-	let owedFirewall = false;
+	let wanted = [];
 
 	for (let row in planned.rows) {
 		if (!row.needsForwarding && !row.needsTable)
@@ -1046,39 +1071,81 @@ export function run(ctx) {
 		state.preparedAt[row.id] = now;
 
 		let one = byId[row.id];
-		if (!one)
-			continue;
 
-		// Deferred, so that a router coming up with five bindings that all need
-		// a forwarding reloads fw4 once rather than five times.
-		let done = prepare.prepare(one, view, { bus: options.bus, defer: true });
-
-		owedNetwork = owedNetwork || done.network;
-		owedFirewall = owedFirewall || done.firewall;
-
-		if (done.ok) {
-			prepared++;
-			delete state.preparedAt[row.id];
-		}
-		else {
-			err(sprintf('binding %s: %s', one.id, done.reason));
-		}
+		if (one)
+			push(wanted, one);
 	}
 
-	// One reload apiece, however many bindings were prepared. The flags are
-	// collected above rather than acted on inside the loop for exactly that
-	// reason: five bindings that all need a forwarding on a router coming up
-	// should reload fw4 once, not five times.
-	prepare.applyReloads({ ok: true, network: owedNetwork, firewall: owedFirewall, reason: '' },
-		options.bus);
+	// One cursor and one commit for the whole batch. Prepared one at a time, a
+	// router coming up with five hundred bindings opened five hundred cursors
+	// and committed /etc/config/firewall five hundred times - five hundred
+	// writes to flash to say one thing fw4 needed telling once.
+	// Which routing tables are already spoken for. Built once for the batch:
+	// prepared one at a time each binding read the router again, and two
+	// prepared in one pass without it would be handed the same free number.
+	let taken = {};
 
-	// Forwardings whose section has gone. A binding removed from the config has
-	// its rule withdrawn by the diff above - nothing desires it, so it is a
-	// stray in the band - but the firewall section it left behind is named after
-	// a binding that no longer exists, and nothing else would ever look at it.
+	for (let one in ifaces) {
+		if (one.table)
+			taken[sprintf('%d', one.table)] = true;
+	}
+
+	for (let one in bindings) {
+		if (one.table > 0)
+			taken[sprintf('%d', one.table)] = true;
+	}
+
+	let made = prepare.prepareMany(wanted, view, { bus: options.bus, taken: taken });
+	let prepared = length(made.prepared);
+
+	for (let id in made.prepared)
+		delete state.preparedAt[id];
+
+	for (let bad in made.failed)
+		err(sprintf('binding %s: %s', bad.id, bad.reason));
+
+	if (made.deferred) {
+		notice(sprintf('%d binding(s) still need a routing table or a firewall path; %d were prepared this pass and the rest are on the next one',
+			made.deferred, prepared));
+	}
+
+	// One reload apiece, however many bindings were prepared - and the answer is
+	// read rather than discarded. A reload fw4 refused used to be a sentence
+	// nobody saw: the sections were committed, the rows read `ok`, and nothing
+	// was being forwarded. Now it is owed, the rows say `written`, and the next
+	// pass tries again.
+	let reloads = prepare.applyReloads({
+		ok: true,
+		network: made.network || state.networkOwed,
+		firewall: made.firewall || state.firewallOwed,
+		reason: ''
+	}, options.bus);
+
+	state.networkOwed = false;
+	state.firewallOwed = false;
+
+	if (!reloads.ok) {
+		state.firewallOwed = true;
+		err(reloads.reason);
+	}
+
+	// Pairs of zones nothing needs any more. A binding removed from the config
+	// has its rule withdrawn by the diff above - nothing desires it, so it is a
+	// stray in the band - and the pair it was the last user of is a hole in the
+	// firewall nobody asked for.
+	//
+	// The same sweep replaces the per-binding sections older releases wrote,
+	// once a numbered one covers the same pair. Not before: until then the old
+	// section is the only thing letting that traffic through.
 	let keep = {};
-	for (let one in bindings)
-		keep[one.id] = true;
+
+	for (let row in planned.rows) {
+		if (!row.usable || !row.enabled)
+			continue;
+
+		if (length(row.lanZone) && length(row.wanZone))
+			keep[row.lanZone + '|' + row.wanZone] = true;
+	}
 
 	let swept = prepare.sweep(keep);
 

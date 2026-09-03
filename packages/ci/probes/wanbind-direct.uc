@@ -654,18 +654,31 @@ check('and nothing else is', ruleAt(ruleset.directOwned(mixed, 19000, 19999, {})
 // ------------------------------------------------------ the two writes that
 // are not ip rules.
 
-check('a forwarding is named after the binding', prepare.forwardingName('desk'), 'bmd_desk');
-check('and an id that could not be one is refused', prepare.forwardingName('desk;reboot'), '');
-
+// A forwarding is a pair of zones, not a binding. It says "traffic from here
+// may go to there", which is true for every binding whose LAN and WAN sit in
+// that pair - so five hundred of them need one section, not five hundred
+// identical ones and five hundred commits of /etc/config/firewall.
 let ready = prepare.prepare(cfg.directBinding('desk'), view, { defer: true });
 check('preparing an already-tabled WAN writes only the forwarding', ready.ok, true);
 check('so netifd is not disturbed', ready.network, false);
 check('and fw4 is owed a reload', ready.firewall, true);
-check('the forwarding runs from the LAN\'s zone', uci.get('firewall', 'bmd_desk', 'src'), 'lan');
-check('to the WAN\'s', uci.get('firewall', 'bmd_desk', 'dest'), 'wan');
-check('and the pass can see it', prepare.forwardings().desk.dest, 'wan');
+
+let pairs = prepare.forwardings().pairs;
+check('the pair is in the file', exists(pairs, 'lan|wan'), true);
+check('the forwarding runs from the LAN\'s zone', uci.get('firewall', pairs['lan|wan'].section, 'src'), 'lan');
+check('to the WAN\'s', uci.get('firewall', pairs['lan|wan'].section, 'dest'), 'wan');
+check('under a numbered name rather than a binding\'s', pairs['lan|wan'].section, 'bmz_0');
+check('and it is not one of the old per-binding sections', pairs['lan|wan'].legacy, false);
 
 check('a second preparation writes nothing', prepare.prepare(cfg.directBinding('desk'), view, { defer: true }).firewall, false);
+
+// The point of the pair: another binding on the same two zones is already
+// forwarded, whoever wrote the section.
+binding('desk2', { ip: '12.10.1.44', wan: 'WAN0', lan: 'lan', pref: '19008', table: '10000' });
+check('a second binding across the same pair writes nothing either',
+	prepare.prepare(cfg.directBinding('desk2'), view, { defer: true }).firewall, false);
+check('and there is still one section for it', length(prepare.forwardings().rows), 1);
+uci.delete('bm_wanbind', 'desk2');
 
 // The WAN with no ip4table: this is where the number the section is stamped
 // with is finally used for something.
@@ -692,25 +705,40 @@ uci.delete('bm_wanbind', 'shed');
 uci.delete('bm_wanbind', 'clash');
 uci.delete('bm_wanbind', 'inward');
 
-// A forwarding whose binding has gone is swept, and one whose binding is merely
-// refused is not - a section somebody is about to correct still needs its path.
+// What a sweep is for: a pair nothing needs any more, and the per-binding
+// sections older releases wrote.
+//
+// The old ones are still forwardings and still in force, so one is only removed
+// once a numbered section covers the same pair. Removing it first would be a
+// hole in the router's connectivity opened by an upgrade.
 uci.set('firewall', 'bmd_ghost', 'forwarding');
 uci.set('firewall', 'bmd_ghost', 'src', 'lan');
 uci.set('firewall', 'bmd_ghost', 'dest', 'wan');
-uci.set('firewall', 'bmd_bad', 'forwarding');
-uci.set('firewall', 'bmd_bad', 'src', 'lan');
-uci.set('firewall', 'bmd_bad', 'dest', 'wan');
+uci.set('firewall', 'bmd_old', 'forwarding');
+uci.set('firewall', 'bmd_old', 'src', 'guest');
+uci.set('firewall', 'bmd_old', 'dest', 'wan');
 
-let keep = {};
-for (let one in cfg.directConfigured())
-	keep[one.id] = true;
+check('the old section covers its pair', prepare.forwardings().pairs['guest|wan'].legacy, true);
 
-// Two, because preparing `shed` above wrote one for a section that has since
-// been deleted - which is exactly the shape a sweep exists for.
-check('the orphans are swept', prepare.sweep(keep), 2);
-check('and they are gone', uci.get('firewall', 'bmd_ghost'), null);
-check('both of them', uci.get('firewall', 'bmd_shed'), null);
-check('while a refused binding keeps its path', uci.get('firewall', 'bmd_bad', 'dest'), 'wan');
+// Every binding above leaves by a WAN in the `wan` zone from a LAN in the `lan`
+// zone, so all of them - including the one with no routing table of its own -
+// are covered by the one numbered section. That is the whole point of keying a
+// forwarding on the pair.
+check('one section covers every binding written so far', length(prepare.forwardings().rows), 3);
+
+// `lan -> wan` is wanted and covered by a numbered section, so the old
+// per-binding one for it goes; `guest -> wan` is wanted and covered only by an
+// old section, so that one stays until a numbered one takes it over.
+check('the sweep takes the superseded section and nothing else',
+	prepare.sweep({ 'lan|wan': true, 'guest|wan': true }), 1);
+check('the superseded per-binding section is gone', uci.get('firewall', 'bmd_ghost'), null);
+check('while the pair only an old section covers is kept', uci.get('firewall', 'bmd_old', 'dest'), 'wan');
+check('and the numbered one stays', uci.get('firewall', 'bmz_0', 'dest'), 'wan');
+
+// And a pair nothing wants at all goes, old section or new.
+check('a pair nothing needs is swept', prepare.sweep({ 'lan|wan': true }), 1);
+check('the old section for it is gone', uci.get('firewall', 'bmd_old'), null);
+
 
 // --------------------------------------------------- and then a real pass
 //

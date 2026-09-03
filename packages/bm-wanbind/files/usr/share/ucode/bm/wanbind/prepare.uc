@@ -46,6 +46,40 @@ import * as layout from 'bm.wanbind.layout';
 const FORWARD_PREFIX = 'bmd_';
 
 /**
+ * And the one a *pair of zones* lives in, which is what a forwarding actually
+ * is.
+ *
+ * A forwarding says "traffic from this zone may go to that zone". It says
+ * nothing about which binding wanted it, and fw4 does not care how many times
+ * it is told: five hundred bindings whose LAN is `lan` and whose WANs are all
+ * in `wan` need exactly one. Written per binding they were five hundred
+ * identical sections, five hundred commits of /etc/config/firewall - which on a
+ * router is five hundred writes to flash - and a ruleset with five hundred
+ * copies of one rule in it.
+ *
+ * Numbered rather than named after the zones, because a zone name may contain
+ * characters a section name may not - `guest-iot` is a perfectly ordinary zone
+ * and `bmz_guest-iot` is not a section anything can address. The number is a
+ * slot; the pair is in the section's own `src` and `dest`, which is where a
+ * reader has to look anyway.
+ */
+const PAIR_PREFIX = 'bmz_';
+
+/**
+ * How many UCI writes one preparation pass may make.
+ *
+ * A router coming up cold with five hundred bindings on WANs that have no
+ * routing tables has five hundred `option ip4table` lines to write. Doing them
+ * all in one pass is one commit either way, but it is also a single callback
+ * holding the daemon while it builds a forty-kilobyte write - and if anything
+ * about it fails, five hundred bindings are unprepared rather than sixty-four.
+ * The rest are done by the next pass, and the pass after that; a cold start
+ * settles in a handful of passes instead of one, and nothing is left in a state
+ * a later pass cannot pick up.
+ */
+const PREPARE_BUDGET = 64;
+
+/**
  * And the one an instance's forwardings live in, numbered per destination zone.
  *
  * A binding has one WAN and therefore one forwarding. An instance has a pool,
@@ -158,10 +192,26 @@ function openConfig() {
 	}
 }
 
-/** The firewall section one binding's forwarding lives in, or '' for a bad id. */
-export function forwardingName(id) {
-	let one = text(id);
-	return match(one, SAFE_ID) ? (FORWARD_PREFIX + one) : '';
+/** The section a numbered zone pair lives in. */
+function pairName(n) {
+	return sprintf('%s%d', PAIR_PREFIX, n);
+}
+
+/** The slot number behind one of them, or -1. */
+function pairIndex(name) {
+	let one = text(name);
+
+	if (substr(one, 0, length(PAIR_PREFIX)) != PAIR_PREFIX)
+		return -1;
+
+	let rest = substr(one, length(PAIR_PREFIX));
+
+	return match(rest, /^[0-9]{1,6}$/) ? int(rest) : -1;
+}
+
+/** How a pair of zones is keyed everywhere in this file. */
+export function pairKey(src, dest) {
+	return text(src) + '|' + text(dest);
 };
 
 /** The binding id behind one of our firewall sections, or ''. */
@@ -213,19 +263,56 @@ function instanceForwardingId(name) {
  * make it something nothing ever notices at all.
  */
 export function forwardings() {
-	let out = {};
+	let rows = [];
 
 	try {
 		cursor().foreach('firewall', 'forwarding', (section) => {
-			let id = forwardingId(section['.name']);
-			if (!length(id))
+			let name = text(section['.name']);
+			let slot = pairIndex(name);
+			let id = forwardingId(name);
+
+			if (slot < 0 && !length(id))
 				return;
 
-			out[id] = { src: text(section.src), dest: text(section.dest) };
+			push(rows, {
+				section: name,
+				slot: slot,
+				id: id,
+				src: text(section.src),
+				dest: text(section.dest)
+			});
 		});
 	}
 	catch (e) {
 		debug('cannot read /etc/config/firewall: ' + e);
+	}
+
+	let out = { pairs: {}, rows: rows, next: 0 };
+
+	// Numbered sections first, so that a pair covered by both a numbered
+	// section and one of the old per-binding ones is reported as covered by the
+	// numbered one - which is what makes the old one sweepable.
+	for (let one in rows) {
+		if (one.slot < 0)
+			continue;
+
+		if (one.slot >= out.next)
+			out.next = one.slot + 1;
+
+		let key = pairKey(one.src, one.dest);
+
+		if (!exists(out.pairs, key))
+			out.pairs[key] = { section: one.section, src: one.src, dest: one.dest, legacy: false };
+	}
+
+	for (let one in rows) {
+		if (one.slot >= 0)
+			continue;
+
+		let key = pairKey(one.src, one.dest);
+
+		if (!exists(out.pairs, key))
+			out.pairs[key] = { section: one.section, src: one.src, dest: one.dest, legacy: true };
 	}
 
 	return out;
@@ -312,7 +399,7 @@ function refusePrepare(reason, changed) {
  * ordinary case on a router that is already prepared, and it is what keeps this
  * from being something a pass does every thirty seconds.
  */
-function ensureWanTable(uci, wan, stamped, taken, whose) {
+function ensureWanTable(uci, wan, stamped, taken, whose, opts) {
 	if (uci.get('network', wan) == null) {
 		return {
 			ok: false,
@@ -350,7 +437,21 @@ function ensureWanTable(uci, wan, stamped, taken, whose) {
 		};
 	}
 
-	if (!uci.set('network', wan, 'ip4table', sprintf('%d', table)) || !uci.commit('network')) {
+	if (!uci.set('network', wan, 'ip4table', sprintf('%d', table))) {
+		return {
+			ok: false,
+			wrote: false,
+			table: 0,
+			reason: sprintf('could not give %s routing table %d in /etc/config/network', wan, table)
+		};
+	}
+
+	// A caller preparing several bindings commits once at the end. On a router
+	// coming up with five hundred of them that is the difference between one
+	// write to flash and five hundred.
+	let commitNow = (type(opts) != 'object') || (opts.commit !== false);
+
+	if (commitNow && !uci.commit('network')) {
 		return {
 			ok: false,
 			wrote: false,
@@ -365,97 +466,160 @@ function ensureWanTable(uci, wan, stamped, taken, whose) {
 }
 
 /**
- * Everything a one-to-one binding needs written, with neither reload performed.
+ * Everything a batch of bindings needs written, in one cursor and one commit.
  *
- * Split out so that every return below hands back the same shape and the
- * reloads happen in exactly one place. A version that reloaded from inside each
- * branch reloaded netifd on some failures and not others, which is the kind of
- * difference nobody sees until a router bounces its WANs for a binding that was
- * refused anyway.
+ * The single-binding version below is this with one item in it, and that is not
+ * a tidiness argument: written per binding, a router coming up with five
+ * hundred of them opened five hundred cursors, wrote five hundred identical
+ * firewall forwardings and committed /etc/config/firewall five hundred times -
+ * five hundred writes to flash to say one thing fw4 needed telling once.
+ *
+ * Answers `{ ok, network, firewall, prepared, failed, writes, deferred }`.
+ * `network` and `firewall` are the reloads owed, exactly as the single version
+ * hands them back, so one caller can apply both once for the whole batch.
  */
-function writePreparation(one, view, taken) {
-	let changed = [];
-	let owedNetwork = false;
+export function prepareMany(items, view, ctx) {
+	let options = objectOr(ctx);
+	let taken = objectOr(options.taken);
+	let list = arrayOr(items);
 
-	if (type(one) != 'object' || one.usable !== true)
-		return refusePrepare('this binding is not usable, so there is nothing to prepare for it', changed);
+	let out = {
+		ok: true,
+		network: false,
+		firewall: false,
+		prepared: [],
+		failed: [],
+		writes: 0,
+		deferred: 0,
+		reason: ''
+	};
 
-	let section = forwardingName(one.id);
-	if (!length(section))
-		return refusePrepare(sprintf('%s cannot be used as a firewall section name', one.id), changed);
-
-	let verdicts = objectOr(objectOr(view).byName);
-	let verdict = verdicts[one.wan];
-
-	if (verdict && verdict.role == 'lan') {
-		return refusePrepare(sprintf('%s is one of this router own LANs, because %s - nothing will be written for a binding that leaves by the network it is already on',
-			one.wan, layout.clauses(verdict.lanEvidence)), changed);
-	}
+	if (!length(list))
+		return out;
 
 	let uci = openConfig();
 
-	if (!uci)
-		return refusePrepare('cannot open /etc/config', changed);
-
-	let table = ensureWanTable(uci, one.wan, one.table, objectOr(taken), 'this binding');
-
-	if (!table.ok)
-		return refusePrepare(table.reason, changed);
-
-	if (table.wrote) {
-		push(changed, sprintf('%s now puts its routes in table %d', one.wan, table.table));
-
-		// Reloaded rather than left for the next reboot. Until netifd has read
-		// it the table is empty, and a rule pointing at an empty table does not
-		// fail - it falls through to main, so the binding would report itself
-		// bound while the address left over the default connection.
-		owedNetwork = true;
+	if (!uci) {
+		out.ok = false;
+		out.reason = 'cannot open /etc/config';
+		return out;
 	}
 
-	if (!length(one.lan)) {
-		return {
-			ok: true,
-			changed: changed,
-			network: owedNetwork,
-			firewall: false,
-			reason: sprintf('no lan is set on this binding, so there is no source zone to write a forwarding from. Set option lan to the interface %s sits behind',
-				one.label)
-		};
+	// One walk of /etc/config/firewall for the whole batch, and the pairs it
+	// found are updated as this loop writes so that two bindings wanting the
+	// same pair write it once.
+	let present = forwardings();
+	let verdicts = objectOr(objectOr(view).byName);
+	let next = present.next;
+	let wroteNetwork = false;
+	let wroteFirewall = false;
+
+	for (let one in list) {
+		if (type(one) != 'object' || one.usable !== true) {
+			push(out.failed, { id: text(one ? one.id : ''), reason: 'this binding is not usable, so there is nothing to prepare for it' });
+			continue;
+		}
+
+		// The budget is spent, and the rest wait for the next pass. Reported
+		// rather than silently dropped: a caller that thought it had prepared
+		// five hundred bindings and had prepared sixty-four would be wrong
+		// about the router in a way nothing else would ever say.
+		if (out.writes >= PREPARE_BUDGET) {
+			out.deferred = out.deferred + 1;
+			continue;
+		}
+
+		let verdict = verdicts[one.wan];
+
+		if (verdict && verdict.role == 'lan') {
+			push(out.failed, {
+				id: one.id,
+				reason: sprintf('%s is one of this router own LANs, because %s - nothing will be written for a binding that leaves by the network it is already on',
+					one.wan, layout.clauses(verdict.lanEvidence))
+			});
+			continue;
+		}
+
+		let table = ensureWanTable(uci, one.wan, one.table, taken, 'this binding', { commit: false });
+
+		if (!table.ok) {
+			push(out.failed, { id: one.id, reason: table.reason });
+			continue;
+		}
+
+		if (table.wrote) {
+			out.writes = out.writes + 1;
+			wroteNetwork = true;
+		}
+
+		if (!length(one.lan)) {
+			push(out.failed, {
+				id: one.id,
+				reason: sprintf('no lan is set on this binding, so there is no source zone to write a forwarding from. Set option lan to the interface %s sits behind',
+					one.label)
+			});
+			continue;
+		}
+
+		let lanVerdict = verdicts[one.lan];
+		let lanZone = lanVerdict ? text(lanVerdict.zone) : '';
+		let wanZone = verdict ? text(verdict.zone) : '';
+
+		if (!length(lanZone) || !length(wanZone)) {
+			push(out.failed, {
+				id: one.id,
+				reason: sprintf('%s is in %s and %s is in %s, and a forwarding needs both',
+					one.lan, length(lanZone) ? ('zone ' + lanZone) : 'no firewall zone',
+					one.wan, length(wanZone) ? ('zone ' + wanZone) : 'no firewall zone')
+			});
+			continue;
+		}
+
+		let key = pairKey(lanZone, wanZone);
+
+		// Already there - written by an earlier pass, by an earlier item in
+		// this very batch, or by one of the old per-binding sections, which is
+		// still a forwarding and still in force.
+		if (exists(present.pairs, key)) {
+			push(out.prepared, one.id);
+			continue;
+		}
+
+		let section = pairName(next);
+
+		uci.set('firewall', section, 'forwarding');
+		uci.set('firewall', section, 'src', lanZone);
+		uci.set('firewall', section, 'dest', wanZone);
+
+		present.pairs[key] = { section: section, src: lanZone, dest: wanZone, legacy: false };
+		next = next + 1;
+		out.writes = out.writes + 1;
+		wroteFirewall = true;
+
+		push(out.prepared, one.id);
 	}
 
-	let lanVerdict = verdicts[one.lan];
-	let lanZone = lanVerdict ? text(lanVerdict.zone) : '';
-	let wanZone = verdict ? text(verdict.zone) : '';
-
-	if (!length(lanZone) || !length(wanZone)) {
-		let refusal = sprintf('%s is in %s and %s is in %s, and a forwarding needs both',
-			one.lan, length(lanZone) ? ('zone ' + lanZone) : 'no firewall zone',
-			one.wan, length(wanZone) ? ('zone ' + wanZone) : 'no firewall zone');
-
-		// The table write above still happened and still has to be applied, so
-		// this refusal carries the reload it owes rather than dropping it.
-		return { ok: false, changed: changed, network: owedNetwork, firewall: false, reason: refusal };
+	// One commit each, at the end, however many bindings were prepared.
+	if (wroteNetwork) {
+		if (uci.commit('network'))
+			out.network = true;
+		else {
+			out.ok = false;
+			out.reason = 'the routing tables could not be written to /etc/config/network';
+		}
 	}
 
-	let src = text(uci.get('firewall', section, 'src'));
-	let dest = text(uci.get('firewall', section, 'dest'));
-
-	if (src == lanZone && dest == wanZone)
-		return { ok: true, changed: changed, network: owedNetwork, firewall: false, reason: '' };
-
-	uci.set('firewall', section, 'forwarding');
-	uci.set('firewall', section, 'src', lanZone);
-	uci.set('firewall', section, 'dest', wanZone);
-
-	if (!uci.commit('firewall')) {
-		return { ok: false, changed: changed, network: owedNetwork, firewall: false,
-			reason: sprintf('could not write the firewall forwarding %s -> %s', lanZone, wanZone) };
+	if (wroteFirewall) {
+		if (uci.commit('firewall'))
+			out.firewall = true;
+		else {
+			out.ok = false;
+			out.reason = 'the firewall forwarding could not be written to /etc/config/firewall';
+		}
 	}
 
-	push(changed, sprintf('%s -> %s is forwarded', lanZone, wanZone));
-
-	return { ok: true, changed: changed, network: owedNetwork, firewall: true, reason: '' };
-}
+	return out;
+};
 
 /**
  * Give one binding the two things on the router a rule is no use without.
@@ -471,7 +635,15 @@ function writePreparation(one, view, taken) {
  */
 export function prepare(one, view, ctx) {
 	let options = objectOr(ctx);
-	let out = writePreparation(one, view, options.taken);
+	let many = prepareMany([ one ], view, options);
+
+	let out = {
+		ok: many.ok && !length(many.failed),
+		changed: [],
+		network: many.network,
+		firewall: many.firewall,
+		reason: length(many.failed) ? many.failed[0].reason : many.reason
+	};
 
 	if (options.defer === true)
 		return out;
@@ -620,41 +792,6 @@ export function prepareInstance(instance, pool, view, ctx) {
 	return (options.defer === true) ? out : applyReloads(out, options.bus);
 };
 
-/**
- * Take one binding's firewall forwarding off the router.
- *
- * The rule is not touched here, deliberately: a section that is still in the
- * config is still a binding, and the pass is the only thing that decides what
- * rule it should have. This is what the ubus `unbind` path calls once the
- * section has gone, and what the sweep below calls for a section that went
- * while nothing was watching.
- */
-export function withdraw(id, ctx) {
-	let options = objectOr(ctx);
-	let section = forwardingName(id);
-
-	if (!length(section))
-		return false;
-
-	let uci = openConfig();
-
-	if (!uci || uci.get('firewall', section) == null)
-		return false;
-
-	uci.delete('firewall', section);
-
-	if (!uci.commit('firewall')) {
-		err(sprintf('the firewall forwarding for binding %s could not be removed', id));
-		return false;
-	}
-
-	if (options.defer !== true && !reloadFirewall())
-		err(sprintf('the firewall forwarding for binding %s was removed and fw4 was not reloaded, so it is still in force', id));
-
-	notice(sprintf('binding %s: its firewall forwarding was removed', id));
-	return true;
-};
-
 /** The same for an instance, which has a numbered set of them. */
 export function withdrawInstance(id, ctx) {
 	let options = objectOr(ctx);
@@ -707,17 +844,52 @@ export function withdrawInstance(id, ctx) {
  * sweep that reloaded fw4 on a settled router every thirty seconds would cost
  * more than everything else this daemon does put together.
  */
-export function sweep(keep) {
-	let kept = objectOr(keep);
+export function sweep(wanted) {
+	let want = objectOr(wanted);
+	let present = forwardings();
 	let removed = 0;
 
-	for (let id in forwardings()) {
-		if (kept[id] !== true && withdraw(id, { defer: true }))
-			removed++;
+	let uci = openConfig();
+
+	if (!uci)
+		return 0;
+
+	for (let one in present.rows) {
+		let key = pairKey(one.src, one.dest);
+		let chosen = present.pairs[key];
+		let drop = false;
+
+		if (one.slot >= 0) {
+			// A numbered section for a pair nothing wants, or a second one for
+			// a pair another section already covers - which is what a migration
+			// interrupted half way through leaves behind.
+			drop = (want[key] !== true) || (chosen && chosen.section != one.section);
+		}
+		else {
+			// One of the old per-binding sections. It goes when nothing wants
+			// the pair any more, or when a numbered section has taken it over -
+			// and not before, because until then it is the only thing letting
+			// that traffic through.
+			drop = (want[key] !== true) || (chosen != null && chosen.legacy !== true);
+		}
+
+		if (!drop)
+			continue;
+
+		uci.delete('firewall', one.section);
+		removed++;
 	}
 
-	if (removed)
-		reloadFirewall();
+	if (!removed)
+		return 0;
+
+	if (!uci.commit('firewall')) {
+		err('firewall forwardings this daemon no longer needs could not be removed');
+		return 0;
+	}
+
+	if (!reloadFirewall())
+		err('firewall forwardings were removed and fw4 was not reloaded, so they are still in force');
 
 	return removed;
 };
