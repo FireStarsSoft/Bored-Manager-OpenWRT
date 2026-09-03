@@ -81,41 +81,91 @@ export interface LimitsDeps {
   /** For the agent path: `objectCall` reads capability per call, never captured. */
   agentDeps: AgentDeps
   /** The slow sweep's last reading of /proc/sys and the fw4 flag. */
-  current(): { sysctl: Readonly<Record<string, number>>; flowOffload: boolean | null }
+  current(): {
+    sysctl: Readonly<Record<string, number>>
+    flowOffload: boolean | null
+    /** Total RAM in kilobytes, or 0 when the sweep has not said. */
+    memTotalKb?: number
+  }
   /** This router's own scale, for the recommendations. */
   scale(): { clients: number; sessions: number }
   /** Kick the slow sweep so the page shows what the router now holds. */
   afterApply(): void
 }
 
-/** The next power of two at or above `value`, within the neighbour bounds. */
+/** The next power of two at or above `value`, floored at 128. */
 function pow2(value: number): number {
   let out = 128
-  while (out < value && out < 1_048_576) out *= 2
+  while (out < value && out < 4_194_304) out *= 2
   return out
 }
+
+/** The largest power of two at or below `value`. */
+function pow2Floor(value: number): number {
+  let out = 128
+  while (out * 2 <= value) out *= 2
+  return out
+}
+
+/** What one tracked connection costs, near enough, with its hash bucket. */
+const CONNTRACK_BYTES = 320
 
 export interface LimitsRecommendation {
   conntrackMax: number
   gcThresh1: number
   gcThresh2: number
   gcThresh3: number
+  memCapped: boolean
 }
 
 /**
  * Sized from what this router is actually carrying, with the shipped-kernel
  * defaults as the floor so an idle router is never told to shrink anything.
- * Conntrack counts flows, which both halves create; the neighbour cache
- * counts LAN devices, so it is sized from clients alone.
+ *
+ * The same arithmetic as `bm.tune`'s `recommended`, and deliberately so: the
+ * router offers these numbers at a console and this offers them on a page, and
+ * two answers to one question in front of somebody deciding whether to raise a
+ * limit is worse than either. `openwrt-limits.test.ts` reads the table the
+ * router's own probe writes, so the two cannot drift apart quietly.
+ *
+ * Conntrack counts flows, which both halves create. The neighbour cache counts
+ * LAN devices, so it is sized from clients alone - a PPPoE session is NOARP and
+ * adds no neighbour entry.
+ *
+ * `memTotalKb` is the ceiling and the reason one is needed: a conntrack table
+ * is free while it is empty and real memory when it fills, so the
+ * recommendation is capped at what an eighth of this router's RAM would hold. A
+ * four-million-entry recommendation on a 128 MB router is not advice, it is an
+ * out-of-memory reboot with a number attached.
  */
-export function recommendLimits(clients: number, sessions: number): LimitsRecommendation {
+export function recommendLimits(
+  clients: number,
+  sessions: number,
+  memTotalKb?: number
+): LimitsRecommendation {
   const flows = Math.max(0, clients) + Math.max(0, sessions)
-  const gcThresh3 = Math.max(8_192, pow2(Math.max(1, clients) * 4))
+  // Bounded by what the sysctl itself accepts, which is the same allowlist the
+  // router enforces: a recommendation the apply would refuse is not a
+  // recommendation.
+  const gcThresh3 = Math.min(1_048_576, Math.max(8_192, pow2(Math.max(1, clients) * 4)))
+
+  let wanted = Math.min(4_194_304, Math.max(262_144, pow2(Math.max(500, flows)) * 512))
+  let capped = false
+
+  if (typeof memTotalKb === 'number' && memTotalKb > 0) {
+    const cap = Math.max(16_384, pow2Floor((memTotalKb * 1024) / 8 / CONNTRACK_BYTES))
+    if (wanted > cap) {
+      wanted = cap
+      capped = true
+    }
+  }
+
   return {
-    conntrackMax: Math.min(4_194_304, Math.max(262_144, pow2(Math.max(1, flows)) * 128)),
+    conntrackMax: wanted,
     gcThresh1: gcThresh3 / 4,
     gcThresh2: gcThresh3 / 2,
-    gcThresh3
+    gcThresh3,
+    memCapped: capped
   }
 }
 
@@ -132,9 +182,9 @@ export class LimitsManager {
 
   /** What the form opens showing: the router's own values, live off the sweep. */
   effective(): Record<string, string | number | boolean> {
-    const { sysctl, flowOffload } = this.deps.current()
+    const { sysctl, flowOffload, memTotalKb } = this.deps.current()
     const { clients, sessions } = this.deps.scale()
-    const recommended = recommendLimits(clients, sessions)
+    const recommended = recommendLimits(clients, sessions, memTotalKb)
 
     const out: Record<string, string | number | boolean> = {
       sampled: Object.keys(sysctl).length > 0,
@@ -181,9 +231,9 @@ export class LimitsManager {
 
     const values = isRecord(raw) ? raw : {}
     const findings: ModuleCheckFinding[] = []
-    const { sysctl, flowOffload } = this.deps.current()
+    const { sysctl, flowOffload, memTotalKb } = this.deps.current()
     const { clients, sessions } = this.deps.scale()
-    const recommended = recommendLimits(clients, sessions)
+    const recommended = recommendLimits(clients, sessions, memTotalKb)
 
     if (Object.keys(sysctl).length === 0) {
       return failedCheck(

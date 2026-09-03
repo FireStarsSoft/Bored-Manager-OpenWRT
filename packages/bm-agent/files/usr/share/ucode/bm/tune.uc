@@ -63,6 +63,11 @@ const TUNABLES = [
 
 const COUNT_PATH = '/proc/sys/net/netfilter/nf_conntrack_count';
 
+// What one tracked connection costs, near enough. A conntrack entry is about
+// 320 bytes with its hash bucket, and the recommendation below is capped at
+// what an eighth of this router's memory would hold if the table filled.
+const CONNTRACK_BYTES = 320;
+
 /** One /proc/sys value as an int, or null when it cannot be read. */
 function readSysctl(path) {
 	let text = readfile(path);
@@ -120,6 +125,92 @@ export function flowOffload() {
  * flow-offload flag. Values are null where the question could not be asked,
  * which a surface shows as unknown rather than as zero.
  */
+/** The next power of two at or above `value`, floored at 128. */
+function pow2(value) {
+	let n = 128;
+
+	while (n < value && n < 4194304)
+		n = n * 2;
+
+	return n;
+}
+
+/** The largest power of two at or below `value`. */
+function pow2Floor(value) {
+	let n = 128;
+
+	while (n * 2 <= value)
+		n = n * 2;
+
+	return n;
+}
+
+/**
+ * What this router's kernel tables should be sized at for a given load.
+ *
+ * One function, and the module and the capacity report both read it rather than
+ * carrying the arithmetic a second time - two copies of a formula are two
+ * answers waiting to disagree in front of somebody deciding whether to raise a
+ * limit.
+ *
+ * The memory ceiling is the part worth stating: a conntrack table is only free
+ * while it is empty, and a full one at 320 bytes an entry is real memory. So
+ * the recommendation is capped at what an eighth of this router's RAM would
+ * hold, and says when that cap is what decided it - a 4 GB recommendation on a
+ * 128 MB router is not advice, it is an out-of-memory reboot with a number
+ * attached.
+ */
+export function recommended(load, memTotalKb) {
+	let clients = (type(load) == 'object' && type(load.clients) == 'int' && load.clients > 0) ? load.clients : 0;
+	let sessions = (type(load) == 'object' && type(load.sessions) == 'int' && load.sessions > 0) ? load.sessions : 0;
+	let flows = clients + sessions;
+
+	let want = pow2((flows > 500) ? flows : 500) * 512;
+
+	if (want < 262144)
+		want = 262144;
+
+	if (want > 4194304)
+		want = 4194304;
+
+	let cap = 4194304;
+	let capped = false;
+
+	if (type(memTotalKb) == 'int' && memTotalKb > 0) {
+		cap = pow2Floor((memTotalKb * 1024) / 8 / CONNTRACK_BYTES);
+
+		if (cap < 16384)
+			cap = 16384;
+	}
+
+	if (want > cap) {
+		want = cap;
+		capped = true;
+	}
+
+	// The neighbour table is about clients and not about sessions: a PPP
+	// interface is NOARP, so a dialled session adds no neighbour entry.
+	let gc3 = pow2(clients * 4);
+
+	if (gc3 < 8192)
+		gc3 = 8192;
+
+	// Bounded by what the sysctl itself accepts, which is the allowlist above:
+	// a recommendation `apply` would refuse is not a recommendation.
+	if (gc3 > 1048576)
+		gc3 = 1048576;
+
+	return {
+		conntrack_max: want,
+		gc_thresh1: gc3 / 4,
+		gc_thresh2: gc3 / 2,
+		gc_thresh3: gc3,
+		flows: flows,
+		mem_cap: cap,
+		mem_capped: capped
+	};
+};
+
 export function current() {
 	let values = {};
 	for (let entry in TUNABLES)
@@ -172,6 +263,19 @@ function refusal(wanted) {
 	if (t2 != null && t3 != null && t2 > t3)
 		return 'gc_thresh2 cannot be above gc_thresh3';
 
+	// A table smaller than what is already in it drops live connections the
+	// moment it is written. The module's own check said so before it sent the
+	// call; nothing said so to `bmctl tune` or to LuCI, which reach this
+	// function directly.
+	if (exists(wanted, 'conntrack_max')) {
+		let inUse = readSysctl(COUNT_PATH);
+
+		if (inUse != null && wanted.conntrack_max < inUse) {
+			return sprintf('conntrack_max %d is below the %d connections this router is tracking right now, and the ones that did not fit would be dropped',
+				wanted.conntrack_max, inUse);
+		}
+	}
+
 	return null;
 };
 
@@ -209,20 +313,56 @@ function setFlowOffload(on) {
 		if (!section)
 			return { ok: false, reason: 'no firewall defaults section, so flow offload has nowhere to go' };
 
+		let was = uci.get('firewall', section, 'flow_offloading');
+
 		uci.set('firewall', section, 'flow_offloading', on ? '1' : '0');
 		if (uci.commit('firewall') === null)
 			return { ok: false, reason: 'the firewall configuration would not commit' };
 
-		let reloaded = false;
-		if (access('/etc/init.d/firewall', 'x')) {
-			let handle = popen('/etc/init.d/firewall reload 2>&1', 'r');
-			if (handle) {
-				handle.read('all');
-				reloaded = handle.close() === 0;
-			}
+		if (!access('/etc/init.d/firewall', 'x')) {
+			// Written and not applied, which is the honest answer: the flag is
+			// in force at the next boot and is not now.
+			return { ok: true, value: on, reloaded: false,
+				reason: 'there is no /etc/init.d/firewall to reload, so the setting is written and not in force until the next boot' };
 		}
 
-		return { ok: true, value: on, reloaded: reloaded };
+		let handle = popen('/etc/init.d/firewall reload 2>&1', 'r');
+
+		if (!handle) {
+			return { ok: true, value: on, reloaded: false,
+				reason: 'the firewall could not be reloaded, so the setting is written and not in force yet' };
+		}
+
+		handle.read('all');
+
+		if (handle.close() === 0)
+			return { ok: true, value: on, reloaded: true, reason: '' };
+
+		// fw4 refused the ruleset and the option is already committed, so on a
+		// router whose kernel has no flowtable this left a firewall that fails
+		// to load at the next boot - which is a router with no firewall at all.
+		// Put back, committed again, reloaded again, and the caller is told,
+		// rather than handed an `ok` that only meant "written".
+		if (was == null)
+			uci.delete('firewall', section, 'flow_offloading');
+		else
+			uci.set('firewall', section, 'flow_offloading', was);
+
+		uci.commit('firewall');
+
+		let again = popen('/etc/init.d/firewall reload 2>&1', 'r');
+
+		if (again) {
+			again.read('all');
+			again.close();
+		}
+
+		return {
+			ok: false,
+			value: !on,
+			reloaded: false,
+			reason: 'fw4 would not load the ruleset with flow offload ' + (on ? 'on' : 'off') + ', so the setting was put back. The kernel may have no flowtable support - kmod-nft-offload is what provides it'
+		};
 	}
 	catch (e) {
 		return { ok: false, reason: 'flow offload could not be written: ' + e };

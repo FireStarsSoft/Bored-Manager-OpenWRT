@@ -201,6 +201,18 @@ if [ -n "$probes" ]; then
 
 		if printf '%s' "$out" | grep -q '^bm-probe-ok$'; then
 			printf 'ok    %s\n' "${file#"$root/"}"
+
+			# A probe may publish a table the TypeScript side has to agree with.
+			#
+			# The arithmetic behind `bmctl tune --recommend` is carried by the
+			# module too, for the page that offers it, and two copies of one
+			# formula are two answers waiting to disagree in front of somebody
+			# deciding whether to raise a limit. So the ucode side writes the
+			# numbers here and the module's own test reads the same file.
+			printf '%s\n' "$out" | grep '^bm-fixture ' | while read -r _tag _name _json; do
+				mkdir -p "$root/packages/ci/fixtures"
+				printf '%s\n' "$_json" > "$root/packages/ci/fixtures/$_name.json"
+			done
 		else
 			printf 'FAIL  %s\n' "${file#"$root/"}" >&2
 			printf '%s\n' "$out" | sed 's/^/      /' >&2

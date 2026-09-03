@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { ModuleExecResult } from '@shared/modules'
 import type { ModuleCheckReport } from '@shared/check'
@@ -100,13 +102,45 @@ describe('the recommendation is sized from the router, with a floor', () => {
     expect(idle.gcThresh1).toBe(2_048)
   })
 
-  it('grows in whole powers of two as the router does', () => {
-    const big = recommendLimits(4_000, 1_000)
-    // 5,000 flows round up to 8,192, ARP staging to four times the clients.
-    expect(big.conntrackMax).toBe(1_048_576)
-    expect(big.gcThresh3).toBe(16_384)
-    expect(big.gcThresh2).toBe(8_192)
-    expect(big.gcThresh1).toBe(4_096)
+  /**
+   * The router offers these numbers at a console and this offers them on a
+   * page. Two answers to one question, in front of somebody deciding whether to
+   * raise a limit, is worse than either - so the table read here is the one
+   * `bm.tune`'s own probe writes when `check-ucode.sh` runs, and this compares
+   * against it rather than restating it.
+   */
+  it('agrees with the router, case for case', () => {
+    const table = JSON.parse(
+      readFileSync(join(process.cwd(), 'packages/ci/fixtures/tune-recommended.json'), 'utf8')
+    ) as Array<{
+      clients: number
+      sessions: number
+      memTotalKb: number
+      conntrack_max: number
+      gc_thresh1: number
+      gc_thresh2: number
+      gc_thresh3: number
+      mem_capped: boolean
+    }>
+
+    expect(table.length).toBeGreaterThan(4)
+
+    for (const one of table) {
+      const mine = recommendLimits(one.clients, one.sessions, one.memTotalKb)
+      expect({
+        conntrack_max: mine.conntrackMax,
+        gc_thresh1: mine.gcThresh1,
+        gc_thresh2: mine.gcThresh2,
+        gc_thresh3: mine.gcThresh3,
+        mem_capped: mine.memCapped,
+      }).toEqual({
+        conntrack_max: one.conntrack_max,
+        gc_thresh1: one.gc_thresh1,
+        gc_thresh2: one.gc_thresh2,
+        gc_thresh3: one.gc_thresh3,
+        mem_capped: one.mem_capped,
+      })
+    }
   })
 
   it('stays inside the same bounds the router-side allowlist enforces', () => {

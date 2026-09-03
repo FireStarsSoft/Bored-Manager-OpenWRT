@@ -284,7 +284,14 @@ export function createRuntime(ctx: ModuleContext): OpenWrtRuntime {
   const limits = new LimitsManager({
     ctx,
     agentDeps: { ctx, capability: () => latch.capabilities.agent },
-    current: () => ({ sysctl: service.sysctl, flowOffload: service.flowOffload }),
+    current: () => ({
+      sysctl: service.sysctl,
+      flowOffload: service.flowOffload,
+      // The recommendation is capped at what an eighth of this router's memory
+      // would hold if the conntrack table filled, so it needs to know how much
+      // there is. The sweep already reads it in bytes.
+      memTotalKb: Math.floor((service.overview?.sys.memTotal ?? 0) / 1024),
+    }),
     scale: () => ({
       clients: service.latest?.leases.length ?? 0,
       sessions: pppoe.latest.interfaces
