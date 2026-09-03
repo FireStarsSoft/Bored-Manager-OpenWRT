@@ -35,7 +35,12 @@ export const RELEASE = '2.4.0';
  * members model; 3 adds `carrier_mode` (vlan | direct) to the spec. A module
  * built for 1 refuses it and says to update; one built for 2 keeps working -
  * it just never sends the new key. */
-export const API_VERSION = 3;
+// 4 since 2.4.0: `sessions` pages and says how many rows there are, `action`
+// takes a pool by name, `info` and `sessions` say whether netifd is answering,
+// and `pool_check` says what the router can do. Every reader treats an absent
+// key as the behaviour it had before, so an older module against this daemon
+// sees what it saw.
+export const API_VERSION = 4;
 
 const STARTED = time();
 
@@ -47,6 +52,15 @@ const FIREWALL_TIMEOUT_MS = 30000;
 // The most rows one `sessions` call returns and the most members one pool
 // holds - the same number, so a whole pool always fits in one reply.
 const ROW_LIMIT = 500;
+
+// The most members one pool may have, which is also the most rows one pool can
+// contribute: `bm.pppoe.config` refuses a larger one. Written here so the row
+// builder asks for a pool's whole answer rather than for whatever is left of a
+// shared cap - which is what made the second pool on a router invisible.
+const MEMBER_MAX = 500;
+
+// How often a netifd that is not answering is worth another line in syslog.
+const BLIND_LOG_EVERY = 60;
 
 // Every key a spec may carry, in the shape ubus declares arguments by. Used
 // by pool_check, pool_add and pool_set: ucode's publish refuses any named
@@ -104,6 +118,15 @@ let state = {
 	// When /etc/config/network was last written, as the daemon last saw it.
 	networkMtime: 0,
 
+	// netifd not answering the interface dump.
+	//
+	// Every row this daemon shows is folded from that dump, so a dump that
+	// stops answering leaves every row reading exactly as it did at the last
+	// good pass - a session that dropped since still reads up, with its old
+	// address, and nothing anywhere says the daemon has stopped looking. Null
+	// while netifd is answering, so a surface can test one field.
+	blind: null,
+
 	// Where the last pass spent its time, and how much of the router it looked
 	// at. A pass that takes longer than the counter interval is a router whose
 	// passes overlap, and which part is slow is the whole question.
@@ -145,6 +168,10 @@ function each() {
 		push(out, state.pools[id]);
 	return out;
 };
+
+function intOr(value, fallback) {
+	return type(value) == 'int' ? value : fallback;
+}
 
 function text(value) {
 	return type(value) == 'string' ? trim(value) : '';
@@ -488,8 +515,29 @@ function configStale() {
 /** Fold `network.interface dump` into every pool's session table. */
 function refresh(now) {
 	let reply = call('network.interface', 'dump', {});
-	if (type(reply) != 'object' || type(reply.interface) != 'array')
+
+	if (type(reply) != 'object' || type(reply.interface) != 'array') {
+		if (!state.blind)
+			state.blind = { since: now, failures: 0, loggedAt: 0 };
+
+		state.blind.failures = state.blind.failures + 1;
+
+		// Once a minute rather than once a pass: a netifd that has been gone
+		// for an hour is one fault, not seven hundred and twenty.
+		if (now - state.blind.loggedAt >= BLIND_LOG_EVERY) {
+			state.blind.loggedAt = now;
+			err(sprintf('netifd is not answering network.interface dump (%d failure(s) since %ds ago); session state is running on events alone',
+				state.blind.failures, now - state.blind.since));
+		}
+
 		return false;
+	}
+
+	if (state.blind) {
+		notice(sprintf('netifd is answering again after %d failed dump(s) over %ds',
+			state.blind.failures, now - state.blind.since));
+		state.blind = null;
+	}
 
 	for (let entry in reply.interface) {
 		if (type(entry) != 'object')
@@ -1014,22 +1062,57 @@ export function actionCall(args) {
 		return { ok: false, reason: 'the action has to be up, down, redial, enable or disable' };
 
 	let names = type(args.sections) == 'array' ? args.sections : [];
-	if (!length(names))
-		return { ok: false, reason: 'name at least one section' };
+	let poolId = text(args.id);
+	let skipped = [];
 
+	// A whole pool by name, rather than five hundred section names the caller
+	// had to fetch first and send back. "Take this pool down" is the thing
+	// every surface actually asks for, and spelling it as a list meant the
+	// list had to be complete and current or the answer was silently partial.
+	if (length(poolId)) {
+		let st = state.pools[poolId];
+
+		if (!st)
+			return { ok: false, reason: sprintf('no pool called %s', poolId) };
+
+		if (!length(names)) {
+			names = [];
+
+			for (let section in keys(st.written))
+				push(names, section);
+
+			sort(names);
+		}
+		else {
+			let kept = [];
+
+			for (let name in names) {
+				if (exists(st.written, name))
+					push(kept, name);
+				else
+					push(skipped, name);
+			}
+
+			if (!length(kept))
+				return { ok: false, reason: sprintf('none of those sections belong to pool %s', poolId), skipped: skipped };
+
+			names = kept;
+		}
+	}
+
+	if (!length(names))
+		return { ok: false, reason: 'name at least one section, or a pool' };
+
+	// A pool holds at most `MEMBER_MAX` members and that is the same number, so
+	// "every section in one pool" always fits in one call.
 	if (length(names) > ROW_LIMIT)
 		return { ok: false, reason: sprintf('at most %d sections in one call', ROW_LIMIT) };
 
 	let done = [];
 
 	for (let name in names) {
-		let owner = null;
-		for (let st in each()) {
-			if (sessions.owns(st, name)) {
-				owner = st;
-				break;
-			}
-		}
+		// One lookup rather than a walk of every pool's member list.
+		let owner = state.bySection[name];
 
 		if (!owner)
 			continue;
@@ -1056,7 +1139,7 @@ export function actionCall(args) {
 		for (let st in each())
 			sessions.observeWritten(st, sections.stateOf(st.pool));
 
-		return { ok: true, action: what, sections: done };
+		return { ok: true, action: what, pool: poolId, sections: done, skipped: skipped };
 	}
 
 	for (let name in done) {
@@ -1066,7 +1149,7 @@ export function actionCall(args) {
 			call('network.interface.' + name, 'up', {});
 	}
 
-	return { ok: true, action: what, sections: done };
+	return { ok: true, action: what, pool: poolId, sections: done, skipped: skipped };
 };
 
 export function settingsGet() {
@@ -1247,21 +1330,46 @@ export function stats() {
 export function sessionRows(args) {
 	let id = text(args.id);
 	let scope = text(args.scope);
+	let offset = intOr(args.offset, 0);
 	let now = time();
-	let out = [];
 
+	if (offset < 0)
+		offset = 0;
+
+	let all = [];
+
+	// Every matching row first, then the window. The cap used to be shared
+	// across pools and applied while the rows were being built, so on a router
+	// with two pools of five hundred the second pool had no rows at all - and
+	// the reply said `limit` rather than saying which pool had been cut off.
 	for (let st in each()) {
 		if (length(id) && st.pool.id != id)
 			continue;
 
-		for (let row in sessions.rows(st, scope, ROW_LIMIT - length(out), state.rates.devices, now))
-			push(out, row);
-
-		if (length(out) >= ROW_LIMIT)
-			break;
+		for (let row in sessions.rows(st, scope, MEMBER_MAX, state.rates.devices, now))
+			push(all, row);
 	}
 
-	return { sessions: out, limit: ROW_LIMIT };
+	let total = length(all);
+	let from = (offset < total) ? offset : total;
+	let to = ((from + ROW_LIMIT) < total) ? (from + ROW_LIMIT) : total;
+	let out = [];
+
+	for (let i = from; i < to; i++)
+		push(out, all[i]);
+
+	return {
+		sessions: out,
+		limit: ROW_LIMIT,
+		offset: offset,
+		total: total,
+		truncated: (to < total),
+
+		// Whether the rows are what netifd last said or what the daemon last
+		// saw. A page drawing them as live while the dump has been silent for
+		// two minutes is describing a router it cannot see.
+		blind: state.blind
+	};
 };
 
 export function reconcileNow() {
@@ -1303,7 +1411,10 @@ export const methods = {
 	info: method({}, () => info()),
 	stats: method({}, () => stats()),
 
-	sessions: method({ id: '', scope: '' }, (args) => sessionRows(args)),
+	// `offset` because the cap is per call and not per router: two pools of
+	// five hundred are a thousand rows, and a reply that stopped at five
+	// hundred used to leave the second pool out entirely without saying which.
+	sessions: method({ id: '', scope: '', offset: 0 }, (args) => sessionRows(args)),
 	carriers: method({}, () => carriersList()),
 
 	// The same gate every mutation runs; nothing is written. `source` names a
@@ -1321,7 +1432,10 @@ export const methods = {
 	pool_set: method(specArgs({ id: '', source: '' }), (args) => poolSet(args)),
 	pool_delete: method({ id: '', force: false }, (args) => poolDelete(args)),
 
-	action: method({ action: '', sections: [] }, (args) => actionCall(args)),
+	// `id` names a whole pool, which is what every surface actually asks for:
+	// spelled as a list of five hundred section names, the list had to be
+	// complete and current or the answer was silently partial.
+	action: method({ action: '', sections: [], id: '' }, (args) => actionCall(args)),
 
 	settings_get: method({}, () => settingsGet()),
 	settings_set: method({

@@ -313,7 +313,7 @@ let fptTold = poolTold(told, 'fpt1');
 // files, so a version bump left this the only red thing in the tree and said
 // nothing about why.
 check('info release', told.release, pppoe.RELEASE);
-check('info api version', told.apiVersion, 3);
+check('info api version', told.apiVersion, 4);
 check('info lists every pool', length(told.pools), 3);
 check('info never carries a password', exists(fptTold, 'password'), false);
 check('info says one is set', fptTold.hasPassword, true);

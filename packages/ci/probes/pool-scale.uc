@@ -38,6 +38,8 @@ uci.set('network', 'lan', 'ipaddr', '10.9.0.1');
 // a router the daemon would never produce.
 seed('/sys/cl' + 'ass/net/eth1/address', 'aa:bb:cc:dd:ee:ff' + chr(10));
 seed('/sys/cl' + 'ass/net/eth1/operstate', 'up' + chr(10));
+seed('/sys/cl' + 'ass/net/eth2/address', 'aa:bb:cc:dd:ee:f0' + chr(10));
+seed('/sys/cl' + 'ass/net/eth2/operstate', 'up' + chr(10));
 
 let wanted = [];
 
@@ -146,5 +148,77 @@ check('and the number waiting is still the number down', sessions.queueDepth(poo
 // Longest down first, which is what the queue was for.
 let first = sessions.dueForRedial(pool, 1, 5, clock + 10000);
 check('the redial batch is the size asked for', length(first), 5);
+
+// ------------------------------------------------------- rows, per pool
+
+// A second pool, so the row cap has two of them to be shared badly between.
+let second = [];
+
+for (let i = 0; i < MEMBERS; i++)
+	push(second, { vlan: 201 + i });
+
+let made2 = service.poolAdd({
+	id: 'vnp', mode: 'multi', prefix: 'vnp', carrier: 'eth2',
+	username: 'user@vnpt', password: 'pw', table_base: 11000,
+	zone: 'bmwanpool', members: second
+});
+
+check('the second pool was created', made2.created, MEMBERS);
+
+let page = service.sessionRows({});
+
+check('a page is the cap', length(page.sessions), 500);
+check('and says how many rows there are altogether', page.total, 1000);
+check('so a reader knows it is not the whole answer', page.truncated, true);
+
+let rest = service.sessionRows({ offset: 500 });
+
+check('the rest are reachable', length(rest.sessions), 500);
+check('and that is all of them', rest.truncated, false);
+
+// The failure this replaces: asked for the second pool by name, every one of
+// its members came back rather than none of them.
+let onlySecond = service.sessionRows({ id: 'vnp' });
+
+check('one pool answers about itself', onlySecond.total, MEMBERS);
+check('all of it', length(onlySecond.sessions), MEMBERS);
+check('and says it is complete', onlySecond.truncated, false);
+
+let past = service.sessionRows({ offset: 5000 });
+check('an offset past the end is empty rather than an error', length(past.sessions), 0);
+
+// ------------------------------------------------------ actions by pool id
+
+let downAll = service.actionCall({ action: 'down', id: 'vnp' });
+
+check('a whole pool can be named', downAll.ok, true);
+check('and every one of its members acted on', length(downAll.sections), MEMBERS);
+check('without touching the other pool', downAll.pool, 'vnp');
+
+let mixed = service.actionCall({ action: 'down', id: 'vnp', sections: [ 'vnp201', 'fpt101' ] });
+
+check('sections outside the named pool are refused', length(mixed.sections), 1);
+check('and named rather than silently dropped', mixed.skipped[0], 'fpt101');
+
+let nopool = service.actionCall({ action: 'down', id: 'nosuch' });
+check('a pool that is not there is said so', nopool.ok, false);
+says('by name', nopool.reason, /no pool called nosuch/);
+
+// ------------------------------------------------------------ going blind
+
+service.attach(netifd.bus(dump, { dumpNull: true }));
+service.pass();
+service.pass();
+
+let unseen = service.sessionRows({ id: PREFIX });
+
+check('the daemon says it cannot see', unseen.blind != null, true);
+check('and for how long it has not', unseen.blind.failures, 2);
+check('while the rows are still there, being the last it saw', length(unseen.sessions), MEMBERS);
+
+service.attach(netifd.bus(dump));
+service.pass();
+
+check('and when netifd comes back it says so', service.sessionRows({}).blind, null);
 
 report();

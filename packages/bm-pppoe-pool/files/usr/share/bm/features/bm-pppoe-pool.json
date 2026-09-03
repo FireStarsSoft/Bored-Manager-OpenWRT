@@ -2,7 +2,7 @@
 	"name": "bm-pppoe-pool",
 	"version": "2.4.0",
 	"ubus": "bm.pppoe",
-	"apiVersion": 3,
+	"apiVersion": 4,
 	"provides": [ "pppoe" ],
 	"description": "PPPoE Dialer - pools of PPPoE sessions over 802.1Q VLANs or straight on the carrier, firewall included"
 }
