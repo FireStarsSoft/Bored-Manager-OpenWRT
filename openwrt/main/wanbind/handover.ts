@@ -196,7 +196,7 @@ export async function handoverPending(runtime: BindingRuntime): Promise<Handover
 
   for (const record of [...data.instances]) {
     if (!alive()) return outcome
-    await handOverInstance(runtime, deps, record, outcome)
+    await handOverInstance(runtime, deps, record, outcome, alive)
   }
 
   return outcome
@@ -222,7 +222,8 @@ async function handOverInstance(
   runtime: BindingRuntime,
   deps: AgentDeps,
   record: BindingInstanceRecord,
-  outcome: HandoverOutcome
+  outcome: HandoverOutcome,
+  alive: () => boolean
 ): Promise<void> {
   const id = wanbindSection(record.id)
 
@@ -272,6 +273,14 @@ async function handOverInstance(
   }
 
   const written = await wanbindInstanceSet(deps, id, spec)
+
+  // Checked after the call, not only before it. `instance_set` is seconds
+  // against the router, and a machine switched inside that window must not have
+  // a record dropped from a document that is no longer the one this instance
+  // belongs to - nor a line filed in that document's trail saying the router
+  // has taken something it has never heard of.
+  if (!alive()) return
+
   if (written.ok) outcome.wrote += 1
   const refused = refusal(written, written.data?.instance)
   if (refused) {

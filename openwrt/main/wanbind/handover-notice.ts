@@ -59,7 +59,14 @@ export function handoverNotice(outcome: HandoverOutcome, kind: HandoverKind): st
     // bm-wanbind the rules stand and nothing maintains them; with one this
     // module cannot drive, that daemon owns the band and is removing them.
     // Saying the first about the second reports health while the bindings go.
-    const rules = outcome.sweeping
+    // `sweeping` is a fact about the one-to-one band and only that band. A
+    // 3.3.x module wrote its one-to-one rules over SSH with no section behind
+    // them, so a 2.3.x daemon - which owns that band and removes what no
+    // section claims - is taking them off. It wrote its *instances* as
+    // `config instance` sections and let the daemon run them, so on the same
+    // router those rules are claimed, maintained, and going nowhere. Saying
+    // otherwise would invent an outage on a half that is working.
+    const rules = kind === 'binding' && outcome.sweeping
       ? `The bm-wanbind on this router is a release this module cannot drive, and it owns the ` +
         `priorities ${one ? 'that rule was' : 'those rules were'} written at - so it is taking ` +
         `${one ? 'it' : 'them'} off as fast as it finds ${one ? 'it' : 'them'}, and the address` +
@@ -67,9 +74,16 @@ export function handoverNotice(outcome: HandoverOutcome, kind: HandoverKind): st
         `meanwhile. Updating the router packages is what stops that: the moment this module can ` +
         `drive the daemon, ${one ? 'the record is' : 'the records are'} handed over and the ` +
         `${one ? 'rule is' : 'rules are'} written back as sections it will keep.`
-      : `The ip rules ${one ? 'it was' : 'they were'} given still stand exactly as they were, ` +
-        `but nothing is maintaining them now: ${UNMAINTAINED[kind]}. Installing the router ` +
-        `packages hands ${one ? 'it' : 'them'} over by itself, and nothing here has to be pressed.`
+      : kind === 'instance' && outcome.sweeping
+        ? `The sections ${one ? 'it was' : 'they were'} written into are on the router and the ` +
+          `bm-wanbind there is running ${one ? 'it' : 'them'} - what this module cannot do is ` +
+          `read or change ${one ? 'it' : 'them'}, because that release speaks a contract this ` +
+          `one stopped driving. Updating the router packages is all of it: the moment this ` +
+          `module can drive the daemon, ${one ? 'the record is' : 'the records are'} handed ` +
+          `over and this half of the page comes back.`
+        : `The ip rules ${one ? 'it was' : 'they were'} given still stand exactly as they were, ` +
+          `but nothing is maintaining them now: ${UNMAINTAINED[kind]}. Installing the router ` +
+          `packages hands ${one ? 'it' : 'them'} over by itself, and nothing here has to be pressed.`
 
     parts.push(
       `This module still holds ${stalled} ${one ? noun.one : noun.many} it created before ` +

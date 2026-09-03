@@ -98,6 +98,22 @@ function fixture(options: {
 const labels = (report: ModuleCheckReport): string[] =>
   report.findings.map((finding) => finding.label)
 
+describe('the SSH writer never empties the file it pins into', () => {
+  it('writes no redirect at all when the apply carries only the offload flag', async () => {
+    // What the one-touch button sends. An empty block redirected over the file
+    // truncated it, so a router whose conntrack and neighbour limits this
+    // module had pinned lost all four - live until the next reboot, then gone.
+    const { limits, sent } = fixture()
+
+    await limits.enableFlowOffload()
+
+    const script = sent.map((one) => one.stdin).join(String.fromCharCode(10))
+
+    expect(script).toContain('flow_offloading')
+    expect(script).not.toContain('> /etc/sysctl.d/60-bm-scale.conf')
+  })
+})
+
 describe('the recommendation is sized from the router, with a floor', () => {
   it('never tells an idle router to shrink anything', () => {
     const idle = recommendLimits(0, 0)

@@ -396,7 +396,15 @@ export function normalizeCapacity(
   const fixable = new Set(fixes.map((one) => one.key))
 
   out.state = 'ready'
-  out.at = count(raw.at) * 1_000 || now
+  // This machine's clock, not the router's.
+  //
+  // `raw.at` is `time()` on the router, and staleness is `now - at` measured
+  // here - so a router whose clock is a year out made every report either
+  // permanently stale (and every Fix permanently refused) or never stale (and
+  // every Fix applied against whatever the report last said). The moment the
+  // reply arrived is the thing staleness is actually about, and this side is
+  // the only one that knows it.
+  out.at = now
   out.agentRelease = text(capability.release)
   out.estimate = true
 

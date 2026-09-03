@@ -483,12 +483,36 @@ export class LimitsManager {
       if (typeof value === 'number') pairs.push([key.sysctl, Math.trunc(value)])
     }
 
-    const lines = ['set -eu', 'mkdir -p /etc/sysctl.d', '{']
-    lines.push(`printf '%s\\n' '# Written by Bored Manager. bm-agent ${TUNE_AGENT_RELEASE}+ owns this file when installed.'`)
-    for (const [name, value] of pairs) {
-      lines.push(`printf '%s\\n' '${name}=${value}'`)
+    const lines = ['set -eu', 'mkdir -p /etc/sysctl.d']
+
+    // Rewritten only when there is something to write into it.
+    //
+    // An apply that carries no sysctl at all is not hypothetical: it is exactly
+    // what the one-touch "Enable flow offload" button sends, and what a capacity
+    // fix for the offload sends. Redirecting an empty block over the file
+    // truncated it, silently un-pinning every limit the module had written - the
+    // values stayed live in the kernel until the next reboot and then went,
+    // which is the worst shape a fault like this can take. The agent's own
+    // writer never did this; only the SSH fallback did.
+    //
+    // Every key this module writes it rewrites whole, so the merge is: keep
+    // whatever is in the file that is not one of ours, then append ours.
+    if (pairs.length) {
+      const drop = pairs.map(([name]) => `-e '^${name}='`).join(' ')
+
+      lines.push(`touch ${LIMITS_FILE}`)
+      lines.push(`KEPT="$(grep -v ${drop} -e '^# Written by Bored Manager' ${LIMITS_FILE} || true)"`)
+      lines.push('{')
+      lines.push(
+        `printf '%s\\n' '# Written by Bored Manager. bm-agent ${TUNE_AGENT_RELEASE}+ owns this file when installed.'`
+      )
+      lines.push(`[ -n "$KEPT" ] && printf '%s\\n' "$KEPT" || true`)
+      for (const [name, value] of pairs) {
+        lines.push(`printf '%s\\n' '${name}=${value}'`)
+      }
+      lines.push(`} > ${LIMITS_FILE}.new`)
+      lines.push(`mv ${LIMITS_FILE}.new ${LIMITS_FILE}`)
     }
-    lines.push(`} > ${LIMITS_FILE}`)
     for (const [name, value] of pairs) {
       lines.push(`sysctl -w ${name}=${value} >/dev/null`)
     }

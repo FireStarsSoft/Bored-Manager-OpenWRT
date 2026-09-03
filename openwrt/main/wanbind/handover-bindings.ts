@@ -139,32 +139,74 @@ const HANDOVER_BYTES = 4_000
  */
 async function sendBatch(
   deps: AgentDeps,
-  batch: Array<{ record: DirectBindingRecord; id: string; spec: WanbindBindSpec }>
+  batch: Array<{ record: DirectBindingRecord; id: string; spec: WanbindBindSpec }>,
+  alive: () => boolean
 ): Promise<AgentCallResult<WanbindBindManyReply>> {
   const reply = await wanbindBindMany(deps, batch.map((one) => one.spec))
 
   if (reply.ok && reply.data && reply.data.ok !== false) return reply
-  if (batch.length < 2) return reply
+  if (batch.length < 2 || !alive()) return reply
 
+  // Both halves, always, and merged per record.
+  //
+  // Returning on the first half that failed is the obvious shape and it is
+  // wrong twice over. One record the router will not take at all - a name too
+  // long for the wire, a section it refuses whole - would take every record
+  // batched behind it with it, unsent, on this tick and on every later tick,
+  // because the batching is deterministic and would compose the same batch
+  // again. And a failure in the second half would strand the records the first
+  // half had already got onto the router, which is the dormant-copy state this
+  // whole file exists to end.
+  //
+  // Before batching, each record was its own call and a poisonous one stranded
+  // only itself. That property is worth keeping.
   const middle = Math.ceil(batch.length / 2)
-  const left = await sendBatch(deps, batch.slice(0, middle))
+  const left = await sendBatch(deps, batch.slice(0, middle), alive)
+  const right = alive()
+    ? await sendBatch(deps, batch.slice(middle), alive)
+    : failedHalf('the router was left before this half was sent')
 
-  if (!left.ok || !left.data || left.data.ok === false) return left
+  const both = [left, right]
+  const answered = both.filter((one) => one.ok && one.data && one.data.ok !== false)
 
-  const right = await sendBatch(deps, batch.slice(middle))
+  // Neither half answered: one honest transport sentence rather than a
+  // synthesised refusal per record about a router that is simply not there.
+  if (!answered.length) return left.ok ? right : left
 
-  if (!right.ok || !right.data || right.data.ok === false) return right
+  const halves = [
+    { half: left, records: batch.slice(0, middle) },
+    { half: right, records: batch.slice(middle) }
+  ]
+  const results: WanbindBindManyReply['results'] = []
+  let written = 0
+  let refused = 0
 
-  return {
-    ok: true,
-    data: {
-      ok: true,
-      written: left.data.written + right.data.written,
-      refused: left.data.refused + right.data.refused,
-      results: [...left.data.results, ...right.data.results]
-    },
-    error: null
+  for (const { half, records } of halves) {
+    if (half.ok && half.data && half.data.ok !== false) {
+      results.push(...half.data.results)
+      written += half.data.written
+      refused += half.data.refused
+      continue
+    }
+
+    const why = half.data?.reason ?? half.error ?? 'the router would not take them'
+
+    for (const one of records) {
+      results.push({ id: one.id, ok: false, pref: 0, table: 0, reason: why })
+      refused += 1
+    }
   }
+
+  return { ok: true, data: { ok: true, written, refused, results }, error: null }
+}
+
+/** The shape a half that was never sent comes back as, so the merge is uniform. */
+function failedHalf(why: string): AgentCallResult<WanbindBindManyReply> {
+  return {
+    ok: false,
+    data: null,
+    error: why
+  } as AgentCallResult<WanbindBindManyReply>
 }
 
 export async function handOverBindings(
@@ -183,13 +225,22 @@ export async function handOverBindings(
     // here rather than trusted from the create gate that let the record in: a
     // per-router document can be edited by hand, and an allowlist two files
     // away is not a guarantee.
-    if (!safeUciWord(record.wan) || (record.lan !== '' && !safeUciWord(record.lan))) {
+    const unsafe = !safeUciWord(record.wan)
+      ? { field: 'WAN', value: record.wan }
+      : record.lan !== '' && !safeUciWord(record.lan)
+        ? { field: 'LAN', value: record.lan }
+        : null
+
+    if (unsafe) {
+      // The field that actually failed, named. Quoting the WAN when it was the
+      // LAN that was rejected leaves a record kept for ever with the only
+      // explanation pointing at a value that is fine.
       strand(
         outcome,
         'binding',
         id,
         record.name,
-        `it names an interface this module will not write to the router's configuration ("${record.wan}")`
+        `its ${unsafe.field} is a name this module will not write to the router's configuration ("${unsafe.value}")`
       )
       continue
     }
@@ -235,7 +286,7 @@ export async function handOverBindings(
     }
 
     const confirmed: DirectBindingRecord[] = []
-    const reply = await sendBatch(deps, batch)
+    const reply = await sendBatch(deps, batch, alive)
 
     if (!alive()) return
 

@@ -193,10 +193,15 @@ function neighbourFindings(ctx, out) {
 	finding(out, 'neigh-thresh', 'warning',
 		sprintf('The neighbour table stops at %d and this router should be sized for %d', have, want),
 		'Over it the kernel refuses to learn new addresses, and a client that cannot be learned drops off the LAN.',
+		// The three neighbour thresholds and nothing else. The conntrack figure
+		// travelled here too, which is a different table with a different guard:
+		// `tune.refusal()` refuses a conntrack_max below the entries in use, so
+		// on a busy router this fix failed for a reason that had nothing to do
+		// with the neighbour table, and on a quiet one it changed something the
+		// row never mentioned. The conntrack row asks for that on its own.
 		{
 			kind: 'tune_set',
 			args: {
-				conntrack_max: ctx.needed.conntrackMax,
 				gc_thresh1: ctx.needed.gcThresh1,
 				gc_thresh2: ctx.needed.gcThresh2,
 				gc_thresh3: want

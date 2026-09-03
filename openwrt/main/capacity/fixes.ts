@@ -31,10 +31,6 @@ export function translateTune(args: Record<string, string | number | boolean>): 
 }
 
 function tuneAction(args: Record<string, string | number | boolean>): string {
-  if (args.flow_offload === true) {
-    return 'Switch on fw4 software flow offload and reload the firewall, which briefly interrupts new connections. Established ones are re-evaluated once.'
-  }
-
   const parts: string[] = []
 
   if (typeof args.conntrack_max === 'number') parts.push(`conntrack max to ${args.conntrack_max}`)
@@ -42,7 +38,20 @@ function tuneAction(args: Record<string, string | number | boolean>): string {
   if (typeof args.gc_thresh2 === 'number') parts.push(`gc_thresh2 to ${args.gc_thresh2}`)
   if (typeof args.gc_thresh3 === 'number') parts.push(`gc_thresh3 to ${args.gc_thresh3}`)
 
-  return `Set ${parts.join(', ')}, pinned in /etc/sysctl.d/60-bm-scale.conf so a reboot keeps them.`
+  const sysctls = parts.length
+    ? `Set ${parts.join(', ')}, pinned in /etc/sysctl.d/60-bm-scale.conf so a reboot keeps them.`
+    : ''
+
+  // Both halves, when the fix carries both. Returning early on the offload
+  // named one thing and wrote several - the row is the sentence somebody reads
+  // before pressing a button that changes their router, and a fix that does
+  // more than it says is the one kind of row this table must never produce.
+  if (args.flow_offload !== true) return sysctls
+
+  const offload =
+    'Switch on fw4 software flow offload and reload the firewall, which briefly interrupts new connections. Established ones are re-evaluated once.'
+
+  return sysctls ? `${offload} ${sysctls}` : offload
 }
 
 /** The row's two sentences, filled in from the kind and what this router has. */
